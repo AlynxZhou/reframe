@@ -22,7 +22,14 @@ gio = dependency('gio-2.0', required: true)
 gio_unix = dependency('gio-unix-2.0', required: true)
 epoxy = dependency('epoxy', required: true)
 libvncserver = dependency('libvncserver', required: true)
-dependencies += [glib, gio, gio_unix, epoxy, libvncserver]
+xkbcommon = dependency('xkbcommon', required: true)
+dependencies += [glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
+
+cc = meson.get_compiler('c')
+m = cc.find_library('m', required : false)
+if m.found()
+  dependencies += [m]
+endif
 
 sources += files('rf-win.c')
 gtk = dependency('gtk4', required: true)

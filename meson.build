@@ -11,8 +11,6 @@ project(
   ]
 )
 
-cc = meson.get_compiler('c')
-
 c_args = []
 if get_option('debug') == true
   warning_level = 3

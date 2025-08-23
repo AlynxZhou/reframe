@@ -1,5 +1,7 @@
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <linux/uinput.h>
 #include <glib-unix.h>
 #include <gio/gunixfdmessage.h>
 
@@ -25,15 +27,26 @@ enum { SIG_FRAME, N_SIGS };
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
-static gboolean _send_ready(gpointer data)
+static void _send_input_request(RfStreamer *this, struct input_event *ies, const size_t length)
+{
+	char request = RF_REQUEST_TYPE_INPUT;
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+	g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
+	g_output_stream_write(os, &length, sizeof(length), NULL, NULL);
+	g_output_stream_write(os, ies, length * sizeof(*ies), NULL, NULL);
+	g_debug("Sent %ld * %ld bytes input request to ReFrame streamer.", length, sizeof(*ies));
+}
+
+static gboolean _send_frame_request(gpointer data)
 {
 	RfStreamer *this = data;
-	char ready = 'R';
+	char request = RF_REQUEST_TYPE_FRAME;
 
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
-	g_output_stream_write(os, &ready, 1, NULL, NULL);
-	g_debug("Sent ready to ReFrame streamer.");
+	g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
+	g_debug("Sent frame request to ReFrame streamer.");
 
 	this->last_frame_time = g_get_monotonic_time();
 	this->timer_id = 0;
@@ -41,7 +54,7 @@ static gboolean _send_ready(gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
-static void _schedule_ready(RfStreamer *this)
+static void _schedule_frame_request(RfStreamer *this)
 {
 	if (this->timer_id != 0)
 		return;
@@ -50,10 +63,10 @@ static void _schedule_ready(RfStreamer *this)
 	int64_t delta = current - this->last_frame_time;
 	if (delta < this->max_interval) {
 		this->timer_id = g_timeout_add(
-			(this->max_interval - delta) / 1000, _send_ready, this);
+			(this->max_interval - delta) / 1000, _send_frame_request, this);
 	} else {
 		g_debug("Converting frame too slow.");
-		_send_ready(this);
+		_send_frame_request(this);
 	}
 }
 
@@ -112,7 +125,7 @@ static gboolean _on_input(int sfd, GIOCondition condition, gpointer data)
 	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
 	for (int i = 0; i < b.md.length; ++i)
 		close(b.fds[i]);
-	_schedule_ready(this);
+	_schedule_frame_request(this);
 	return G_SOURCE_CONTINUE;
 }
 
@@ -159,43 +172,111 @@ RfStreamer *rf_streamer_new(RfConfig *config)
 	return this;
 }
 
-void rf_streamer_set_socket_path(RfStreamer *s, const char *socket_path)
+void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path)
 {
-	// g_clear_pointer(&s->socket_path, g_free);
-	g_clear_object(&s->client);
-	g_clear_object(&s->address);
-	// s->socket_path = g_strdup(socket_path);
-	s->client = g_socket_client_new();
-	g_debug("socket path: %s.", socket_path);
-	s->address = g_unix_socket_address_new(socket_path);
+	g_return_if_fail(RF_IS_STREAMER(this));
+
+	g_clear_object(&this->client);
+	g_clear_object(&this->address);
+	this->client = g_socket_client_new();
+	this->address = g_unix_socket_address_new(socket_path);
 }
 
-void rf_streamer_start(RfStreamer *s)
+void rf_streamer_start(RfStreamer *this)
 {
-	if (s->running)
+	g_return_if_fail(RF_IS_STREAMER(this));
+
+	if (this->running)
 		return;
 
-	// g_socket_client_connect_async(s->client, G_SOCKET_CONNECTABLE(s->address), NULL, _on_connected, s);
+	// g_socket_client_connect_async(this->client, G_SOCKET_CONNECTABLE(this->address), NULL, _on_connected, s);
 	// FIXME: Is it necessary to go async here?
-	s->connection = g_socket_client_connect(
-		s->client, G_SOCKET_CONNECTABLE(s->address), NULL, NULL);
-	if (s->connection == NULL) {
+	this->connection = g_socket_client_connect(
+		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL);
+	if (this->connection == NULL) {
 		g_error("Error connecting to socket.\n");
 		exit(EXIT_FAILURE);
 	}
 	// TODO: Error handling.
-	s->running = true;
-	s->socket = g_socket_connection_get_socket(s->connection);
-	int sfd = g_socket_get_fd(s->socket);
-	g_unix_fd_add(sfd, G_IO_IN, _on_input, s);
-	_send_ready(s);
+	this->running = true;
+	this->socket = g_socket_connection_get_socket(this->connection);
+	int sfd = g_socket_get_fd(this->socket);
+	g_unix_fd_add(sfd, G_IO_IN, _on_input, this);
+	_send_frame_request(this);
 }
 
-void rf_streamer_stop(RfStreamer *s)
+void rf_streamer_stop(RfStreamer *this)
 {
-	if (!s->running)
+	g_return_if_fail(RF_IS_STREAMER(this));
+
+	if (!this->running)
 		return;
 
-	g_io_stream_close(G_IO_STREAM(s->connection), NULL, NULL);
-	s->running = false;
+	g_io_stream_close(G_IO_STREAM(this->connection), NULL, NULL);
+	this->running = false;
+}
+
+void rf_streamer_send_keyboard_event(RfStreamer *this, uint32_t keycode, bool down)
+{
+	g_return_if_fail(RF_IS_STREAMER(this));
+	g_return_if_fail(this->running);
+
+#define KEYBOARD_EVENT_LENGTH 2
+	struct input_event ies[KEYBOARD_EVENT_LENGTH] = {
+		{
+			.type = EV_KEY,
+			.code = keycode,
+			.value = down
+		},
+		{
+			.type = EV_SYN,
+			.code = SYN_REPORT,
+			.value = 0
+		}
+	};
+	_send_input_request(this, ies, KEYBOARD_EVENT_LENGTH);
+}
+
+void rf_streamer_send_pointer_event(RfStreamer *this, double rx, double ry, bool left, bool middle, bool right, bool wup, bool wdown)
+{
+	g_return_if_fail(RF_IS_STREAMER(this));
+	g_return_if_fail(this->running);
+
+	const int x = round(rx * RF_POINTER_MAX);
+	const int y = round(ry * RF_POINTER_MAX);
+
+	size_t length = (wup || wdown) ? 7 : 6;
+	g_autofree struct input_event *ies = g_malloc0_n(length, sizeof(*ies));
+
+	ies[0].type = EV_ABS;
+	ies[0].code = ABS_X;
+	ies[0].value = x;
+
+	ies[1].type = EV_ABS;
+	ies[1].code = ABS_Y;
+	ies[1].value = y;
+
+	ies[2].type = EV_KEY;
+	ies[2].code = BTN_LEFT;
+	ies[2].value = left;
+
+	ies[3].type = EV_KEY;
+	ies[3].code = BTN_MIDDLE;
+	ies[3].value = middle;
+
+	ies[4].type = EV_KEY;
+	ies[4].code = BTN_RIGHT;
+	ies[4].value = right;
+
+	if (wup || wdown) {
+		ies[5].type = EV_REL;
+		ies[5].code = REL_WHEEL;
+		ies[5].value = wup ? 1 : -1;
+	}
+
+	ies[length - 1].type = EV_SYN;
+	ies[length - 1].code = SYN_REPORT;
+	ies[length - 1].value = 0;
+
+	_send_input_request(this, ies, length);
 }

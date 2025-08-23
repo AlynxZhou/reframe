@@ -7,11 +7,40 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <libdrm/drm_fourcc.h>
+#include <linux/uinput.h>
 
 #include "config.h"
 #include "rf-common.h"
 #include "rf-buffer.h"
 #include "rf-config.h"
+
+#define _ioctl_must(...) \
+	G_STMT_START { \
+		int e; \
+		if ((e = ioctl(__VA_ARGS__)))				\
+			g_error("Failed to call ioctl() on line %d: %d.", __LINE__, e); \
+	} G_STMT_END
+#define _ioctl_may(...) \
+	G_STMT_START { \
+		int e; \
+		if ((e = ioctl(__VA_ARGS__)))				\
+			g_debug("Failed to call ioctl() on line %d: %d.", __LINE__, e); \
+	} G_STMT_END
+
+#define _write_may(fd,buf,count) \
+	G_STMT_START { \
+		ssize_t e = write((fd), (buf), (count)); \
+		if (e != (count)) \
+			g_debug("Failed to write %ld bytes to %d on line %d, actually wrote %ld bytes.", (count), (fd), __LINE__, e); \
+	} G_STMT_END
+
+struct _this {
+	RfConfig *config;
+	int cfd;
+	uint32_t connector_id;
+	int ufd;
+	GSocketConnection *connection;
+};
 
 static uint32_t _get_connector_id(int cfd, drmModeRes *res,
 				  const char *connector_name)
@@ -25,7 +54,7 @@ static uint32_t _get_connector_id(int cfd, drmModeRes *res,
 			"%s-%d",
 			drmModeGetConnectorTypeName(connector->connector_type),
 			connector->connector_type_id);
-		g_debug("%s: %s", full_name,
+		g_debug("%s: %s.", full_name,
 			connector->connection == DRM_MODE_CONNECTED ?
 				"connected" :
 				"disconnected");
@@ -69,20 +98,184 @@ clean_connector:
 	return id;
 }
 
+static ssize_t _on_frame_request(struct _this *this)
+{
+	g_debug("Frame: Received frame request from ReFrame server.");
+
+	RfBuffer b;
+	uint32_t fb_id = _get_fb_id(this->cfd, this->connector_id);
+	// TODO: Handle drmModeFB.
+	drmModeFB2 *fb = drmModeGetFB2(this->cfd, fb_id);
+	if (fb == NULL)
+		return 0;
+	g_debug("Frame: Get new framebuffer %u.", fb->fb_id);
+	// GUnixFDList refuses to send invalid fds like -1, so we need
+	// to pass the number of fds. We assume valid planes are
+	// continuous.
+	for (int i = 0; i < RF_MAX_PLANES; ++i)
+		b.fds[i] = -1;
+	b.md.length = 0;
+	for (int i = 0; i < RF_MAX_PLANES; ++i) {
+		if (fb->handles[i] == 0)
+			break;
+		drmPrimeHandleToFD(this->cfd, fb->handles[i],
+				   DRM_CLOEXEC, &b.fds[i]);
+		++b.md.length;
+	}
+	b.md.width = fb->width;
+	b.md.height = fb->height;
+	b.md.fourcc = fb->pixel_format;
+	b.md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
+		fb->modifier :
+		DRM_FORMAT_MOD_INVALID;
+	// b.md.modifier = fb->modifier;
+	for (int i = 0; i < RF_MAX_PLANES; ++i) {
+		if (fb->handles[i] != 0) {
+			b.md.offsets[i] = fb->offsets[i];
+			b.md.pitches[i] = fb->pitches[i];
+		} else {
+			b.md.offsets[i] = 0;
+			b.md.pitches[i] = 0;
+		}
+	}
+
+	g_debug("Frame: length: %u, width: %u, height: %u, fourcc: %c%c%c%c, modifier: %#lx",
+		b.md.length, b.md.width, b.md.height,
+		(b.md.fourcc >> 0) & 0xff,
+		(b.md.fourcc >> 8) & 0xff,
+		(b.md.fourcc >> 16) & 0xff,
+		(b.md.fourcc >> 24) & 0xff, b.md.modifier);
+	g_debug("Frame: fds: %d %d %d %d", b.fds[0], b.fds[1],
+		b.fds[2], b.fds[3]);
+	g_debug("Frame: offsets: %u %u %u %u", b.md.offsets[0],
+		b.md.offsets[1], b.md.offsets[2],
+		b.md.offsets[3]);
+	g_debug("Frame: pitches: %u %u %u %u", b.md.pitches[0],
+		b.md.pitches[1], b.md.pitches[2],
+		b.md.pitches[3]);
+
+	GOutputVector iov = { &b.md, sizeof(b.md) };
+	GUnixFDList *fds = g_unix_fd_list_new();
+	// This won't take the ownership so we need to close fds.
+	//
+	// See <https://docs.gtk.org/gio/method.UnixFDList.append.html>.
+	for (int i = 0; i < b.md.length; ++i)
+		g_unix_fd_list_append(fds, b.fds[i], NULL);
+	// This won't take the ownership so we need to free GUnixFDList.
+	GSocketControlMessage *msg =
+		g_unix_fd_message_new_with_fd_list(fds);
+	GSocket *socket = g_socket_connection_get_socket(this->connection);
+	ssize_t ret = 0;
+	ret = g_socket_send_message(socket, NULL, &iov, 1, &msg,
+				    1, G_SOCKET_MSG_NONE, NULL,
+				    NULL);
+	if (ret <= 0)
+		g_error("Frame: Failed to send fds via socket.");
+
+	g_object_unref(fds);
+	g_object_unref(msg);
+	for (int i = 0; i < b.md.length; ++i)
+		close(b.fds[i]);
+
+	drmModeFreeFB2(fb);
+	return ret;
+}
+
+static ssize_t _on_input_request(struct _this *this)
+{
+	g_autofree struct input_event *ies = NULL;
+	size_t length = 0;
+	ssize_t ret = 0;
+	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
+
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
+	if (ret == 0) {
+		g_debug("Input: ReFrame server disconnected.");
+		goto out;
+	} else if (ret < 0) {
+		g_error("Input: Read socket failed.");
+		goto out;
+	}
+	ies = g_malloc_n(length, sizeof(*ies));
+	ret = g_input_stream_read(is, ies, length * sizeof(*ies), NULL, NULL);
+	if (ret == 0) {
+		g_debug("Input: ReFrame server disconnected.");
+		goto out;
+	} else if (ret < 0) {
+		g_error("Input: Read socket failed.");
+		goto out;
+	}
+	g_debug("Input: Received %lu * %ld bytes input request from ReFrame server.", length, sizeof(*ies));
+
+	_write_may(this->ufd, ies, length * sizeof(*ies));
+
+out:
+	return ret;
+}
+
+static void _init_uinput(struct _this *this)
+{
+	this->ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+	if (this->ufd <= 0) {
+		g_error("Failed to open uinput: %s.", strerror(errno));
+	}
+
+	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
+	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
+	for (int i = 0; i < RF_KEYBOARD_MAX; ++i)
+		_ioctl_must(this->ufd, UI_SET_KEYBIT, i);
+
+	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_ABS);
+	_ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_X);
+	_ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_Y);
+
+	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
+	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
+
+	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
+	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
+	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_RIGHT);
+
+	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_WHEEL);
+
+	struct uinput_abs_setup abs = {0};
+	abs.absinfo.maximum = RF_POINTER_MAX;
+	abs.absinfo.minimum = 0;
+	abs.code = ABS_X;
+	_ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
+	abs.code = ABS_Y;
+	_ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
+
+	struct uinput_setup dev = {0};
+	dev.id.bustype = BUS_USB;
+	dev.id.vendor = 0xa3a7;
+	dev.id.product = 0x0003;
+	strcpy(dev.name, "reframe");
+	_ioctl_must(this->ufd, UI_DEV_SETUP, &dev);
+	_ioctl_must(this->ufd, UI_DEV_CREATE);
+}
+
 int main(int argc, char *argv[])
 {
 	g_autofree char *config_path = NULL;
-	g_autofree char *socket_path = g_strdup("/tmp/reframe.sock");
-	bool keep_listen = false;
-	bool version = false;
+	g_autofree char *socket_path = NULL;
+	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
+	// to `GOptionContext` leads into overflow!
+	gboolean keep_listen = FALSE;
+	gboolean version = FALSE;
+	g_autofree char **args = g_strdupv(argv);
 	g_autoptr(GError) error = NULL;
+	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 
+	// FIXME: File path is random when set keep listen.
 	GOptionEntry options[] = {
 		{ "version", 'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
 		  &version, "Display version and exit.", NULL },
-		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &socket_path, "Socket path of streamer.", "SOCKET" },
-		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &config_path, "Configuration file path.", "PATH" },
 		{ "keep-listen", 'k', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
 		  &keep_listen,
@@ -91,9 +284,9 @@ int main(int argc, char *argv[])
 		{ NULL, 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, NULL, NULL,
 		  NULL }
 	};
-	GOptionContext *context = g_option_context_new(" - ReFrame streamer");
+	g_autoptr(GOptionContext) context = g_option_context_new(" - ReFrame streamer");
 	g_option_context_add_main_entries(context, options, NULL);
-	if (!g_option_context_parse(context, &argc, &argv, &error)) {
+	if (!g_option_context_parse_strv(context, &args, &error)) {
 		g_error("Failed to parse options.");
 		return EXIT_FAILURE;
 	}
@@ -103,34 +296,38 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	g_debug("Use configuration file %s", config_path);
-	RfConfig *config = rf_config_new(config_path);
-	g_autofree char *card_path = rf_config_get_card_path(config);
+	// Use `g_strdup` here to make `g_autofree` happy.
+	if (socket_path == NULL)
+		socket_path = g_strdup("/tmp/reframe.sock");
+
+	g_debug("Using configuration file %s", config_path);
+	this->config = rf_config_new(config_path);
+	g_autofree char *card_path = rf_config_get_card_path(this->config);
 	g_remove(socket_path);
-	int cfd = -1;
-	cfd = open(card_path, O_RDONLY | O_CLOEXEC);
-	if (cfd < 0) {
-		g_error("Open card failed: %s", strerror(errno));
+	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
+	if (this->cfd <= 0) {
+		g_error("Failed to open card %s: %s.", card_path, strerror(errno));
 	}
 
 	drmModeRes *res = NULL;
-	uint32_t connector_id = 0;
-	g_autofree char *connector_name = rf_config_get_connector(config);
-	;
-	res = drmModeGetResources(cfd);
-	connector_id = _get_connector_id(cfd, res, connector_name);
+	g_autofree char *connector_name = rf_config_get_connector(this->config);
+	res = drmModeGetResources(this->cfd);
+	this->connector_id = _get_connector_id(this->cfd, res, connector_name);
 	drmModeFreeResources(res);
 
-	if (connector_id == 0) {
+	if (this->connector_id == 0) {
 		g_error("Failed to find a connected connector %s.",
 			connector_name);
-		close(cfd);
+		close(this->cfd);
 		return EXIT_FAILURE;
 	}
-	g_debug("Find connected connector %s.", connector_name);
+	g_debug("Found connected connector %s.", connector_name);
+
+	_init_uinput(this);
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
 
+	g_debug("Using socket %s", socket_path);
 	// Non-systemd socket.
 	GSocketAddress *address = g_unix_socket_address_new(socket_path);
 	g_socket_listener_add_address(listener, address, G_SOCKET_TYPE_STREAM,
@@ -143,112 +340,51 @@ int main(int argc, char *argv[])
 
 	g_debug("Keep listening mode is %s.",
 		keep_listen ? "enabled" : "disabled");
-	while (keep_listen) {
-		GSocketConnection *connection =
-			g_socket_listener_accept(listener, NULL, NULL, NULL);
-		if (connection == NULL) {
-			g_error("Error listening to socket.");
+	do {
+		this->connection =
+			g_socket_listener_accept(listener, NULL, NULL, &error);
+		if (this->connection == NULL) {
+			g_error("Failed to listen to socket.");
 			return EXIT_FAILURE;
 		}
-		GSocket *socket = g_socket_connection_get_socket(connection);
 
 		while (true) {
-			ssize_t ret;
+			ssize_t ret = 0;
 			GInputStream *is = g_io_stream_get_input_stream(
-				G_IO_STREAM(connection));
-			char ready;
-			// TODO: Read input line by line, and check whether type is input event or ready.
-			ret = g_input_stream_read(is, &ready, 1, NULL, NULL);
+				G_IO_STREAM(this->connection));
+			char request;
+			ret = g_input_stream_read(is, &request, sizeof(request), NULL, NULL);
 			if (ret == 0) {
 				g_debug("ReFrame server disconnected.");
-				// g_application_release(app);
 				break;
 			} else if (ret < 0) {
 				g_error("Read socket failed.");
 				break;
 			}
 
-			g_debug("Received ready from ReFrame server.");
-
-			RfBuffer b;
-			uint32_t fb_id = _get_fb_id(cfd, connector_id);
-			drmModeFB2 *fb = drmModeGetFB2(cfd, fb_id);
-			if (fb == NULL)
-				continue;
-			g_debug("Get new framebuffer %u.", fb->fb_id);
-			// GUnixFDList refuses to send invalid fds like -1, so we need
-			// to pass the number of fds. We assume valid planes are
-			// continuous.
-			for (int i = 0; i < RF_MAX_PLANES; ++i)
-				b.fds[i] = -1;
-			b.md.length = 0;
-			for (int i = 0; i < RF_MAX_PLANES; ++i) {
-				if (fb->handles[i] == 0)
-					break;
-				drmPrimeHandleToFD(cfd, fb->handles[i],
-						   DRM_CLOEXEC, &b.fds[i]);
-				++b.md.length;
-			}
-			b.md.width = fb->width;
-			b.md.height = fb->height;
-			b.md.fourcc = fb->pixel_format;
-			b.md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
-						fb->modifier :
-						DRM_FORMAT_MOD_INVALID;
-			// b.md.modifier = fb->modifier;
-			for (int i = 0; i < RF_MAX_PLANES; ++i) {
-				if (fb->handles[i] != 0) {
-					b.md.offsets[i] = fb->offsets[i];
-					b.md.pitches[i] = fb->pitches[i];
-				} else {
-					b.md.offsets[i] = 0;
-					b.md.pitches[i] = 0;
-				}
+			switch (request) {
+			case RF_REQUEST_TYPE_FRAME:
+				ret = _on_frame_request(this);
+				break;
+			case RF_REQUEST_TYPE_INPUT:
+				ret = _on_input_request(this);
+				break;
+			default:
+				break;
 			}
 
-			g_debug("length: %u, width: %u, height: %u, fourcc: %c%c%c%c, modifier: %#lx",
-				b.md.length, b.md.width, b.md.height,
-				(b.md.fourcc >> 0) & 0xff,
-				(b.md.fourcc >> 8) & 0xff,
-				(b.md.fourcc >> 16) & 0xff,
-				(b.md.fourcc >> 24) & 0xff, b.md.modifier);
-			g_debug("fds: %d %d %d %d", b.fds[0], b.fds[1],
-				b.fds[2], b.fds[3]);
-			g_debug("offsets: %u %u %u %u", b.md.offsets[0],
-				b.md.offsets[1], b.md.offsets[2],
-				b.md.offsets[3]);
-			g_debug("pitches: %u %u %u %u", b.md.pitches[0],
-				b.md.pitches[1], b.md.pitches[2],
-				b.md.pitches[3]);
-
-			GOutputVector iov = { &b.md, sizeof(b.md) };
-			GUnixFDList *fds = g_unix_fd_list_new();
-			// This won't take the ownership so we need to close fds.
-			//
-			// See <https://docs.gtk.org/gio/method.UnixFDList.append.html>.
-			for (int i = 0; i < b.md.length; ++i)
-				g_unix_fd_list_append(fds, b.fds[i], NULL);
-			// This won't take the ownership so we need to free GUnixFDList.
-			GSocketControlMessage *msg =
-				g_unix_fd_message_new_with_fd_list(fds);
-			ret = g_socket_send_message(socket, NULL, &iov, 1, &msg,
-						    1, G_SOCKET_MSG_NONE, NULL,
-						    NULL);
-			if (ret < 0) {
-				g_error("Failed to send fds via socket.");
-			}
-			g_object_unref(fds);
-			g_object_unref(msg);
-			for (int i = 0; i < b.md.length; ++i)
-				close(b.fds[i]);
-
-			drmModeFreeFB2(fb);
+			if (ret <=0)
+				break;
 		}
-	}
+	} while (keep_listen);
 
 	g_socket_listener_close(listener);
 	g_unlink(socket_path);
-	close(cfd);
+
+	_ioctl_may(this->ufd, UI_DEV_DESTROY);
+	close(this->ufd);
+
+	close(this->cfd);
 
 	return 0;
 }

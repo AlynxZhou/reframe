@@ -22,7 +22,7 @@ struct _RfApp {
 };
 G_DEFINE_TYPE(RfApp, rf_app, G_TYPE_APPLICATION)
 
-static void _on_size_request(RfVNCServer *v, int width, int height,
+static void _on_resize_event(RfVNCServer *v, int width, int height,
 			     gpointer data)
 {
 	RfApp *this = data;
@@ -65,8 +65,12 @@ static void _startup(GApplication *g_app)
 				 G_CALLBACK(rf_streamer_start), this->streamer);
 	g_signal_connect_swapped(this->vnc, "last-client",
 				 G_CALLBACK(rf_streamer_stop), this->streamer);
-	g_signal_connect(this->vnc, "size-request",
-			 G_CALLBACK(_on_size_request), this);
+	g_signal_connect(this->vnc, "resize-event",
+			 G_CALLBACK(_on_resize_event), this);
+	g_signal_connect_swapped(this->vnc, "keyboard-event",
+				 G_CALLBACK(rf_streamer_send_keyboard_event), this->streamer);
+	g_signal_connect_swapped(this->vnc, "pointer-event",
+			 G_CALLBACK(rf_streamer_send_pointer_event), this->streamer);
 
 	rf_vnc_server_start(this->vnc);
 
@@ -76,9 +80,9 @@ static void _startup(GApplication *g_app)
 		g_signal_connect_swapped(this->win, "map",
 					 G_CALLBACK(rf_streamer_start),
 					 this->streamer);
-		g_signal_connect_swapped(this->win, "unmap",
-					 G_CALLBACK(rf_streamer_stop),
-					 this->streamer);
+		// g_signal_connect_swapped(this->win, "unmap",
+		// 			 G_CALLBACK(rf_streamer_stop),
+		// 			 this->streamer);
 		gtk_window_present(GTK_WINDOW(this->win));
 	}
 
@@ -130,9 +134,9 @@ static void rf_app_init(RfApp *this)
 	const GOptionEntry options[] = {
 		{ "version", 'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, NULL,
 		  "Display version and exit.", NULL },
-		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &this->socket_path, "Socket path of streamer.", "SOCKET" },
-		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &this->config_path, "Configuration file path.", "PATH" },
 		{ "debug-win", 'w', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
 		  &this->debug_win_opt, "Show debug window.", NULL },
@@ -157,5 +161,5 @@ static void rf_app_class_init(RfAppClass *klass)
 RfApp *rf_app_new(void)
 {
 	return g_object_new(RF_TYPE_APP, "application-id", "one.alynx.reframe",
-			    NULL);
+			    "flags", G_APPLICATION_NON_UNIQUE, NULL);
 }

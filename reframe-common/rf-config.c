@@ -32,8 +32,11 @@ static void rf_config_class_init(RfConfigClass *klass)
 
 RfConfig *rf_config_new(const char *config_path)
 {
+	g_autoptr(GError) error = NULL;
 	RfConfig *this = g_object_new(RF_TYPE_CONFIG, NULL);
-	g_key_file_load_from_file(this->f, config_path, G_KEY_FILE_NONE, NULL);
+	g_key_file_load_from_file(this->f, config_path, G_KEY_FILE_NONE, &error);
+	if (error != NULL)
+		g_warning("Failed to load configuration from %s, will use default values!", config_path);
 	return this;
 }
 

@@ -1,8 +1,11 @@
 #include <stdbool.h>
 #include <rfb/rfb.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include "rf-common.h"
 #include "rf-vnc-server.h"
+
+#define KEY_CODE_XKB_TO_EV(key_code) ((key_code) - 8)
 
 struct _RfVNCServer {
 	GSocketService parent_instance;
@@ -12,13 +15,81 @@ struct _RfVNCServer {
 	unsigned int width;
 	unsigned int height;
 	char *buf;
+	struct xkb_context *xkb_context;
+	struct xkb_keymap *xkb_keymap;
 	bool running;
 };
 G_DEFINE_TYPE(RfVNCServer, rf_vnc_server, G_TYPE_SOCKET_SERVICE)
 
-enum { SIG_FIRST_CLIENT, SIG_LAST_CLIENT, SIG_SIZE_REQUEST, N_SIGS };
+enum { SIG_FIRST_CLIENT, SIG_LAST_CLIENT, SIG_RESIZE_EVENT, SIG_KEYBOARD_EVENT, SIG_POINTER_EVENT, N_SIGS };
 
 static unsigned int sigs[N_SIGS] = { 0 };
+
+struct _iterate_data {
+	xkb_keysym_t keysym;
+	xkb_keycode_t keycode;
+	xkb_level_index_t level;
+};
+
+static void _iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
+{
+	struct _iterate_data *idata = data;
+	if (idata->keycode != XKB_KEYCODE_INVALID)
+		return;
+
+	xkb_level_index_t num_levels = xkb_keymap_num_levels_for_key(map, key, 0);
+	for (xkb_level_index_t i = 0; i < num_levels; ++i) {
+		const xkb_keysym_t *syms;
+		int num_syms = xkb_keymap_key_get_syms_by_level(map, key, 0, i, &syms);
+		for (int k = 0; k < num_syms; ++k) {
+			if (syms[k] == idata->keysym) {
+				idata->keycode = key;
+				idata->level = i;
+				return;
+			}
+		}
+	}
+}
+
+static void _on_keyboard_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
+{
+	RfVNCServer *this = client->screen->screenData;
+
+	bool down = direction != 0;
+	struct _iterate_data idata = {
+		.keysym = keysym,
+		.keycode = XKB_KEYCODE_INVALID,
+		.level = 0,
+	};
+	xkb_keymap_key_for_each(this->xkb_keymap, _iterate_keys, &idata);
+	if (idata.keycode == XKB_KEYCODE_INVALID) {
+		g_warning("Failed to find keysym %04x in keymap, will ignore it.", keysym);
+		return;
+	}
+	uint32_t keycode = KEY_CODE_XKB_TO_EV(idata.keycode);
+	g_debug("Received key %s for keysym %04x and keycode %u.", down ? "down" : "up", keysym, keycode);
+	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
+}
+
+static inline char *_true_or_false(bool b)
+{
+	return b ? "true" : "false";
+}
+
+static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
+{
+	RfVNCServer *this = client->screen->screenData;
+
+	bool left = mask & 1;
+	bool middle = mask & (1 << 1);
+	bool right = mask & (1 << 2);
+	bool wup = mask & (1 << 3);
+	bool wdown = mask & (1 << 4);
+	double rx = (double)x / this->width;
+	double ry = (double)y / this->height;
+	g_debug("Received pointer at (%f, %f), left %s, middle %s, right %s, wheel up %s, wheel down %s", rx, ry, _true_or_false(left), _true_or_false(middle), _true_or_false(right), _true_or_false(wup), _true_or_false(wdown));
+	g_signal_emit(this, sigs[SIG_POINTER_EVENT], 0, rx, ry, left, middle, right, wup, wdown);
+}
 
 static gboolean _on_socket_input(GSocket *socket, GIOCondition condition,
 				 gpointer data)
@@ -74,7 +145,7 @@ static int _on_set_desktop_size(int width, int height, int num_screens,
 		this->width = width;
 		this->height = height;
 		g_free(this->buf);
-		g_signal_emit(this, sigs[SIG_SIZE_REQUEST], 0, width, height);
+		g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
 		this->buf = g_malloc0(this->width * this->height *
 				      RF_BYTES_PER_PIXEL);
 		rfbNewFramebuffer(this->screen, this->buf, this->width,
@@ -94,17 +165,15 @@ static gboolean _incoming(GSocketService *service,
 		this->buf = g_malloc0(this->width * this->height *
 				      RF_BYTES_PER_PIXEL);
 		this->screen->frameBuffer = this->buf;
-		g_autofree char *connector_name =
-			rf_config_get_connector(this->config);
-		this->screen->desktopName = connector_name;
+		this->screen->desktopName = rf_config_get_connector(this->config);
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
 		this->screen->setDesktopSizeHook = _on_set_desktop_size;
-		// TODO: Input event, clipboard event.
-		// this->screen->ptrAddEvent = _on_pointer_event;
-		// this->screen->kbdAddEvent = _on_key_event;
-		// this->screen->kbdReleaseAllKeys = _on_release_all_keys;
+		// TODO: Clipboard event.
+		this->screen->ptrAddEvent = _on_pointer_event;
+		this->screen->kbdAddEvent = _on_keyboard_event;
+		// TODO: Password.
 		rfbInitServer(this->screen);
 	}
 	GSocket *socket = g_socket_connection_get_socket(connection);
@@ -131,6 +200,14 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	this->height = RF_DEFAULT_HEIGHT;
 	this->connections = g_hash_table_new_full(
 		g_direct_hash, g_direct_equal, g_object_unref, g_object_unref);
+	this->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	if (this->xkb_context == NULL)
+		g_error("Failed to create XKB context.");
+	struct xkb_rule_names names = {NULL, NULL, NULL, NULL, NULL};
+	this->xkb_keymap = xkb_keymap_new_from_names(
+		this->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	if (this->xkb_keymap == NULL)
+		g_error("Failed to create XKB context.");
 }
 
 static void rf_vnc_server_class_init(RfVNCServerClass *klass)
@@ -150,9 +227,15 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 	sigs[SIG_LAST_CLIENT] = g_signal_new("last-client", RF_TYPE_VNC_SERVER,
 					     G_SIGNAL_RUN_LAST, 0, NULL, NULL,
 					     NULL, G_TYPE_NONE, 0);
-	sigs[SIG_SIZE_REQUEST] = g_signal_new(
-		"size-request", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+	sigs[SIG_RESIZE_EVENT] = g_signal_new(
+		"resize-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
 		NULL, NULL, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
+	sigs[SIG_KEYBOARD_EVENT] = g_signal_new(
+		"keyboard-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+		NULL, NULL, G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_BOOLEAN);
+	sigs[SIG_POINTER_EVENT] = g_signal_new(
+		"pointer-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+		NULL, NULL, G_TYPE_NONE, 7, G_TYPE_DOUBLE, G_TYPE_DOUBLE, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN);
 }
 
 RfVNCServer *rf_vnc_server_new(RfConfig *config)
