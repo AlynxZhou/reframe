@@ -1,0 +1,6 @@
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
+
+#define PROJECT_VERSION "@project_version@"
+
+#endif
