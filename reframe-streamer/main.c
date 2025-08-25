@@ -11,35 +11,35 @@
 
 #include "config.h"
 #include "rf-common.h"
-#include "rf-buffer.h"
 #include "rf-config.h"
+#include "rf-buffer.h"
 
 #define _ioctl_must(...) \
 	G_STMT_START { \
 		int e; \
 		if ((e = ioctl(__VA_ARGS__)))				\
-			g_error("Failed to call ioctl() on line %d: %d.", __LINE__, e); \
+			g_error("Failed to call ioctl() at line %d: %d.", __LINE__, e); \
 	} G_STMT_END
 #define _ioctl_may(...) \
 	G_STMT_START { \
 		int e; \
 		if ((e = ioctl(__VA_ARGS__)))				\
-			g_debug("Failed to call ioctl() on line %d: %d.", __LINE__, e); \
+			g_warning("Failed to call ioctl() at line %d: %d.", __LINE__, e); \
 	} G_STMT_END
 
 #define _write_may(fd,buf,count) \
 	G_STMT_START { \
 		ssize_t e = write((fd), (buf), (count)); \
 		if (e != (count)) \
-			g_debug("Failed to write %ld bytes to %d on line %d, actually wrote %ld bytes.", (count), (fd), __LINE__, e); \
+			g_warning("Failed to write %ld bytes to %d at line %d, actually wrote %ld bytes.", (count), (fd), __LINE__, e); \
 	} G_STMT_END
 
 struct _this {
 	RfConfig *config;
+	GSocketConnection *connection;
 	int cfd;
 	uint32_t connector_id;
 	int ufd;
-	GSocketConnection *connection;
 };
 
 static uint32_t _get_connector_id(int cfd, drmModeRes *res,
@@ -60,7 +60,6 @@ static uint32_t _get_connector_id(int cfd, drmModeRes *res,
 				"disconnected");
 		id = connector->connector_id;
 		drmModeFreeConnector(connector);
-		// TODO: Get connector by name.
 		if (connector->connection == DRM_MODE_CONNECTED &&
 		    g_strcmp0(full_name, connector_name) == 0) {
 			found = true;
@@ -100,15 +99,17 @@ clean_connector:
 
 static ssize_t _on_frame_request(struct _this *this)
 {
-	g_debug("Frame: Received frame request from ReFrame server.");
+	g_debug("Frame: Received frame request.");
 
 	RfBuffer b;
 	uint32_t fb_id = _get_fb_id(this->cfd, this->connector_id);
 	// TODO: Handle drmModeFB.
 	drmModeFB2 *fb = drmModeGetFB2(this->cfd, fb_id);
-	if (fb == NULL)
-		return 0;
-	g_debug("Frame: Get new framebuffer %u.", fb->fb_id);
+	if (fb == NULL) {
+		g_warning("Failed to get frame.");
+		return -1;
+	}
+	g_debug("Frame: Got frame %u.", fb->fb_id);
 	// GUnixFDList refuses to send invalid fds like -1, so we need
 	// to pass the number of fds. We assume valid planes are
 	// continuous.
@@ -139,18 +140,18 @@ static ssize_t _on_frame_request(struct _this *this)
 		}
 	}
 
-	g_debug("Frame: length: %u, width: %u, height: %u, fourcc: %c%c%c%c, modifier: %#lx",
+	g_debug("Frame: Got frame metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
 		b.md.length, b.md.width, b.md.height,
 		(b.md.fourcc >> 0) & 0xff,
 		(b.md.fourcc >> 8) & 0xff,
 		(b.md.fourcc >> 16) & 0xff,
 		(b.md.fourcc >> 24) & 0xff, b.md.modifier);
-	g_debug("Frame: fds: %d %d %d %d", b.fds[0], b.fds[1],
+	g_debug("Frame: Got frame fds: %d %d %d %d.", b.fds[0], b.fds[1],
 		b.fds[2], b.fds[3]);
-	g_debug("Frame: offsets: %u %u %u %u", b.md.offsets[0],
+	g_debug("Frame: Got frame offsets: %u %u %u %u.", b.md.offsets[0],
 		b.md.offsets[1], b.md.offsets[2],
 		b.md.offsets[3]);
-	g_debug("Frame: pitches: %u %u %u %u", b.md.pitches[0],
+	g_debug("Frame: Got frame pitches: %u %u %u %u.", b.md.pitches[0],
 		b.md.pitches[1], b.md.pitches[2],
 		b.md.pitches[3]);
 
@@ -169,8 +170,6 @@ static ssize_t _on_frame_request(struct _this *this)
 	ret = g_socket_send_message(socket, NULL, &iov, 1, &msg,
 				    1, G_SOCKET_MSG_NONE, NULL,
 				    NULL);
-	if (ret <= 0)
-		g_error("Frame: Failed to send fds via socket.");
 
 	g_object_unref(fds);
 	g_object_unref(msg);
@@ -178,6 +177,9 @@ static ssize_t _on_frame_request(struct _this *this)
 		close(b.fds[i]);
 
 	drmModeFreeFB2(fb);
+
+	if (ret < 0)
+		g_warning("Failed to send frame to socket.");
 	return ret;
 }
 
@@ -189,36 +191,47 @@ static ssize_t _on_input_request(struct _this *this)
 	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
 
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
-	if (ret == 0) {
-		g_debug("Input: ReFrame server disconnected.");
-		goto out;
-	} else if (ret < 0) {
-		g_error("Input: Read socket failed.");
-		goto out;
+	if (ret <= 0) {
+		if (ret < 0)
+			g_warning("Failed to receive input events length from socket.");
+		return ret;
 	}
 	ies = g_malloc_n(length, sizeof(*ies));
 	ret = g_input_stream_read(is, ies, length * sizeof(*ies), NULL, NULL);
-	if (ret == 0) {
-		g_debug("Input: ReFrame server disconnected.");
-		goto out;
-	} else if (ret < 0) {
-		g_error("Input: Read socket failed.");
-		goto out;
+	if (ret < 0) {
+		if (ret < 0)
+			g_warning("Failed to receive %lu * %ld bytes input events length from socket.", length, sizeof(*ies));
+		return ret;
 	}
-	g_debug("Input: Received %lu * %ld bytes input request from ReFrame server.", length, sizeof(*ies));
-
+	g_debug("Input: Received %lu * %ld bytes input events.", length, sizeof(*ies));
 	_write_may(this->ufd, ies, length * sizeof(*ies));
 
-out:
 	return ret;
+}
+
+static void _init_drm(struct _this *this)
+{
+	g_autofree char *card_path = rf_config_get_card_path(this->config);
+	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
+	if (this->cfd <= 0)
+		g_error("Failed to open card %s: %s.", card_path, strerror(errno));
+
+	drmModeRes *res = NULL;
+	g_autofree char *connector_name = rf_config_get_connector(this->config);
+	res = drmModeGetResources(this->cfd);
+	this->connector_id = _get_connector_id(this->cfd, res, connector_name);
+	drmModeFreeResources(res);
+	if (this->connector_id == 0)
+		g_error("Failed to find a connected connector %s.",
+			connector_name);
+	g_message("Found connected connector %s.", connector_name);
 }
 
 static void _init_uinput(struct _this *this)
 {
 	this->ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-	if (this->ufd <= 0) {
+	if (this->ufd <= 0)
 		g_error("Failed to open uinput: %s.", strerror(errno));
-	}
 
 	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
 	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
@@ -267,9 +280,7 @@ int main(int argc, char *argv[])
 	gboolean version = FALSE;
 	g_autofree char **args = g_strdupv(argv);
 	g_autoptr(GError) error = NULL;
-	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 
-	// FIXME: File path is random when set keep listen.
 	GOptionEntry options[] = {
 		{ "version", 'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
 		  &version, "Display version and exit.", NULL },
@@ -287,66 +298,49 @@ int main(int argc, char *argv[])
 	g_autoptr(GOptionContext) context = g_option_context_new(" - ReFrame streamer");
 	g_option_context_add_main_entries(context, options, NULL);
 	if (!g_option_context_parse_strv(context, &args, &error)) {
-		g_error("Failed to parse options.");
-		return EXIT_FAILURE;
+		g_warning("Failed to parse options: %s.", error->message);
+		g_clear_pointer(&error, g_error_free);
 	}
-
 	if (version) {
 		g_print(PROJECT_VERSION "\n");
 		return 0;
 	}
-
-	// Use `g_strdup` here to make `g_autofree` happy.
+	// Use `g_strdup()` here to make `g_autofree` happy.
 	if (socket_path == NULL)
 		socket_path = g_strdup("/tmp/reframe.sock");
 
-	g_debug("Using configuration file %s", config_path);
+	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
-	g_autofree char *card_path = rf_config_get_card_path(this->config);
-	g_remove(socket_path);
-	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
-	if (this->cfd <= 0) {
-		g_error("Failed to open card %s: %s.", card_path, strerror(errno));
-	}
-
-	drmModeRes *res = NULL;
-	g_autofree char *connector_name = rf_config_get_connector(this->config);
-	res = drmModeGetResources(this->cfd);
-	this->connector_id = _get_connector_id(this->cfd, res, connector_name);
-	drmModeFreeResources(res);
-
-	if (this->connector_id == 0) {
-		g_error("Failed to find a connected connector %s.",
-			connector_name);
-		close(this->cfd);
-		return EXIT_FAILURE;
-	}
-	g_debug("Found connected connector %s.", connector_name);
-
-	_init_uinput(this);
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
+	g_message("Using socket %s.", socket_path);
+	g_remove(socket_path);
 
-	g_debug("Using socket %s", socket_path);
 	// Non-systemd socket.
-	GSocketAddress *address = g_unix_socket_address_new(socket_path);
+	g_autoptr(GSocketAddress) address = g_unix_socket_address_new(socket_path);
 	g_socket_listener_add_address(listener, address, G_SOCKET_TYPE_STREAM,
 				      G_SOCKET_PROTOCOL_DEFAULT, NULL, NULL,
-				      NULL);
+				      &error);
 	// TODO: systemd socket.
 	// int sfd = 0;
-	// GSocket *socket = g_socket_new_from_fd(sfd, NULL);
-	// g_socket_listener_add_socket(listener, socket, NULL, NULL);
+	// g_autoptr(GSocket) socket = g_socket_new_from_fd(sfd, NULL);
+	// g_socket_listener_add_socket(listener, socket, NULL, &error);
+	if (error != NULL)
+		g_error("Failed to listen to socket: %s.", error->message);
 
-	g_debug("Keep listening mode is %s.",
+	g_message("Keep listening mode is %s.",
 		keep_listen ? "enabled" : "disabled");
 	do {
 		this->connection =
 			g_socket_listener_accept(listener, NULL, NULL, &error);
-		if (this->connection == NULL) {
-			g_error("Failed to listen to socket.");
-			return EXIT_FAILURE;
-		}
+		if (this->connection == NULL)
+			g_error("Failed to accept connection: %s.", error->message);
+
+		g_message("ReFrame server connected.");
+
+		_init_drm(this);
+		_init_uinput(this);
 
 		while (true) {
 			ssize_t ret = 0;
@@ -355,10 +349,10 @@ int main(int argc, char *argv[])
 			char request;
 			ret = g_input_stream_read(is, &request, sizeof(request), NULL, NULL);
 			if (ret == 0) {
-				g_debug("ReFrame server disconnected.");
+				g_message("ReFrame server disconnected.");
 				break;
 			} else if (ret < 0) {
-				g_error("Read socket failed.");
+				g_warning("Failed to receive request from socket.");
 				break;
 			}
 
@@ -372,19 +366,29 @@ int main(int argc, char *argv[])
 			default:
 				break;
 			}
-
-			if (ret <=0)
+			if (ret <= 0) {
+				if (ret == 0)
+					g_message("ReFrame server disconnected.");
 				break;
+			}
 		}
+
+		_ioctl_may(this->ufd, UI_DEV_DESTROY);
+		close(this->ufd);
+		this->ufd = 0;
+
+		close(this->cfd);
+		this->cfd = 0;
+
+		g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
+		if (error != NULL)
+			g_error("Failed to close socket connection: %s.", error->message);
+		g_clear_object(&this->connection);
 	} while (keep_listen);
 
 	g_socket_listener_close(listener);
 	g_unlink(socket_path);
-
-	_ioctl_may(this->ufd, UI_DEV_DESTROY);
-	close(this->ufd);
-
-	close(this->cfd);
+	g_object_unref(this->config);
 
 	return 0;
 }
