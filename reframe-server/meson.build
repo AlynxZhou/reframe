@@ -1,7 +1,7 @@
 # gnome = import('gnome')
 sources = files(
   'main.c',
-  'rf-app.c',
+  # 'rf-app.c',
   'rf-win.c',
   'rf-streamer.c',
   'rf-converter.c',
@@ -9,7 +9,7 @@ sources = files(
 )
 
 headers = files(
-  'rf-app.h',
+  # 'rf-app.h',
   'rf-win.h',
   'rf-streamer.h',
   'rf-converter.h',
