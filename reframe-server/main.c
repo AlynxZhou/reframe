@@ -4,12 +4,10 @@
 #include "rf-streamer.h"
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
-#include "rf-win.h"
 
 struct _this {
 	GMainLoop *main_loop;
 	RfConfig *config;
-	RfWin *win;
 	RfStreamer *streamer;
 	RfConverter *converter;
 	RfVNCServer *vnc;
@@ -35,8 +33,6 @@ static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 	unsigned char *buf = rf_converter_convert(this->converter, b,
 						  this->width, this->height);
 	rf_vnc_server_update(this->vnc, buf);
-	if (this->debug_win_opt)
-		rf_win_draw(this->win, buf, this->width, this->height);
 	g_free(buf);
 }
 
@@ -46,7 +42,6 @@ int main(int argc, char *argv[])
 	g_autofree char *socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
-	gboolean debug_win = FALSE;
 	gboolean version = FALSE;
 	g_autofree char **args = g_strdupv(argv);
 	g_autoptr(GError) error = NULL;
@@ -59,8 +54,6 @@ int main(int argc, char *argv[])
 		  &socket_path, "Socket path of streamer.", "SOCKET" },
 		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &config_path, "Configuration file path.", "PATH" },
-		{ "debug-win", 'w', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
-		  &debug_win, "Show debug window.", NULL },
 		{ NULL, 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, NULL, NULL,
 		  NULL }
 	};
@@ -79,8 +72,6 @@ int main(int argc, char *argv[])
 	// Use `g_strdup` here to make `g_autofree` happy.
 	if (socket_path == NULL)
 		socket_path = g_strdup("/tmp/reframe.sock");
-
-	this->debug_win_opt = debug_win;
 
 	this->config = rf_config_new(config_path);
 
@@ -103,26 +94,9 @@ int main(int argc, char *argv[])
 
 	rf_vnc_server_start(this->vnc);
 
-	if (this->debug_win_opt) {
-		gtk_init();
-		this->win = rf_win_new();
-		g_signal_connect_swapped(this->win, "map",
-					 G_CALLBACK(rf_streamer_start),
-					 this->streamer);
-		// g_signal_connect_swapped(this->win, "unmap",
-		// 			 G_CALLBACK(rf_streamer_stop),
-		// 			 this->streamer);
-		gtk_window_present(GTK_WINDOW(this->win));
-	}
-
 	this->main_loop = g_main_loop_new(NULL, FALSE);
 
 	g_main_loop_run(this->main_loop);
-
-	if (this->win != NULL) {
-		gtk_window_destroy(GTK_WINDOW(this->win));
-		this->win = NULL;
-	}
 
 	return 0;
 }

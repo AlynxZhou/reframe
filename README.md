@@ -26,6 +26,5 @@ $ EGL_PLATFORM=surfaceless G_MESSAGES_DEBUG=ReFrame ./reframe-server/reframe-ser
 - [ ] Use systemd socket to start streamer on demand, start streamer on first connection and stop streamer on last connection.
 - [ ] Permission control with systemd unit, only streamer has SYS_CAP_ADMIN, others in normal users.
 - [X] Accept config file as parameters so we can start different daemon for different connectors.
-- [ ] Debug window should be optional.
 - [ ] Error handling.
 - [ ] Free pointers on stopping.
