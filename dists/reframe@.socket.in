@@ -1,0 +1,12 @@
+[Unit]
+Description=ReFrame Remote Desktop Socket for %i
+
+[Socket]
+Accept=no
+Service=reframe-streamer@%i.service
+SocketUser=@username@
+SocketMode=0660
+ListenStream=%t/reframe-%i.sock
+
+[Install]
+WantedBy=sockets.target

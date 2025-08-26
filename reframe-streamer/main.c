@@ -14,6 +14,10 @@
 #include "rf-config.h"
 #include "rf-buffer.h"
 
+#ifdef HAVE_LIBSYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 #define _ioctl_must(...) \
 	G_STMT_START { \
 		int e; \
@@ -315,17 +319,27 @@ int main(int argc, char *argv[])
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
 	g_message("Using socket %s.", socket_path);
-	g_remove(socket_path);
 
-	// Non-systemd socket.
-	g_autoptr(GSocketAddress) address = g_unix_socket_address_new(socket_path);
-	g_socket_listener_add_address(listener, address, G_SOCKET_TYPE_STREAM,
+#ifdef HAVE_LIBSYSTEMD
+	if (sd_listen_fds(0) != 0) {
+		// systemd socket.
+		// We only handle 1 socket.
+		int sfd = SD_LISTEN_FDS_START;
+		g_autoptr(GSocket) socket = g_socket_new_from_fd(sfd, &error);
+		if (error != NULL)
+			g_error("Failed to create socket from systemd fd: %s.", error->message);
+		g_socket_listener_add_socket(listener, socket, NULL, &error);
+	} else {
+#endif
+		g_remove(socket_path);
+		// Non-systemd socket.
+		g_autoptr(GSocketAddress) address = g_unix_socket_address_new(socket_path);
+		g_socket_listener_add_address(listener, address, G_SOCKET_TYPE_STREAM,
 				      G_SOCKET_PROTOCOL_DEFAULT, NULL, NULL,
 				      &error);
-	// TODO: systemd socket.
-	// int sfd = 0;
-	// g_autoptr(GSocket) socket = g_socket_new_from_fd(sfd, NULL);
-	// g_socket_listener_add_socket(listener, socket, NULL, &error);
+#ifdef HAVE_LIBSYSTEMD
+	}
+#endif
 	if (error != NULL)
 		g_error("Failed to listen to socket: %s.", error->message);
 
@@ -387,7 +401,6 @@ int main(int argc, char *argv[])
 	} while (keep_listen);
 
 	g_socket_listener_close(listener);
-	g_unlink(socket_path);
 	g_object_unref(this->config);
 
 	return 0;

@@ -1,0 +1,17 @@
+[Unit]
+Description=ReFrame Remote Desktop Server for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@username@
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Required for framebuffer-only rendering.
+Environment=EGL_PLATFORM=surfaceless
+ExecStart=@bindir@/reframe-server --config=@confdir@/%i.conf --socket=%t/reframe-%i.sock
+Restart=on-failure
+
+[Install]
+WantedBy=graphical.target

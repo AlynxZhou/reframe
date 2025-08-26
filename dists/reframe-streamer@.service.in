@@ -1,0 +1,22 @@
+[Unit]
+Description=ReFrame Remote Desktop Streamer for %i
+After=network-online.target reframe@%i.socket
+Wants=network-online.target
+Requires=reframe@%i.socket
+
+[Service]
+Type=exec
+# We have to run this as root to get permissions on `/dev/dri/card*` and
+# `/dev/uinput`, then we drop permissions as much as we can.
+CapabilityBoundingSet=CAP_SYS_ADMIN
+ProtectHome=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelTunables=true
+DeviceAllow=char-drm r
+DeviceAllow=/dev/uinput rw
+ExecStart=@bindir@/reframe-streamer --config=@confdir@/%i.conf --socket=%t/reframe-%i.sock
+Restart=on-failure
+
+[Install]
+WantedBy=graphical.target

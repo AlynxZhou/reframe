@@ -8,6 +8,9 @@ gio = dependency('gio-2.0', required: true)
 gio_unix = dependency('gio-unix-2.0', required: true)
 libdrm = dependency('libdrm', required: true)
 dependencies += [glib, gio, gio_unix, libdrm]
+if libsystemd.found()
+  dependencies += [libsystemd]
+endif
 
 dependencies += [reframe_common_dep]
 

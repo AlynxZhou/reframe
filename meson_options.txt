@@ -1,0 +1,34 @@
+option(
+  'confdir',
+  type: 'string',
+  value: '',
+  description: 'Configuration directory for the system daemon.'
+)
+
+option(
+  'username',
+  type: 'string',
+  value: 'reframe',
+  description: 'User name for the system daemon.'
+)
+
+option(
+  'systemd',
+  type: 'boolean',
+  value: true,
+  description: 'Enable systemd support.'
+)
+
+option(
+  'systemunitdir',
+  type: 'string',
+  value: '',
+  description: 'systemd system unit dir.'
+)
+
+option(
+  'sysusersdir',
+  type: 'string',
+  value: '',
+  description: 'systemd sysusers dir.'
+)
