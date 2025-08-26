@@ -68,7 +68,7 @@ static void _on_keyboard_event(rfbBool direction, rfbKeySym keysym, rfbClientRec
 		return;
 	}
 	uint32_t keycode = KEY_CODE_XKB_TO_EV(idata.keycode);
-	g_debug("Received key %s for keysym %04x and keycode %u.", down ? "down" : "up", keysym, keycode);
+	g_debug("Input: Received key %s for keysym %04x and keycode %u.", down ? "down" : "up", keysym, keycode);
 	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
 }
 
@@ -88,7 +88,7 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	bool wdown = mask & (1 << 4);
 	double rx = (double)x / this->width;
 	double ry = (double)y / this->height;
-	g_debug("Received pointer at (%f, %f), left %s, middle %s, right %s, wheel up %s, wheel down %s", rx, ry, _true_or_false(left), _true_or_false(middle), _true_or_false(right), _true_or_false(wup), _true_or_false(wdown));
+	g_debug("Input: Received pointer at x %f and y %f, left %s, middle %s, right %s, wheel up %s, wheel down %s", rx, ry, _true_or_false(left), _true_or_false(middle), _true_or_false(right), _true_or_false(wup), _true_or_false(wdown));
 	g_signal_emit(this, sigs[SIG_POINTER_EVENT], 0, rx, ry, left, middle, right, wup, wdown);
 }
 
@@ -149,6 +149,7 @@ static enum rfbNewClientAction _on_new_client(rfbClientRec *client)
 	return RFB_CLIENT_ACCEPT;
 }
 
+// FIXME: The initial client size is not handled.
 static int _on_set_desktop_size(int width, int height, int num_screens,
 				struct rfbExtDesktopScreen *screens,
 				rfbClientRec *client)

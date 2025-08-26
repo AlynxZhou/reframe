@@ -20,12 +20,6 @@ libvncserver = dependency('libvncserver', required: true)
 xkbcommon = dependency('xkbcommon', required: true)
 dependencies += [glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
 
-cc = meson.get_compiler('c')
-m = cc.find_library('m', required : false)
-if m.found()
-  dependencies += [m]
-endif
-
 dependencies += [reframe_common_dep]
 
 include_directories = []

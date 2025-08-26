@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <gio/gunixfdmessage.h>
@@ -10,6 +9,7 @@
 
 struct _RfStreamer {
 	GObject parent_instance;
+	RfConfig *config;
 	GSocketClient *client;
 	GSocketAddress *address;
 	GSocketConnection *connection;
@@ -18,6 +18,12 @@ struct _RfStreamer {
 	unsigned int timer_id;
 	int64_t last_frame_time;
 	int64_t max_interval;
+	unsigned int width;
+	unsigned int height;
+	unsigned int desktop_width;
+	unsigned int desktop_height;
+	int monitor_x;
+	int monitor_y;
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
 
@@ -167,6 +173,11 @@ static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer 
 	g_debug("Frame: Got frame pitches: %u %u %u %u.", b.md.pitches[0], b.md.pitches[1],
 		b.md.pitches[2], b.md.pitches[3]);
 
+	if (this->width != b.md.width || this->height != b.md.height) {
+		this->width = b.md.width;
+		this->height = b.md.height;
+	}
+
 	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
 
 cleanup:
@@ -202,6 +213,8 @@ static void rf_streamer_init(RfStreamer *this)
 	this->source = NULL;
 	this->last_frame_time = g_get_monotonic_time();
 	this->timer_id = 0;
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
 }
 
 static void rf_streamer_class_init(RfStreamerClass *klass)
@@ -218,7 +231,7 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 RfStreamer *rf_streamer_new(RfConfig *config)
 {
 	RfStreamer *this = g_object_new(RF_TYPE_STREAMER, NULL);
-	this->max_interval = 1000000 / rf_config_get_fps(config);
+	this->config = config;
 	return this;
 }
 
@@ -246,6 +259,13 @@ int rf_streamer_start(RfStreamer *this)
 		g_warning("Failed to connecting to ReFrame streamer.");
 		return -2;
 	}
+	this->max_interval = 1000000 / rf_config_get_fps(this->config);
+	this->desktop_width = rf_config_get_desktop_width(this->config);
+	this->desktop_height = rf_config_get_desktop_height(this->config);
+	g_debug("Input: Got desktop width %u and height %u.", this->desktop_width, this->desktop_height);
+	this->monitor_x = rf_config_get_monitor_x(this->config);
+	this->monitor_y = rf_config_get_monitor_y(this->config);
+	g_debug("Input: Got monitor x %u and y %u.", this->monitor_x, this->monitor_y);
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, G_IO_IN, NULL);
 	g_source_set_callback(this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
@@ -309,19 +329,26 @@ void rf_streamer_send_pointer_event(RfStreamer *this, double rx, double ry, bool
 	g_return_if_fail(RF_IS_STREAMER(this));
 	g_return_if_fail(this->running);
 
-	const int x = round(rx * RF_POINTER_MAX);
-	const int y = round(ry * RF_POINTER_MAX);
+	// Assuming user only have 1 monitor when they set desktop size to 0x0.
+	const int desktop_width = this->desktop_width > 0 ? this->desktop_width : this->width + this->monitor_x;
+	const int desktop_height = this->desktop_height > 0 ? this->desktop_height : this->height + this->monitor_y;
+	// Typically desktop environment will map uinput `EV_ABS` max size to
+	// the whole virtual desktop, so we need to convert the position to
+	// global position in the virtual desktop.
+	const double x = (rx * this->width + this->monitor_x) / desktop_width;
+	const double y = (ry * this->height + this->monitor_y) / desktop_height;
+	g_debug("Input: Calculated global position x %f and y %f.", x, y);
 
 	size_t length = (wup || wdown) ? 7 : 6;
 	g_autofree struct input_event *ies = g_malloc0_n(length, sizeof(*ies));
 
 	ies[0].type = EV_ABS;
 	ies[0].code = ABS_X;
-	ies[0].value = x;
+	ies[0].value = RF_POINTER_MAX * x;
 
 	ies[1].type = EV_ABS;
 	ies[1].code = ABS_Y;
-	ies[1].value = y;
+	ies[1].value = RF_POINTER_MAX * y;
 
 	ies[2].type = EV_KEY;
 	ies[2].code = BTN_LEFT;
