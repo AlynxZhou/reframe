@@ -1,9 +1,8 @@
 #include <math.h>
-#include <stdbool.h>
 #include <stdint.h>
-#include <linux/uinput.h>
-#include <glib-unix.h>
+#include <stdbool.h>
 #include <gio/gunixfdmessage.h>
+#include <linux/uinput.h>
 
 #include "rf-common.h"
 #include "rf-buffer.h"
@@ -11,11 +10,10 @@
 
 struct _RfStreamer {
 	GObject parent_instance;
-	char *socket_path;
 	GSocketClient *client;
 	GSocketAddress *address;
 	GSocketConnection *connection;
-	GSocket *socket;
+	GSource *source;
 	bool running;
 	unsigned int timer_id;
 	int64_t last_frame_time;
@@ -32,25 +30,68 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	char request = RF_REQUEST_TYPE_INPUT;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
-	g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
-	g_output_stream_write(os, &length, sizeof(length), NULL, NULL);
-	g_output_stream_write(os, ies, length * sizeof(*ies), NULL, NULL);
-	g_debug("Sent %ld * %ld bytes input request to ReFrame streamer.", length, sizeof(*ies));
+	ssize_t ret = 0;
+
+	ret = g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
+	if (ret == 0) {
+		goto disconnected;
+	} else if (ret < 0) {
+		g_warning("Failed to send input request to socket.");
+		goto stop;
+	}
+
+	ret = g_output_stream_write(os, &length, sizeof(length), NULL, NULL);
+	if (ret == 0) {
+		goto disconnected;
+	} else if (ret < 0) {
+		g_warning("Failed to send input events length to socket.");
+		goto stop;
+	}
+
+	ret = g_output_stream_write(os, ies, length * sizeof(*ies), NULL, NULL);
+	if (ret == 0) {
+		goto disconnected;
+	} else if (ret < 0) {
+		g_warning("Failed to send %lu * %ld bytes input events to socket.", length, sizeof(*ies));
+		goto stop;
+	}
+
+	g_debug("Input: Sent %ld * %ld bytes input request.", length, sizeof(*ies));
+
+	return;
+
+disconnected:
+	g_warning("ReFrame streamer disconnected.");
+stop:
+	rf_streamer_stop(this);
 }
 
 static gboolean _send_frame_request(gpointer data)
 {
 	RfStreamer *this = data;
 	char request = RF_REQUEST_TYPE_FRAME;
-
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
-	g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
-	g_debug("Sent frame request to ReFrame streamer.");
+	ssize_t ret = 0;
+
+	ret = g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
+	if (ret == 0) {
+		g_warning("ReFrame streamer disconnected.");
+		goto stop;
+	} else if (ret < 0) {
+		g_warning("Failed to send frame request to socket.");
+		goto stop;
+	}
+
+	g_debug("Frame: Sent frame request.");
 
 	this->last_frame_time = g_get_monotonic_time();
 	this->timer_id = 0;
 
+	return G_SOURCE_REMOVE;
+
+stop:
+	rf_streamer_stop(this);
 	return G_SOURCE_REMOVE;
 }
 
@@ -65,12 +106,12 @@ static void _schedule_frame_request(RfStreamer *this)
 		this->timer_id = g_timeout_add(
 			(this->max_interval - delta) / 1000, _send_frame_request, this);
 	} else {
-		g_debug("Converting frame too slow.");
+		g_warning("Converting frame too slow.");
 		_send_frame_request(this);
 	}
 }
 
-static gboolean _on_input(int sfd, GIOCondition condition, gpointer data)
+static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfStreamer *this = data;
 	RfBuffer b;
@@ -79,14 +120,14 @@ static gboolean _on_input(int sfd, GIOCondition condition, gpointer data)
 	int n_msgs = 0;
 	ssize_t ret;
 
-	ret = g_socket_receive_message(this->socket, NULL, &iov, 1, &msgs,
+	ret = g_socket_receive_message(socket, NULL, &iov, 1, &msgs,
 				       &n_msgs, NULL, NULL, NULL);
 	if (ret == 0) {
 		g_warning("ReFrame streamer disconnected.");
-		return G_SOURCE_REMOVE;
+		goto stop;
 	} else if (ret < 0) {
-		g_error("Read socket failed.");
-		return G_SOURCE_REMOVE;
+		g_warning("Failed to receive frame from socket.");
+		goto stop;
 	}
 
 	for (int i = 0; i < RF_MAX_PLANES; ++i)
@@ -98,8 +139,15 @@ static gboolean _on_input(int sfd, GIOCondition condition, gpointer data)
 		if (G_IS_UNIX_FD_MESSAGE(msgs[i])) {
 			GUnixFDMessage *msg = G_UNIX_FD_MESSAGE(msgs[i]);
 			GUnixFDList *fds = g_unix_fd_message_get_fd_list(msg);
-			for (int j = 0; j < b.md.length; ++j)
+			for (int j = 0; j < b.md.length; ++j) {
 				b.fds[j] = g_unix_fd_list_get(fds, j, NULL);
+				// Some error happens.
+				if (b.fds[j] == -1) {
+					g_warning("Failed to receive frame fds from socket, only got %d of %d.", j, b.md.length);
+					b.md.length = j;
+					goto cleanup;
+				}
+			}
 			// We don't need to free GUnixFDList because
 			// GUnixFDMessage does not return a reference so we
 			// are not taking ownership of it.
@@ -108,43 +156,42 @@ static gboolean _on_input(int sfd, GIOCondition condition, gpointer data)
 			break;
 		}
 	}
+
+	g_debug("Frame: Got frame metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
+		b.md.length, b.md.width, b.md.height, (b.md.fourcc >> 0) & 0xff,
+		(b.md.fourcc >> 8) & 0xff, (b.md.fourcc >> 16) & 0xff,
+		(b.md.fourcc >> 24) & 0xff, b.md.modifier);
+	g_debug("Frame: Got frame fds: %d %d %d %d.", b.fds[0], b.fds[1], b.fds[2], b.fds[3]);
+	g_debug("Frame: Got frame offsets: %u %u %u %u.", b.md.offsets[0], b.md.offsets[1],
+		b.md.offsets[2], b.md.offsets[3]);
+	g_debug("Frame: Got frame pitches: %u %u %u %u.", b.md.pitches[0], b.md.pitches[1],
+		b.md.pitches[2], b.md.pitches[3]);
+
+	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
+
+cleanup:
+	for (int i = 0; i < b.md.length; ++i)
+		close(b.fds[i]);
+
 	for (int i = 0; i < n_msgs; ++i)
 		g_object_unref(msgs[i]);
 	g_free(msgs);
 
-	g_debug("length: %u, width: %u, height: %u, fourcc: %c%c%c%c, modifier: %#lx",
-		b.md.length, b.md.width, b.md.height, (b.md.fourcc >> 0) & 0xff,
-		(b.md.fourcc >> 8) & 0xff, (b.md.fourcc >> 16) & 0xff,
-		(b.md.fourcc >> 24) & 0xff, b.md.modifier);
-	g_debug("fds: %d %d %d %d", b.fds[0], b.fds[1], b.fds[2], b.fds[3]);
-	g_debug("offsets: %u %u %u %u", b.md.offsets[0], b.md.offsets[1],
-		b.md.offsets[2], b.md.offsets[3]);
-	g_debug("pitches: %u %u %u %u", b.md.pitches[0], b.md.pitches[1],
-		b.md.pitches[2], b.md.pitches[3]);
-
-	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
-	for (int i = 0; i < b.md.length; ++i)
-		close(b.fds[i]);
 	_schedule_frame_request(this);
 	return G_SOURCE_CONTINUE;
-}
 
-// static void _on_connected(GObject *source_object, GAsyncResult *res, gpointer data)
-// {
-// 	RfStreamer *s = data;
-// 	s->connection = g_socket_client_connect_finish(s->client, res, NULL);
-// 	// TODO: Error handling.
-// 	s->running = true;
-// 	s->socket = g_socket_connection_get_socket(s->connection);
-// 	s->sfd = g_socket_get_fd(s->socket);
-// 	g_unix_fd_add(s->sfd, G_IO_IN, _on_input, s);
-// }
+stop:
+	rf_streamer_stop(this);
+	return G_SOURCE_REMOVE;
+}
 
 static void _dispose(GObject *o)
 {
 	RfStreamer *this = RF_STREAMER(o);
 
 	rf_streamer_stop(this);
+	g_clear_object(&this->address);
+	g_clear_object(&this->client);
 
 	G_OBJECT_CLASS(rf_streamer_parent_class)->dispose(o);
 }
@@ -152,6 +199,9 @@ static void _dispose(GObject *o)
 static void rf_streamer_init(RfStreamer *this)
 {
 	this->running = false;
+	this->source = NULL;
+	this->last_frame_time = g_get_monotonic_time();
+	this->timer_id = 0;
 }
 
 static void rf_streamer_class_init(RfStreamerClass *klass)
@@ -175,45 +225,62 @@ RfStreamer *rf_streamer_new(RfConfig *config)
 void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path)
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
+	g_return_if_fail(socket_path != NULL);
 
-	g_clear_object(&this->client);
 	g_clear_object(&this->address);
+	g_clear_object(&this->client);
 	this->client = g_socket_client_new();
 	this->address = g_unix_socket_address_new(socket_path);
 }
 
-void rf_streamer_start(RfStreamer *this)
+int rf_streamer_start(RfStreamer *this)
 {
-	g_return_if_fail(RF_IS_STREAMER(this));
+	g_return_val_if_fail(RF_IS_STREAMER(this), -1);
 
 	if (this->running)
-		return;
+		return 0;
 
-	// g_socket_client_connect_async(this->client, G_SOCKET_CONNECTABLE(this->address), NULL, _on_connected, s);
-	// FIXME: Is it necessary to go async here?
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL);
 	if (this->connection == NULL) {
-		g_error("Error connecting to socket.\n");
-		exit(EXIT_FAILURE);
+		g_warning("Failed to connecting to ReFrame streamer.");
+		return -2;
 	}
-	// TODO: Error handling.
-	this->running = true;
-	this->socket = g_socket_connection_get_socket(this->connection);
-	int sfd = g_socket_get_fd(this->socket);
-	g_unix_fd_add(sfd, G_IO_IN, _on_input, this);
+	GSocket *socket = g_socket_connection_get_socket(this->connection);
+	this->source = g_socket_create_source(socket, G_IO_IN, NULL);
+	g_source_set_callback(this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
+	g_source_attach(this->source, NULL);
 	_send_frame_request(this);
+
+	this->running = true;
+	return 0;
 }
 
 void rf_streamer_stop(RfStreamer *this)
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
 
+	g_autoptr(GError) error = NULL;
+
 	if (!this->running)
 		return;
 
-	g_io_stream_close(G_IO_STREAM(this->connection), NULL, NULL);
 	this->running = false;
+
+	if (this->source != NULL) {
+		g_source_destroy(this->source);
+		g_clear_pointer(&this->source, g_source_unref);
+	}
+	if (this->timer_id != 0) {
+		g_source_remove(this->timer_id);
+		this->timer_id = 0;
+	}
+	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
+	if (error != NULL) {
+		g_warning("Failed to close ReFrame streamer connection: %s.", error->message);
+		return;
+	}
+	g_clear_object(&this->connection);
 }
 
 void rf_streamer_send_keyboard_event(RfStreamer *this, uint32_t keycode, bool down)

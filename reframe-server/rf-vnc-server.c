@@ -15,6 +15,7 @@ struct _RfVNCServer {
 	unsigned int width;
 	unsigned int height;
 	char *buf;
+	char *desktop_name;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	bool running;
@@ -112,11 +113,23 @@ static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 	g_hash_table_insert(this->connections, connection, source);
 }
 
+static gboolean _close_client(GSocketConnection *connection, GSource *source)
+{
+	g_autoptr(GError) error = NULL;
+	g_source_destroy(source);
+	g_io_stream_close(G_IO_STREAM(connection), NULL, &error);
+	// We can do nothing here.
+	if (error != NULL)
+		g_warning("Failed to close client connection: %s.", error->message);
+	return TRUE;
+}
+
 static void _detach_source(RfVNCServer *this, GSocketConnection *connection)
 {
+	g_autoptr(GError) error = NULL;
 	GSource *source = g_hash_table_lookup(this->connections, connection);
 	if (source != NULL) {
-		g_source_destroy(source);
+		_close_client(connection, source);
 		g_hash_table_remove(this->connections, connection);
 	}
 }
@@ -145,11 +158,11 @@ static int _on_set_desktop_size(int width, int height, int num_screens,
 		this->width = width;
 		this->height = height;
 		g_free(this->buf);
-		g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
 		this->buf = g_malloc0(this->width * this->height *
 				      RF_BYTES_PER_PIXEL);
 		rfbNewFramebuffer(this->screen, this->buf, this->width,
 				  this->height, 8, 3, RF_BYTES_PER_PIXEL);
+		g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
 	}
 	return rfbExtDesktopSize_Success;
 }
@@ -165,7 +178,7 @@ static gboolean _incoming(GSocketService *service,
 		this->buf = g_malloc0(this->width * this->height *
 				      RF_BYTES_PER_PIXEL);
 		this->screen->frameBuffer = this->buf;
-		this->screen->desktopName = rf_config_get_connector(this->config);
+		this->screen->desktopName = this->desktop_name;
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
@@ -179,7 +192,8 @@ static gboolean _incoming(GSocketService *service,
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	int fd = g_socket_get_fd(socket);
 	g_debug("New VNC connection socket fd: %d.", fd);
-	rfbClientRec *client = rfbNewClient(this->screen, fd);
+	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
+	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = g_object_ref(connection);
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
@@ -192,14 +206,38 @@ static gboolean _incoming(GSocketService *service,
 		->incoming(service, connection, source_object);
 }
 
+static void _dispose(GObject *o)
+{
+	RfVNCServer *this = RF_VNC_SERVER(o);
+
+	rf_vnc_server_stop(this);
+
+	G_OBJECT_CLASS(rf_vnc_server_parent_class)->dispose(o);
+}
+
+static void _finalize(GObject *o)
+{
+	RfVNCServer *this = RF_VNC_SERVER(o);
+
+	g_clear_pointer(&this->buf, g_free);
+	g_clear_pointer(&this->desktop_name, g_free);
+	g_clear_pointer(&this->screen, rfbScreenCleanup);
+	g_clear_pointer(&this->connections, g_hash_table_unref);
+	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
+	g_clear_pointer(&this->xkb_context, xkb_context_unref);
+
+	G_OBJECT_CLASS(rf_vnc_server_parent_class)->finalize(o);
+}
+
 static void rf_vnc_server_init(RfVNCServer *this)
 {
-	// this->screen = NULL;
 	this->running = false;
+	this->screen = NULL;
+	this->desktop_name = NULL;
 	this->width = RF_DEFAULT_WIDTH;
 	this->height = RF_DEFAULT_HEIGHT;
 	this->connections = g_hash_table_new_full(
-		g_direct_hash, g_direct_equal, g_object_unref, g_object_unref);
+		g_direct_hash, g_direct_equal, g_object_unref, (GDestroyNotify)g_source_unref);
 	this->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (this->xkb_context == NULL)
 		g_error("Failed to create XKB context.");
@@ -212,13 +250,13 @@ static void rf_vnc_server_init(RfVNCServer *this)
 
 static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 {
-	// GObjectClass *o_class = G_OBJECT_CLASS(klass);
+	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 	GSocketServiceClass *s_class = G_SOCKET_SERVICE_CLASS(klass);
 
 	s_class->incoming = _incoming;
 
-	// o_class->dispose = _dispose;
-	// o_class->finalize = _finalize;
+	o_class->dispose = _dispose;
+	o_class->finalize = _finalize;
 
 	sigs[SIG_FIRST_CLIENT] = g_signal_new("first-client",
 					      RF_TYPE_VNC_SERVER,
@@ -242,36 +280,57 @@ RfVNCServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfVNCServer *this = g_object_new(RF_TYPE_VNC_SERVER, NULL);
 	this->config = config;
+	this->desktop_name = rf_config_get_connector(this->config);
 	return this;
 }
 
 void rf_vnc_server_start(RfVNCServer *this)
 {
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
 	if (this->running)
 		return;
 
-	unsigned port = rf_config_get_port(this->config);
-	g_debug("Listening on %u.", port);
+	g_autoptr(GError) error = NULL;
+	unsigned int port = rf_config_get_port(this->config);
+	g_debug("Listening on port %u.", port);
 	g_socket_listener_add_inet_port(G_SOCKET_LISTENER(this), port, NULL,
-					NULL);
+					&error);
+	if (error != NULL)
+		g_error("Failed to listen on port %u: %s.", port, error->message);
+
 	this->running = true;
 }
 
 void rf_vnc_server_stop(RfVNCServer *this)
 {
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
 	if (!this->running)
 		return;
 
 	this->running = false;
+
+	rf_vnc_server_flush(this);
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
-	// TODO: Disconnect all client connections.
 }
 
-void rf_vnc_server_update(RfVNCServer *this, unsigned char *buf)
+void rf_vnc_server_update(RfVNCServer *this, const unsigned char *buf)
 {
-	if (this->screen == NULL || !rfbIsActive(this->screen))
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	if (buf == NULL || !this->running || this->screen == NULL || !rfbIsActive(this->screen))
 		return;
+
 	memcpy(this->buf, buf, this->width * this->height * RF_BYTES_PER_PIXEL);
 	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
 	rfbProcessEvents(this->screen, 0);
+}
+
+void rf_vnc_server_flush(RfVNCServer *this)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
+	g_hash_table_foreach_remove(this->connections, (GHRFunc)_close_client, NULL);
 }
