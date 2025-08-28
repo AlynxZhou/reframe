@@ -28,6 +28,7 @@ I might rebase and force push master branch at any time!
 
 - Sound: VNC has no sound support and I am not sure whether we can dump sound buffers in ALSA like what we do currently for graphics in DRM, and I think sound in display manager is not so useful, so maybe you can setup sound stream redirection for your session using PulseAudio/PipeWire-pulse, I think it already have network support.
 - No GPU/connector/EGL/OpenGL ES/DRM/KMS: You probably cannot run a modern Linux desktop environment if you are lacking of those, then why you want a remote desktop?
+- Game Streaming: ReFrame does not handle network streaming directly but uses existing tools like VNC, and VNC might be not optimized for low-latency. You may use some game streaming optimized apps like [Sunshine](https://github.com/LizardByte/Sunshine/).
 
 # Requirements
 
@@ -61,6 +62,8 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 ```
 
 ### Usage
+
+**Security Warning**: VNC data streams are not encrypted even with password authenciation, so **never** expose this to public network directly! Connecting to it via VPN is a better idea.
 
 First copy the example configuration and modify it according to your monitors.
 
