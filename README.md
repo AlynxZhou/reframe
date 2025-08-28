@@ -80,10 +80,10 @@ Unfortunately there are no general way to get those values for all desktop envir
 
 **You need to keep the same multi-monitors layout for display manager and user session to make remote login work correctly!**
 
-Then enable the ReFrame systemd socket so it will run the privileged process on demand.
+Then start the ReFrame systemd socket so it will run the privileged process on demand.
 
 ```
-# systemctl enable reframe@DP-1.socket
+# systemctl start reframe@DP-1.socket
 ```
 
 Then start the ReFrame Server systemd service so it will listen to VNC clients.
