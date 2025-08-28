@@ -1,5 +1,5 @@
-ReFrame
-=======
+ReFrame Remote Desktop
+======================
 
 DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/login…
 -----------------------------------------------------------------------------------
