@@ -34,6 +34,26 @@ If you cannot meet those requirements (for example embedded devices without prop
 
 # Install
 
+## Distribution Package (Recommended)
+
+### Arch Linux
+
+#### Install From [AUR](https://aur.archlinux.org/packages/reframe/)
+
+```
+$ paru reframe
+```
+
+Or use other AUR helpers.
+
+#### Install From `archlinuxcn`
+
+First [add archlinuxcn repo to your system](ttps://www.archlinuxcn.org/archlinux-cn-repo-and-mirror/).
+
+```
+# pacman -S reframe
+```
+
 ## Build from Source
 
 ### Dependencies
