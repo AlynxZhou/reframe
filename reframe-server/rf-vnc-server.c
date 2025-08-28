@@ -153,7 +153,6 @@ static enum rfbNewClientAction _on_new_client(rfbClientRec *client)
 	return RFB_CLIENT_ACCEPT;
 }
 
-// FIXME: The initial client size is not handled.
 static int _on_set_desktop_size(int width, int height, int num_screens,
 				struct rfbExtDesktopScreen *screens,
 				rfbClientRec *client)

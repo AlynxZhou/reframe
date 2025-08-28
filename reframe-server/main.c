@@ -84,6 +84,8 @@ int main(int argc, char *argv[])
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
 	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
 	this->streamer = rf_streamer_new(this->config);
