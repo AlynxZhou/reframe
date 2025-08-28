@@ -18,15 +18,27 @@ include_directories = []
 # For `config.h`.
 include_directories += include_directories('..')
 
-reframe_common = library(
-  'reframe-common',
-  sources: sources,
-  c_args: c_args,
-  include_directories: include_directories,
-  dependencies: dependencies,
-  install: true
-)
-
+# Linker ignores `RPATH` with `CAP_SYS_ADMIN`, so debug needs static linking.
+# But do not install static libray, we already linked against it.
+if get_option('buildtype') == 'debug'
+  reframe_common = static_library(
+    'reframe-common',
+    sources: sources,
+    c_args: c_args,
+    include_directories: include_directories,
+    dependencies: dependencies,
+    install: false
+  )
+else
+  reframe_common = shared_library(
+    'reframe-common',
+    sources: sources,
+    c_args: c_args,
+    include_directories: include_directories,
+    dependencies: dependencies,
+    install: true
+  )
+endif
 reframe_common_dep = declare_dependency(
   link_with: reframe_common,
   include_directories: include_directories('.')

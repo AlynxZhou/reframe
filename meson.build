@@ -3,12 +3,6 @@ project(
   'c',
   version: '0.0.0',
   license: 'Apache-2.0',
-  default_options: [
-    'c_std=gnu11',
-    # Linker will ignore `RPATH` with `CAP_SYS_ADMIN`, so we need static linking
-    # to debug.
-    get_option('buildtype') == 'debug' ? 'default_library=static' : 'default_library=shared'
-  ]
 )
 
 c_args = []
@@ -16,7 +10,7 @@ if get_option('debug') == true
   warning_level = 3
   c_args += ['-D__DEBUG__']
 endif
-c_args += ['-DG_LOG_DOMAIN="ReFrame"']
+c_args += ['-std=gnu11', '-DG_LOG_DOMAIN="ReFrame"']
 
 systemd = dependency('systemd', required: get_option('systemd'))
 libsystemd = dependency('libsystemd', required: get_option('systemd'))
