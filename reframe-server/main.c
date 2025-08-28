@@ -15,8 +15,8 @@ struct _this {
 	unsigned int height;
 };
 
-static void _on_resize_event(RfVNCServer *v, int width, int height,
-			     gpointer data)
+static void
+_on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
 {
 	struct _this *this = data;
 
@@ -28,8 +28,9 @@ static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 {
 	struct _this *this = data;
 
-	g_autofree unsigned char *buf = rf_converter_convert(this->converter, b,
-							     this->width, this->height);
+	g_autofree unsigned char *buf = rf_converter_convert(
+		this->converter, b, this->width, this->height
+	);
 	rf_vnc_server_update(this->vnc, buf);
 }
 
@@ -51,17 +52,36 @@ int main(int argc, char *argv[])
 	g_autofree char **args = g_strdupv(argv);
 	g_autoptr(GError) error = NULL;
 
-	GOptionEntry options[] = {
-		{ "version", 'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, &version,
-		  "Display version and exit.", NULL },
-		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
-		  &socket_path, "Socket path to communicate.", "SOCKET" },
-		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
-		  &config_path, "Configuration file path.", "PATH" },
-		{ NULL, 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, NULL, NULL,
-		  NULL }
-	};
-	g_autoptr(GOptionContext) context = g_option_context_new(" - ReFrame Server");
+	GOptionEntry options[] = { { "version",
+				     'v',
+				     G_OPTION_FLAG_NONE,
+				     G_OPTION_ARG_NONE,
+				     &version,
+				     "Display version and exit.",
+				     NULL },
+				   { "socket",
+				     's',
+				     G_OPTION_FLAG_NONE,
+				     G_OPTION_ARG_FILENAME,
+				     &socket_path,
+				     "Socket path to communicate.",
+				     "SOCKET" },
+				   { "config",
+				     'c',
+				     G_OPTION_FLAG_NONE,
+				     G_OPTION_ARG_FILENAME,
+				     &config_path,
+				     "Configuration file path.",
+				     "PATH" },
+				   { NULL,
+				     0,
+				     G_OPTION_FLAG_NONE,
+				     G_OPTION_ARG_NONE,
+				     NULL,
+				     NULL,
+				     NULL } };
+	g_autoptr(GOptionContext)
+		context = g_option_context_new(" - ReFrame Server");
 	g_option_context_add_main_entries(context, options, NULL);
 	if (!g_option_context_parse_strv(context, &args, &error)) {
 		g_warning("Failed to parse options: %s.", error->message);
@@ -79,7 +99,9 @@ int main(int argc, char *argv[])
 
 	const char *XKB_DEFAULT_LAYOUT = getenv("XKB_DEFAULT_LAYOUT");
 	if (XKB_DEFAULT_LAYOUT == 0 || g_strcmp0(XKB_DEFAULT_LAYOUT, "") == 0) {
-		g_message("XKB_DEFAULT_LAYOUT is empty, using US layout by default.");
+		g_message(
+			"XKB_DEFAULT_LAYOUT is empty, using US layout by default."
+		);
 		setenv("XKB_DEFAULT_LAYOUT", "us", 1);
 	}
 
@@ -93,19 +115,37 @@ int main(int argc, char *argv[])
 	rf_streamer_set_socket_path(this->streamer, socket_path);
 	this->converter = rf_converter_new();
 	this->vnc = rf_vnc_server_new(this->config);
-	g_signal_connect_swapped(this->streamer, "stop",
-				 G_CALLBACK(rf_vnc_server_flush), this->vnc);
+	g_signal_connect_swapped(
+		this->streamer,
+		"stop",
+		G_CALLBACK(rf_vnc_server_flush),
+		this->vnc
+	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
-	g_signal_connect(this->vnc, "first-client",
-			 G_CALLBACK(_on_first_client), this);
-	g_signal_connect_swapped(this->vnc, "last-client",
-				 G_CALLBACK(rf_streamer_stop), this->streamer);
-	g_signal_connect(this->vnc, "resize-event",
-			 G_CALLBACK(_on_resize_event), this);
-	g_signal_connect_swapped(this->vnc, "keyboard-event",
-				 G_CALLBACK(rf_streamer_send_keyboard_event), this->streamer);
-	g_signal_connect_swapped(this->vnc, "pointer-event",
-			 G_CALLBACK(rf_streamer_send_pointer_event), this->streamer);
+	g_signal_connect(
+		this->vnc, "first-client", G_CALLBACK(_on_first_client), this
+	);
+	g_signal_connect_swapped(
+		this->vnc,
+		"last-client",
+		G_CALLBACK(rf_streamer_stop),
+		this->streamer
+	);
+	g_signal_connect(
+		this->vnc, "resize-event", G_CALLBACK(_on_resize_event), this
+	);
+	g_signal_connect_swapped(
+		this->vnc,
+		"keyboard-event",
+		G_CALLBACK(rf_streamer_send_keyboard_event),
+		this->streamer
+	);
+	g_signal_connect_swapped(
+		this->vnc,
+		"pointer-event",
+		G_CALLBACK(rf_streamer_send_pointer_event),
+		this->streamer
+	);
 	rf_vnc_server_start(this->vnc);
 
 	this->main_loop = g_main_loop_new(NULL, FALSE);

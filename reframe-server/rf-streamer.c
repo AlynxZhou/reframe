@@ -32,7 +32,11 @@ enum { SIG_START, SIG_STOP, SIG_FRAME, N_SIGS };
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
-static void _send_input_request(RfStreamer *this, struct input_event *ies, const size_t length)
+static void _send_input_request(
+	RfStreamer *this,
+	struct input_event *ies,
+	const size_t length
+)
 {
 	char request = RF_REQUEST_TYPE_INPUT;
 	GOutputStream *os =
@@ -51,7 +55,9 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	if (ret == 0) {
 		goto disconnected;
 	} else if (ret < 0) {
-		g_warning("Input: Failed to send input events length to socket.");
+		g_warning(
+			"Input: Failed to send input events length to socket."
+		);
 		goto stop;
 	}
 
@@ -59,11 +65,17 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	if (ret == 0) {
 		goto disconnected;
 	} else if (ret < 0) {
-		g_warning("Input: Failed to send %lu * %ld bytes input events to socket.", length, sizeof(*ies));
+		g_warning(
+			"Input: Failed to send %lu * %ld bytes input events to socket.",
+			length,
+			sizeof(*ies)
+		);
 		goto stop;
 	}
 
-	g_debug("Input: Sent %ld * %ld bytes input request.", length, sizeof(*ies));
+	g_debug("Input: Sent %ld * %ld bytes input request.",
+		length,
+		sizeof(*ies));
 
 	return;
 
@@ -111,14 +123,18 @@ static void _schedule_frame_request(RfStreamer *this)
 	int64_t delta = current - this->last_frame_time;
 	if (delta < this->max_interval) {
 		this->timer_id = g_timeout_add(
-			(this->max_interval - delta) / 1000, _send_frame_request, this);
+			(this->max_interval - delta) / 1000,
+			_send_frame_request,
+			this
+		);
 	} else {
 		g_warning("Frame: Converting frame too slow.");
 		this->timer_id = g_timeout_add(1, _send_frame_request, this);
 	}
 }
 
-static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
+static gboolean
+_on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfStreamer *this = data;
 
@@ -131,8 +147,9 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 	int n_msgs = 0;
 	ssize_t ret;
 
-	ret = g_socket_receive_message(socket, NULL, &iov, 1, &msgs,
-				       &n_msgs, NULL, NULL, NULL);
+	ret = g_socket_receive_message(
+		socket, NULL, &iov, 1, &msgs, &n_msgs, NULL, NULL, NULL
+	);
 	if (ret == 0) {
 		g_warning("ReFrame Streamer disconnected.");
 		goto stop;
@@ -154,7 +171,11 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 				b.fds[j] = g_unix_fd_list_get(fds, j, NULL);
 				// Some error happens.
 				if (b.fds[j] == -1) {
-					g_warning("Frame: Failed to receive frame fds from socket, only got %d of %d.", j, b.md.length);
+					g_warning(
+						"Frame: Failed to receive frame fds from socket, only got %d of %d.",
+						j,
+						b.md.length
+					);
 					b.md.length = j;
 					goto cleanup;
 				}
@@ -169,14 +190,29 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 	}
 
 	g_debug("Frame: Got frame metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
-		b.md.length, b.md.width, b.md.height, (b.md.fourcc >> 0) & 0xff,
-		(b.md.fourcc >> 8) & 0xff, (b.md.fourcc >> 16) & 0xff,
-		(b.md.fourcc >> 24) & 0xff, b.md.modifier);
-	g_debug("Frame: Got frame fds: %d %d %d %d.", b.fds[0], b.fds[1], b.fds[2], b.fds[3]);
-	g_debug("Frame: Got frame offsets: %u %u %u %u.", b.md.offsets[0], b.md.offsets[1],
-		b.md.offsets[2], b.md.offsets[3]);
-	g_debug("Frame: Got frame pitches: %u %u %u %u.", b.md.pitches[0], b.md.pitches[1],
-		b.md.pitches[2], b.md.pitches[3]);
+		b.md.length,
+		b.md.width,
+		b.md.height,
+		(b.md.fourcc >> 0) & 0xff,
+		(b.md.fourcc >> 8) & 0xff,
+		(b.md.fourcc >> 16) & 0xff,
+		(b.md.fourcc >> 24) & 0xff,
+		b.md.modifier);
+	g_debug("Frame: Got frame fds: %d %d %d %d.",
+		b.fds[0],
+		b.fds[1],
+		b.fds[2],
+		b.fds[3]);
+	g_debug("Frame: Got frame offsets: %u %u %u %u.",
+		b.md.offsets[0],
+		b.md.offsets[1],
+		b.md.offsets[2],
+		b.md.offsets[3]);
+	g_debug("Frame: Got frame pitches: %u %u %u %u.",
+		b.md.pitches[0],
+		b.md.pitches[1],
+		b.md.pitches[2],
+		b.md.pitches[3]);
 
 	if (this->width != b.md.width || this->height != b.md.height) {
 		this->width = b.md.width;
@@ -229,15 +265,24 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 
 	o_class->dispose = _dispose;
 
-	sigs[SIG_START] = g_signal_new("start", RF_TYPE_STREAMER,
-				       0, 0, NULL, NULL, NULL,
-				       G_TYPE_NONE, 0);
-	sigs[SIG_STOP] = g_signal_new("stop", RF_TYPE_STREAMER,
-				      0, 0, NULL, NULL, NULL,
-				      G_TYPE_NONE, 0);
-	sigs[SIG_FRAME] = g_signal_new("frame", RF_TYPE_STREAMER,
-				       0, 0, NULL, NULL, NULL,
-				       G_TYPE_NONE, 1, RF_TYPE_BUFFER);
+	sigs[SIG_START] = g_signal_new(
+		"start", RF_TYPE_STREAMER, 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0
+	);
+	sigs[SIG_STOP] = g_signal_new(
+		"stop", RF_TYPE_STREAMER, 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0
+	);
+	sigs[SIG_FRAME] = g_signal_new(
+		"frame",
+		RF_TYPE_STREAMER,
+		0,
+		0,
+		NULL,
+		NULL,
+		NULL,
+		G_TYPE_NONE,
+		1,
+		RF_TYPE_BUFFER
+	);
 }
 
 RfStreamer *rf_streamer_new(RfConfig *config)
@@ -266,7 +311,8 @@ int rf_streamer_start(RfStreamer *this)
 		return 0;
 
 	this->connection = g_socket_client_connect(
-		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL);
+		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
+	);
 	if (this->connection == NULL) {
 		g_warning("Failed to connecting to ReFrame Streamer.");
 		return -2;
@@ -274,13 +320,19 @@ int rf_streamer_start(RfStreamer *this)
 	this->max_interval = 1000000 / rf_config_get_fps(this->config);
 	this->desktop_width = rf_config_get_desktop_width(this->config);
 	this->desktop_height = rf_config_get_desktop_height(this->config);
-	g_debug("Input: Got desktop width %u and height %u.", this->desktop_width, this->desktop_height);
+	g_debug("Input: Got desktop width %u and height %u.",
+		this->desktop_width,
+		this->desktop_height);
 	this->monitor_x = rf_config_get_monitor_x(this->config);
 	this->monitor_y = rf_config_get_monitor_y(this->config);
-	g_debug("Input: Got monitor x %u and y %u.", this->monitor_x, this->monitor_y);
+	g_debug("Input: Got monitor x %u and y %u.",
+		this->monitor_x,
+		this->monitor_y);
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(this->source, G_SOURCE_FUNC(_on_socket_io), this, NULL);
+	g_source_set_callback(
+		this->source, G_SOURCE_FUNC(_on_socket_io), this, NULL
+	);
 	g_source_attach(this->source, NULL);
 	_send_frame_request(this);
 
@@ -313,41 +365,53 @@ void rf_streamer_stop(RfStreamer *this)
 	}
 	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
 	if (error != NULL) {
-		g_warning("Failed to close ReFrame Streamer connection: %s.", error->message);
+		g_warning(
+			"Failed to close ReFrame Streamer connection: %s.",
+			error->message
+		);
 		return;
 	}
 	g_clear_object(&this->connection);
 }
 
-void rf_streamer_send_keyboard_event(RfStreamer *this, uint32_t keycode, bool down)
+void rf_streamer_send_keyboard_event(
+	RfStreamer *this,
+	uint32_t keycode,
+	bool down
+)
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
 	g_return_if_fail(this->running);
 
 #define KEYBOARD_EVENT_LENGTH 2
 	struct input_event ies[KEYBOARD_EVENT_LENGTH] = {
-		{
-			.type = EV_KEY,
-			.code = keycode,
-			.value = down
-		},
-		{
-			.type = EV_SYN,
-			.code = SYN_REPORT,
-			.value = 0
-		}
+		{ .type = EV_KEY, .code = keycode, .value = down },
+		{ .type = EV_SYN, .code = SYN_REPORT, .value = 0 }
 	};
 	_send_input_request(this, ies, KEYBOARD_EVENT_LENGTH);
 }
 
-void rf_streamer_send_pointer_event(RfStreamer *this, double rx, double ry, bool left, bool middle, bool right, bool wup, bool wdown)
+void rf_streamer_send_pointer_event(
+	RfStreamer *this,
+	double rx,
+	double ry,
+	bool left,
+	bool middle,
+	bool right,
+	bool wup,
+	bool wdown
+)
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
 	g_return_if_fail(this->running);
 
 	// Assuming user only have 1 monitor when they set desktop size to 0x0.
-	const int desktop_width = this->desktop_width > 0 ? this->desktop_width : this->width + this->monitor_x;
-	const int desktop_height = this->desktop_height > 0 ? this->desktop_height : this->height + this->monitor_y;
+	const int desktop_width = this->desktop_width > 0 ?
+					  this->desktop_width :
+					  this->width + this->monitor_x;
+	const int desktop_height = this->desktop_height > 0 ?
+					   this->desktop_height :
+					   this->height + this->monitor_y;
 	// Typically desktop environment will map uinput `EV_ABS` max size to
 	// the whole virtual desktop, so we need to convert the position to
 	// global position in the virtual desktop.

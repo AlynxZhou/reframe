@@ -28,25 +28,24 @@ static void _init_egl(RfConverter *this)
 	EGLint size;
 	EGLConfig config = NULL;
 	EGLConfig *configs;
-	EGLint config_attribs[] = { EGL_SURFACE_TYPE,
-				    EGL_PBUFFER_BIT,
-				    EGL_RED_SIZE,
-				    8,
-				    EGL_GREEN_SIZE,
-				    8,
-				    EGL_BLUE_SIZE,
-				    8,
-				    EGL_ALPHA_SIZE,
-				    8,
-				    EGL_RENDERABLE_TYPE,
-				    EGL_OPENGL_ES3_BIT,
-				    EGL_NONE };
-
-	EGLint context_attribs[] = { EGL_CONTEXT_MAJOR_VERSION, 3,
+	// clang-format off
+	EGLint config_attribs[] = {
+		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+		EGL_RED_SIZE, 8,
+		EGL_GREEN_SIZE, 8,
+		EGL_BLUE_SIZE, 8,
+		EGL_ALPHA_SIZE, 8,
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+		EGL_NONE
+	};
+	EGLint context_attribs[] = {
+		EGL_CONTEXT_MAJOR_VERSION, 3,
 #ifdef __DEBUG__
-				     EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE,
+		EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE,
 #endif
-				     EGL_NONE };
+		EGL_NONE
+	};
+	// clang-format on
 
 	this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	if (this->display == EGL_NO_DISPLAY)
@@ -62,16 +61,18 @@ static void _init_egl(RfConverter *this)
 	configs = g_malloc_n(count, sizeof(*configs));
 	eglChooseConfig(this->display, config_attribs, configs, count, &n);
 	for (int i = 0; i < n; ++i) {
-		eglGetConfigAttrib(this->display, configs[i], EGL_BUFFER_SIZE,
-				   &size);
+		eglGetConfigAttrib(
+			this->display, configs[i], EGL_BUFFER_SIZE, &size
+		);
 		if (size == 32) {
 			config = configs[i];
 			break;
 		}
 	}
 
-	this->context = eglCreateContext(this->display, config, EGL_NO_CONTEXT,
-				      context_attribs);
+	this->context = eglCreateContext(
+		this->display, config, EGL_NO_CONTEXT, context_attribs
+	);
 	if (this->context == EGL_NO_CONTEXT)
 		g_error("EGL: Failed to create context: %d.", eglGetError());
 
@@ -79,7 +80,15 @@ static void _init_egl(RfConverter *this)
 }
 
 #ifdef __DEBUG__
-static void _gl_message(unsigned int source, unsigned int type, unsigned int id, unsigned int severity, int length, const char *message, const void *user_param)
+static void _gl_message(
+	unsigned int source,
+	unsigned int type,
+	unsigned int id,
+	unsigned int severity,
+	int length,
+	const char *message,
+	const void *user_param
+)
 {
 	if (type == GL_DEBUG_TYPE_ERROR)
 		g_warning("GL: Failed to call command: %s.", message);
@@ -89,7 +98,8 @@ static void _gl_message(unsigned int source, unsigned int type, unsigned int id,
 static void _gen_texture(RfConverter *this)
 {
 	g_debug("GL: Generating new texture for width %d and height %d.",
-		this->width, this->height);
+		this->width,
+		this->height);
 
 	if (this->texture != 0)
 		glDeleteTextures(1, &this->texture);
@@ -97,10 +107,24 @@ static void _gen_texture(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 	glGenTextures(1, &this->texture);
 	glBindTexture(GL_TEXTURE_2D, this->texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, this->width, this->height, 0, GL_RGBA,
-		     GL_UNSIGNED_BYTE, NULL);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-			       GL_TEXTURE_2D, this->texture, 0);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		GL_RGBA,
+		this->width,
+		this->height,
+		0,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		NULL
+	);
+	glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		GL_TEXTURE_2D,
+		this->texture,
+		0
+	);
 	GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
 	glDrawBuffers(1, &draw_buffer);
 	glBindTexture(GL_TEXTURE_2D, 0);
@@ -151,9 +175,11 @@ static unsigned int _make_program(const char *vs, const char *fs)
 
 static void _init_gl(RfConverter *this)
 {
-	if (!eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
-			    this->context))
-		g_error("EGL: Failed to make context current: %d.", eglGetError());
+	if (!eglMakeCurrent(
+		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
+	    ))
+		g_error("EGL: Failed to make context current: %d.",
+			eglGetError());
 
 #ifdef __DEBUG__
 	glEnable(GL_DEBUG_OUTPUT);
@@ -187,40 +213,54 @@ static void _init_gl(RfConverter *this)
 	glGenBuffers(3, this->buffers);
 
 	// FIXME: What if screen rotate? Do I need a rotate matrix?
-	const float vertices[] = { // x, y
-				   // bottom left
-				   -1.0f, -1.0f,
-				   // top left
-				   -1.0f, 1.0f,
-				   // bottom right
-				   1.0f, -1.0f,
-				   // top right
-				   1.0f, 1.0f
+	// clang-format off
+	const float vertices[] = {
+		// x, y
+		// bottom left
+		-1.0f, -1.0f,
+		// top left
+		-1.0f, 1.0f,
+		// bottom right
+		1.0f, -1.0f,
+		// top right
+		1.0f, 1.0f
 	};
+	// clang-format on
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices,
-		     GL_STATIC_DRAW);
+	glBufferData(
+		GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW
+	);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-	const float coordinates[] = { // u, v
-				      // bottom left
-				      0.0f, 0.0f,
-				      // top left
-				      0.0f, 1.0f,
-				      // bottom right
-				      1.0f, 0.0f,
-				      // top right
-				      1.0f, 1.0f
+	// clang-format off
+	const float coordinates[] = {
+		// u, v
+		// bottom left
+		0.0f, 0.0f,
+		// top left
+		0.0f, 1.0f,
+		// bottom right
+		1.0f, 0.0f,
+		// top right
+		1.0f, 1.0f
 	};
+	// clang-format on
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(coordinates), coordinates,
-		     GL_STATIC_DRAW);
+	glBufferData(
+		GL_ARRAY_BUFFER, sizeof(coordinates), coordinates, GL_STATIC_DRAW
+	);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-	const unsigned int indices[] = { 0, 1, 2, 3, 2, 1 };
+	// clang-format off
+	const unsigned int indices[] = {
+		0, 1, 2,
+		3, 2, 1
+	};
+	// clang-format on
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
-		     GL_STATIC_DRAW);
+	glBufferData(
+		GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW
+	);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 	glGenVertexArrays(1, &this->vertex_array);
@@ -228,17 +268,30 @@ static void _init_gl(RfConverter *this)
 	glBindVertexArray(this->vertex_array);
 
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
-	glVertexAttribPointer(glGetAttribLocation(this->program, "in_position"), 2,
-			      GL_FLOAT, GL_FALSE, 2 * sizeof(*vertices), 0);
+	glVertexAttribPointer(
+		glGetAttribLocation(this->program, "in_position"),
+		2,
+		GL_FLOAT,
+		GL_FALSE,
+		2 * sizeof(*vertices),
+		0
+	);
 	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_position"));
+		glGetAttribLocation(this->program, "in_position")
+	);
 
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
-	glVertexAttribPointer(glGetAttribLocation(this->program, "in_coordinate"),
-			      2, GL_FLOAT, GL_FALSE, 2 * sizeof(*coordinates),
-			      0);
+	glVertexAttribPointer(
+		glGetAttribLocation(this->program, "in_coordinate"),
+		2,
+		GL_FLOAT,
+		GL_FALSE,
+		2 * sizeof(*coordinates),
+		0
+	);
 	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_coordinate"));
+		glGetAttribLocation(this->program, "in_coordinate")
+	);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
 
@@ -299,17 +352,21 @@ static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 	g_array_append_val(a, v);
 }
 
-unsigned char *rf_converter_convert(RfConverter *this, const RfBuffer *b,
-				    unsigned int width, unsigned int height)
+unsigned char *rf_converter_convert(
+	RfConverter *this,
+	const RfBuffer *b,
+	unsigned int width,
+	unsigned int height
+)
 {
 	EGLAttrib fd_keys[RF_MAX_PLANES] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					     EGL_DMA_BUF_PLANE1_FD_EXT,
 					     EGL_DMA_BUF_PLANE2_FD_EXT,
 					     EGL_DMA_BUF_PLANE3_FD_EXT };
-	EGLAttrib offset_keys[RF_MAX_PLANES] = {
-		EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT,
-		EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT
-	};
+	EGLAttrib offset_keys[RF_MAX_PLANES] = { EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+						 EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+						 EGL_DMA_BUF_PLANE2_OFFSET_EXT,
+						 EGL_DMA_BUF_PLANE3_OFFSET_EXT };
 	EGLAttrib pitch_keys[RF_MAX_PLANES] = { EGL_DMA_BUF_PLANE0_PITCH_EXT,
 						EGL_DMA_BUF_PLANE1_PITCH_EXT,
 						EGL_DMA_BUF_PLANE2_PITCH_EXT,
@@ -335,10 +392,16 @@ unsigned char *rf_converter_convert(RfConverter *this, const RfBuffer *b,
 		_append_attrib(image_attribs, offset_keys[i], b->md.offsets[i]);
 		_append_attrib(image_attribs, pitch_keys[i], b->md.pitches[i]);
 		if (b->md.modifier != DRM_FORMAT_MOD_INVALID) {
-			_append_attrib(image_attribs, modlo_keys[i],
-				       (b->md.modifier & 0xFFFFFFFF));
-			_append_attrib(image_attribs, modhi_keys[i],
-				       (b->md.modifier >> 32));
+			_append_attrib(
+				image_attribs,
+				modlo_keys[i],
+				(b->md.modifier & 0xFFFFFFFF)
+			);
+			_append_attrib(
+				image_attribs,
+				modhi_keys[i],
+				(b->md.modifier >> 32)
+			);
 		}
 	}
 	EGLAttrib key = EGL_NONE;
@@ -347,10 +410,13 @@ unsigned char *rf_converter_convert(RfConverter *this, const RfBuffer *b,
 	// EGL_NO_CONTEXT must be used here according to the docs.
 	//
 	// See <https://registry.khronos.org/EGL/extensions/EXT/EGL_EXT_image_dma_buf_import.txt>.
-	EGLImage image = eglCreateImage(this->display, EGL_NO_CONTEXT,
-					EGL_LINUX_DMA_BUF_EXT,
-					(EGLClientBuffer)NULL,
-					(EGLAttrib *)image_attribs->data);
+	EGLImage image = eglCreateImage(
+		this->display,
+		EGL_NO_CONTEXT,
+		EGL_LINUX_DMA_BUF_EXT,
+		(EGLClientBuffer)NULL,
+		(EGLAttrib *)image_attribs->data
+	);
 
 	g_array_free(image_attribs, true);
 
@@ -359,15 +425,20 @@ unsigned char *rf_converter_convert(RfConverter *this, const RfBuffer *b,
 		return NULL;
 	}
 
-	if (!eglMakeCurrent(this->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
-			    this->context)) {
-		g_warning("EGL: Failed to make context current: %d.", eglGetError());
+	if (!eglMakeCurrent(
+		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
+	    )) {
+		g_warning(
+			"EGL: Failed to make context current: %d.",
+			eglGetError()
+		);
 		return NULL;
 	}
 
 	width = width > 0 ? width : b->md.width;
 	height = height > 0 ? height : b->md.height;
-	if (this->texture == 0 || this->width != width || this->height != height) {
+	if (this->texture == 0 || this->width != width ||
+	    this->height != height) {
 		this->width = width;
 		this->height = height;
 		_gen_texture(this);
@@ -405,7 +476,9 @@ unsigned char *rf_converter_convert(RfConverter *this, const RfBuffer *b,
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
 	// But luckily LibVNCServer accepts RGBA by default.
-	glReadPixels(0, 0, this->width, this->height, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	glReadPixels(
+		0, 0, this->width, this->height, GL_RGBA, GL_UNSIGNED_BYTE, buf
+	);
 	// g_debug("glReadPixels: %#x", glGetError());
 	if (glGetError() != GL_NO_ERROR)
 		g_clear_pointer(&buf, g_free);

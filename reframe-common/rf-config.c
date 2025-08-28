@@ -36,7 +36,10 @@ RfConfig *rf_config_new(const char *config_path)
 	RfConfig *this = g_object_new(RF_TYPE_CONFIG, NULL);
 	g_key_file_load_from_file(this->f, config_path, G_KEY_FILE_NONE, &error);
 	if (error != NULL)
-		g_warning("Failed to load configuration from %s, will use default values!", config_path);
+		g_warning(
+			"Failed to load configuration from %s, will use default values!",
+			config_path
+		);
 	return this;
 }
 
@@ -63,8 +66,9 @@ char *rf_config_get_connector(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), def);
 
-	char *connector = g_key_file_get_string(this->f, RF_CONFIG_GROUP,
-						"connector", &error);
+	char *connector = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP, "connector", &error
+	);
 	if (error != NULL)
 		return def;
 	return connector;
@@ -76,8 +80,9 @@ unsigned int rf_config_get_desktop_width(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	unsigned int desktop_width = g_key_file_get_integer(this->f, RF_CONFIG_GROUP,
-							    "desktop-width", &error);
+	unsigned int desktop_width = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "desktop-width", &error
+	);
 	if (error != NULL)
 		return 0;
 	return desktop_width;
@@ -89,8 +94,9 @@ unsigned int rf_config_get_desktop_height(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	unsigned int desktop_height = g_key_file_get_integer(this->f, RF_CONFIG_GROUP,
-							     "desktop-height", &error);
+	unsigned int desktop_height = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "desktop-height", &error
+	);
 	if (error != NULL)
 		return 0;
 	return desktop_height;
@@ -102,8 +108,9 @@ int rf_config_get_monitor_x(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	int monitor_x = g_key_file_get_integer(this->f, RF_CONFIG_GROUP,
-					       "monitor-x", &error);
+	int monitor_x = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "monitor-x", &error
+	);
 	if (error != NULL)
 		return 0;
 	return monitor_x;
@@ -115,8 +122,9 @@ int rf_config_get_monitor_y(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	int monitor_y = g_key_file_get_integer(this->f, RF_CONFIG_GROUP,
-					       "monitor-y", &error);
+	int monitor_y = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "monitor-y", &error
+	);
 	if (error != NULL)
 		return 0;
 	return monitor_y;
@@ -141,8 +149,9 @@ unsigned int rf_config_get_port(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), 5933);
 
-	unsigned int port = g_key_file_get_integer(this->f, RF_CONFIG_GROUP,
-						   "port", &error);
+	unsigned int port = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "port", &error
+	);
 	if (error != NULL)
 		return 5933;
 	return port;
@@ -154,8 +163,9 @@ char *rf_config_get_password(RfConfig *this)
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	char *password = g_key_file_get_string(this->f, RF_CONFIG_GROUP,
-					       "password", &error);
+	char *password = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP, "password", &error
+	);
 	if (error != NULL)
 		return NULL;
 	return password;
