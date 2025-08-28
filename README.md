@@ -43,7 +43,6 @@ If you cannot meet those requirements (for example embedded devices without prop
 ### Dependencies
 
 - glib2
-- gio
 - libepoxy
 - libvncserver
 - libxkbcommon
