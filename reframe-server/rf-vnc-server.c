@@ -12,6 +12,7 @@ struct _RfVNCServer {
 	RfConfig *config;
 	rfbScreenInfo *screen;
 	GHashTable *connections;
+	GIOCondition io_flags;
 	unsigned int width;
 	unsigned int height;
 	char *buf;
@@ -93,12 +94,17 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	g_signal_emit(this, sigs[SIG_POINTER_EVENT], 0, rx, ry, left, middle, right, wup, wdown);
 }
 
-static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
+static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
 {
-	if (!(condition & G_IO_IN || condition & G_IO_PRI))
+	RfVNCServer *this = data;
+
+	if (!(condition & this->io_flags))
 		return G_SOURCE_CONTINUE;
 
-	RfVNCServer *this = data;
+	// Ensure there is no other entry to call processing events except this!
+	// Especially don't call processing events while processing events!
+	// Otherwise we may get last client disconnection and release resources
+	// while processing other events and leads into segmentation fault.
 	if (rfbIsActive(this->screen))
 		rfbProcessEvents(this->screen, 0);
 	return G_SOURCE_CONTINUE;
@@ -107,9 +113,8 @@ static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer 
 static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 {
 	GSocket *socket = g_socket_connection_get_socket(connection);
-	GSource *source =
-		g_socket_create_source(socket, G_IO_IN | G_IO_PRI, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
+	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_io), this, NULL);
 	g_source_attach(source, NULL);
 	g_hash_table_insert(this->connections, connection, source);
 }
@@ -205,7 +210,6 @@ static gboolean _incoming(GSocketService *service,
 	_attach_source(this, connection);
 	if (g_hash_table_size(this->connections) == 1)
 		g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
-	rfbProcessEvents(this->screen, 0);
 	// Just in case client disconnects very soon.
 	if (client->sock == -1)
 		_on_client_gone(client);
@@ -247,6 +251,12 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	this->connector = NULL;
 	this->width = RF_DEFAULT_WIDTH;
 	this->height = RF_DEFAULT_HEIGHT;
+	// Updating buffer to VNC clients requires to call processing events,
+	// otherwise the screen content won't be updated, however we cannot call
+	// processing events in `rf_vnc_server_update()` (for details read the
+	// comments in `_on_socket_io()`), so we also run callback here for
+	// output to also processing events for updating buffer.
+	this->io_flags = G_IO_IN | G_IO_PRI | G_IO_OUT;
 	this->connections = g_hash_table_new_full(
 		g_direct_hash, g_direct_equal, g_object_unref, (GDestroyNotify)g_source_unref);
 	this->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -336,7 +346,6 @@ void rf_vnc_server_update(RfVNCServer *this, const unsigned char *buf)
 
 	memcpy(this->buf, buf, this->width * this->height * RF_BYTES_PER_PIXEL);
 	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
-	rfbProcessEvents(this->screen, 0);
 }
 
 void rf_vnc_server_flush(RfVNCServer *this)
