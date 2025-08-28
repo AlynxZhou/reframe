@@ -4,10 +4,6 @@ ReFrame Remote Desktop
 DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/login…
 -----------------------------------------------------------------------------------
 
-# WIP
-
-I might rebase and force push master branch at any time!
-
 # Features
 
 ## What ReFrame Currently Support
