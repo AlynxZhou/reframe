@@ -106,12 +106,12 @@ static int _export_fb2(struct _this *this, uint32_t fb_id, RfBuffer *b)
 	drmModeFB2 *fb = drmModeGetFB2(this->cfd, fb_id);
 	if (fb == NULL)
 		return -1;
-	g_debug("Frame: Got frame %u.", fb->fb_id);
+	g_debug("Frame: Got FB2 frame %u.", fb->fb_id);
 	for (int i = 0; i < RF_MAX_PLANES; ++i) {
 		if (fb->handles[i] == 0)
 			break;
 		drmPrimeHandleToFD(this->cfd, fb->handles[i],
-					     DRM_CLOEXEC, &b->fds[i]);
+				   DRM_CLOEXEC, &b->fds[i]);
 		if (b->fds[i] < 0)
 			break;
 		++b->md.length;
@@ -122,11 +122,9 @@ static int _export_fb2(struct _this *this, uint32_t fb_id, RfBuffer *b)
 	b->md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
 		fb->modifier :
 		DRM_FORMAT_MOD_INVALID;
-	for (int i = 0; i < RF_MAX_PLANES; ++i) {
-		if (fb->handles[i] != 0) {
-			b->md.offsets[i] = fb->offsets[i];
-			b->md.pitches[i] = fb->pitches[i];
-		}
+	for (int i = 0; i < b->md.length; ++i) {
+		b->md.offsets[i] = fb->offsets[i];
+		b->md.pitches[i] = fb->pitches[i];
 	}
 	drmModeFreeFB2(fb);
 	return b->md.length;
@@ -137,7 +135,7 @@ static int _export_fb(struct _this *this, uint32_t fb_id, RfBuffer *b)
 	drmModeFB *fb = drmModeGetFB(this->cfd, fb_id);
 	if (fb == NULL)
 		return -1;
-	g_debug("Frame: Got frame %u.", fb->fb_id);
+	g_debug("Frame: Got FB frame %u.", fb->fb_id);
 	if (fb->handle == 0)
 		return 0;
 	drmPrimeHandleToFD(this->cfd, fb->handle, DRM_CLOEXEC, &b->fds[0]);

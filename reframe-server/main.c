@@ -91,6 +91,8 @@ int main(int argc, char *argv[])
 	rf_streamer_set_socket_path(this->streamer, socket_path);
 	this->converter = rf_converter_new();
 	this->vnc = rf_vnc_server_new(this->config);
+	g_signal_connect_swapped(this->streamer, "stop",
+				 G_CALLBACK(rf_vnc_server_flush), this->vnc);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
 	g_signal_connect(this->vnc, "first-client",
 			 G_CALLBACK(_on_first_client), this);

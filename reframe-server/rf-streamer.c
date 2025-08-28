@@ -28,7 +28,7 @@ struct _RfStreamer {
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
 
-enum { SIG_FRAME, N_SIGS };
+enum { SIG_START, SIG_STOP, SIG_FRAME, N_SIGS };
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
@@ -229,6 +229,12 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 
 	o_class->dispose = _dispose;
 
+	sigs[SIG_START] = g_signal_new("start", RF_TYPE_STREAMER,
+				       0, 0, NULL, NULL, NULL,
+				       G_TYPE_NONE, 0);
+	sigs[SIG_STOP] = g_signal_new("stop", RF_TYPE_STREAMER,
+				      0, 0, NULL, NULL, NULL,
+				      G_TYPE_NONE, 0);
 	sigs[SIG_FRAME] = g_signal_new("frame", RF_TYPE_STREAMER,
 				       0, 0, NULL, NULL, NULL,
 				       G_TYPE_NONE, 1, RF_TYPE_BUFFER);
@@ -279,6 +285,8 @@ int rf_streamer_start(RfStreamer *this)
 	_send_frame_request(this);
 
 	this->running = true;
+	g_debug("Emitting ReFrame Streamer start signal.");
+	g_signal_emit(this, sigs[SIG_START], 0);
 	return 0;
 }
 
@@ -291,6 +299,8 @@ void rf_streamer_stop(RfStreamer *this)
 	if (!this->running)
 		return;
 
+	g_debug("Emitting ReFrame Streamer stop signal.");
+	g_signal_emit(this, sigs[SIG_STOP], 0);
 	this->running = false;
 
 	if (this->source != NULL) {
