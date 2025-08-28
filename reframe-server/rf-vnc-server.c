@@ -15,7 +15,8 @@ struct _RfVNCServer {
 	unsigned int width;
 	unsigned int height;
 	char *buf;
-	char *desktop_name;
+	char *passwords[2];
+	char *connector;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	bool running;
@@ -92,13 +93,14 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	g_signal_emit(this, sigs[SIG_POINTER_EVENT], 0, rx, ry, left, middle, right, wup, wdown);
 }
 
-static gboolean _on_socket_input(GSocket *socket, GIOCondition condition,
-				 gpointer data)
+static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
+	if (!(condition & G_IO_IN || condition & G_IO_PRI))
+		return G_SOURCE_CONTINUE;
+
 	RfVNCServer *this = data;
-	if (condition & G_IO_IN)
-		if (rfbIsActive(this->screen))
-			rfbProcessEvents(this->screen, 0);
+	if (rfbIsActive(this->screen))
+		rfbProcessEvents(this->screen, 0);
 	return G_SOURCE_CONTINUE;
 }
 
@@ -107,8 +109,7 @@ static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	GSource *source =
 		g_socket_create_source(socket, G_IO_IN | G_IO_PRI, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_input), this,
-			      NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	g_hash_table_insert(this->connections, connection, source);
 }
@@ -179,7 +180,7 @@ static gboolean _incoming(GSocketService *service,
 		this->buf = g_malloc0(this->width * this->height *
 				      RF_BYTES_PER_PIXEL);
 		this->screen->frameBuffer = this->buf;
-		this->screen->desktopName = this->desktop_name;
+		this->screen->desktopName = this->connector;
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
@@ -187,12 +188,15 @@ static gboolean _incoming(GSocketService *service,
 		// TODO: Clipboard event.
 		this->screen->ptrAddEvent = _on_pointer_event;
 		this->screen->kbdAddEvent = _on_keyboard_event;
-		// TODO: Password.
+		if (this->passwords[0] != NULL && strlen(this->passwords[0]) != 0) {
+			this->screen->authPasswdData = this->passwords;
+			this->screen->passwordCheck = rfbCheckPasswordByList;
+		}
 		rfbInitServer(this->screen);
 	}
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	int fd = g_socket_get_fd(socket);
-	g_debug("New VNC connection socket fd: %d.", fd);
+	g_debug("VNC: New connection socket fd: %d.", fd);
 	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
 	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = g_object_ref(connection);
@@ -202,6 +206,9 @@ static gboolean _incoming(GSocketService *service,
 	if (g_hash_table_size(this->connections) == 1)
 		g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
 	rfbProcessEvents(this->screen, 0);
+	// Just in case client disconnects very soon.
+	if (client->sock == -1)
+		_on_client_gone(client);
 
 	return G_SOCKET_SERVICE_CLASS(rf_vnc_server_parent_class)
 		->incoming(service, connection, source_object);
@@ -221,7 +228,8 @@ static void _finalize(GObject *o)
 	RfVNCServer *this = RF_VNC_SERVER(o);
 
 	g_clear_pointer(&this->buf, g_free);
-	g_clear_pointer(&this->desktop_name, g_free);
+	g_clear_pointer(&this->passwords[0], g_free);
+	g_clear_pointer(&this->connector, g_free);
 	g_clear_pointer(&this->screen, rfbScreenCleanup);
 	g_clear_pointer(&this->connections, g_hash_table_unref);
 	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
@@ -234,7 +242,9 @@ static void rf_vnc_server_init(RfVNCServer *this)
 {
 	this->running = false;
 	this->screen = NULL;
-	this->desktop_name = NULL;
+	this->passwords[0] = NULL;
+	this->passwords[1] = NULL;
+	this->connector = NULL;
 	this->width = RF_DEFAULT_WIDTH;
 	this->height = RF_DEFAULT_HEIGHT;
 	this->connections = g_hash_table_new_full(
@@ -261,19 +271,19 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 
 	sigs[SIG_FIRST_CLIENT] = g_signal_new("first-client",
 					      RF_TYPE_VNC_SERVER,
-					      G_SIGNAL_RUN_LAST, 0, NULL, NULL,
+					      0, 0, NULL, NULL,
 					      NULL, G_TYPE_NONE, 0);
 	sigs[SIG_LAST_CLIENT] = g_signal_new("last-client", RF_TYPE_VNC_SERVER,
-					     G_SIGNAL_RUN_LAST, 0, NULL, NULL,
+					     0, 0, NULL, NULL,
 					     NULL, G_TYPE_NONE, 0);
 	sigs[SIG_RESIZE_EVENT] = g_signal_new(
-		"resize-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+		"resize-event", RF_TYPE_VNC_SERVER, 0, 0, NULL,
 		NULL, NULL, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
 	sigs[SIG_KEYBOARD_EVENT] = g_signal_new(
-		"keyboard-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+		"keyboard-event", RF_TYPE_VNC_SERVER, 0, 0, NULL,
 		NULL, NULL, G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_BOOLEAN);
 	sigs[SIG_POINTER_EVENT] = g_signal_new(
-		"pointer-event", RF_TYPE_VNC_SERVER, G_SIGNAL_RUN_LAST, 0, NULL,
+		"pointer-event", RF_TYPE_VNC_SERVER, 0, 0, NULL,
 		NULL, NULL, G_TYPE_NONE, 7, G_TYPE_DOUBLE, G_TYPE_DOUBLE, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN, G_TYPE_BOOLEAN);
 }
 
@@ -281,7 +291,8 @@ RfVNCServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfVNCServer *this = g_object_new(RF_TYPE_VNC_SERVER, NULL);
 	this->config = config;
-	this->desktop_name = rf_config_get_connector(this->config);
+	this->passwords[0] = rf_config_get_password(this->config);
+	this->connector = rf_config_get_connector(this->config);
 	return this;
 }
 
@@ -294,7 +305,7 @@ void rf_vnc_server_start(RfVNCServer *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int port = rf_config_get_port(this->config);
-	g_debug("Listening on port %u.", port);
+	g_debug("VNC: Listening on port %u.", port);
 	g_socket_listener_add_inet_port(G_SOCKET_LISTENER(this), port, NULL,
 					&error);
 	if (error != NULL)

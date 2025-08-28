@@ -80,7 +80,7 @@ int main(int argc, char *argv[])
 
 	const char *XKB_DEFAULT_LAYOUT = getenv("XKB_DEFAULT_LAYOUT");
 	if (XKB_DEFAULT_LAYOUT == 0 || g_strcmp0(XKB_DEFAULT_LAYOUT, "") == 0) {
-		g_message("Failed to get keyboard layout from environment variables, using US layout by default.");
+		g_message("XKB_DEFAULT_LAYOUT is empty, using US layout by default.");
 		setenv("XKB_DEFAULT_LAYOUT", "us", 1);
 	}
 

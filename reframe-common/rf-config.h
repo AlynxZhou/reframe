@@ -17,6 +17,7 @@ int rf_config_get_monitor_x(RfConfig *this);
 int rf_config_get_monitor_y(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
 unsigned int rf_config_get_port(RfConfig *this);
+char *rf_config_get_password(RfConfig *this);
 
 G_END_DECLS
 

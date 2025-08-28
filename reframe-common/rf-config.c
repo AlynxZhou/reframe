@@ -147,3 +147,16 @@ unsigned int rf_config_get_port(RfConfig *this)
 		return 5933;
 	return port;
 }
+
+char *rf_config_get_password(RfConfig *this)
+{
+	g_autoptr(GError) error = NULL;
+
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	char *password = g_key_file_get_string(this->f, RF_CONFIG_GROUP,
+					       "password", &error);
+	if (error != NULL)
+		return NULL;
+	return password;
+}

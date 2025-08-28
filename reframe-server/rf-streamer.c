@@ -113,12 +113,15 @@ static void _schedule_frame_request(RfStreamer *this)
 			(this->max_interval - delta) / 1000, _send_frame_request, this);
 	} else {
 		g_warning("Converting frame too slow.");
-		_send_frame_request(this);
+		this->timer_id = g_timeout_add(1, _send_frame_request, this);
 	}
 }
 
 static gboolean _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
+	if (!(condition & G_IO_IN || condition & G_IO_PRI))
+		return G_SOURCE_CONTINUE;
+
 	RfStreamer *this = data;
 	RfBuffer b;
 	GInputVector iov = { &b.md, sizeof(b.md) };
@@ -224,7 +227,7 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 	o_class->dispose = _dispose;
 
 	sigs[SIG_FRAME] = g_signal_new("frame", RF_TYPE_STREAMER,
-				       G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+				       0, 0, NULL, NULL, NULL,
 				       G_TYPE_NONE, 1, RF_TYPE_BUFFER);
 }
 
@@ -267,7 +270,7 @@ int rf_streamer_start(RfStreamer *this)
 	this->monitor_y = rf_config_get_monitor_y(this->config);
 	g_debug("Input: Got monitor x %u and y %u.", this->monitor_x, this->monitor_y);
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
-	this->source = g_socket_create_source(socket, G_IO_IN, NULL);
+	this->source = g_socket_create_source(socket, G_IO_IN | G_IO_PRI, NULL);
 	g_source_set_callback(this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
 	g_source_attach(this->source, NULL);
 	_send_frame_request(this);

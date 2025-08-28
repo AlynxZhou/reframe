@@ -58,7 +58,7 @@ static uint32_t _get_connector_id(int cfd, drmModeRes *res,
 			"%s-%d",
 			drmModeGetConnectorTypeName(connector->connector_type),
 			connector->connector_type_id);
-		g_debug("%s: %s.", full_name,
+		g_debug("Connector %s is %s.", full_name,
 			connector->connection == DRM_MODE_CONNECTED ?
 				"connected" :
 				"disconnected");
