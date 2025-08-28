@@ -99,7 +99,7 @@ Unfortunately there are no general way to get those values for all desktop envir
 
 **You need to keep the same multi-monitors layout for display manager and user session to make remote login work correctly!**
 
-Then start the ReFrame systemd socket so it will run the privileged process on demand.
+Then start the ReFrame systemd socket so it will run the privileged ReFrame Streamer systemd service on demand.
 
 ```
 # systemctl start reframe@DP-1.socket
