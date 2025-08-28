@@ -66,7 +66,7 @@ static void _on_keyboard_event(rfbBool direction, rfbKeySym keysym, rfbClientRec
 	};
 	xkb_keymap_key_for_each(this->xkb_keymap, _iterate_keys, &idata);
 	if (idata.keycode == XKB_KEYCODE_INVALID) {
-		g_warning("Failed to find keysym %04x in keymap, will ignore it.", keysym);
+		g_warning("Input: Failed to find keysym %04x in keymap, will ignore it.", keysym);
 		return;
 	}
 	uint32_t keycode = KEY_CODE_XKB_TO_EV(idata.keycode);
@@ -112,6 +112,7 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 
 static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 {
+	g_debug("VNC: Attaching source for connection %p.", connection);
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_io), this, NULL);
@@ -119,23 +120,18 @@ static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 	g_hash_table_insert(this->connections, connection, source);
 }
 
-static gboolean _close_client(GSocketConnection *connection, GSource *source)
-{
-	g_autoptr(GError) error = NULL;
-	g_source_destroy(source);
-	g_io_stream_close(G_IO_STREAM(connection), NULL, &error);
-	// We can do nothing here.
-	if (error != NULL)
-		g_warning("Failed to close client connection: %s.", error->message);
-	return TRUE;
-}
-
 static void _detach_source(RfVNCServer *this, GSocketConnection *connection)
 {
+	g_debug("VNC: Detaching source for connection %p.", connection);
 	g_autoptr(GError) error = NULL;
 	GSource *source = g_hash_table_lookup(this->connections, connection);
 	if (source != NULL) {
-		_close_client(connection, source);
+		g_autoptr(GError) error = NULL;
+		g_source_destroy(source);
+		g_io_stream_close(G_IO_STREAM(connection), NULL, &error);
+		// We can do nothing here.
+		if (error != NULL)
+			g_warning("VNC: Failed to close client connection: %s.", error->message);
 		g_hash_table_remove(this->connections, connection);
 	}
 }
@@ -144,8 +140,10 @@ static void _on_client_gone(rfbClientRec *client)
 {
 	RfVNCServer *this = client->screen->screenData;
 	GSocketConnection *connection = client->clientData;
-	if (g_hash_table_size(this->connections) == 1)
+	if (g_hash_table_size(this->connections) == 1) {
+		g_debug("VNC: Emitting last client signal.");
 		g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
+	}
 	_detach_source(this, connection);
 }
 
@@ -169,6 +167,7 @@ static int _on_set_desktop_size(int width, int height, int num_screens,
 				      RF_BYTES_PER_PIXEL);
 		rfbNewFramebuffer(this->screen, this->buf, this->width,
 				  this->height, 8, 3, RF_BYTES_PER_PIXEL);
+		g_debug("VNC: Emitting size request signal: width %d, height %d.", width, height);
 		g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
 	}
 	return rfbExtDesktopSize_Success;
@@ -208,8 +207,10 @@ static gboolean _incoming(GSocketService *service,
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
 	_attach_source(this, connection);
-	if (g_hash_table_size(this->connections) == 1)
+	if (g_hash_table_size(this->connections) == 1) {
+		g_debug("VNC: Emitting first client signal.");
 		g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
+	}
 	// Just in case client disconnects very soon.
 	if (client->sock == -1)
 		_on_client_gone(client);
@@ -352,6 +353,12 @@ void rf_vnc_server_flush(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
-	g_hash_table_foreach_remove(this->connections, (GHRFunc)_close_client, NULL);
+	if (this->screen == NULL)
+		return;
+
+	rfbClientIteratorPtr it = rfbGetClientIterator(this->screen);
+	rfbClientRec *cl;
+	while ((cl = rfbClientIteratorNext(it)))
+		rfbCloseClient(cl);
+	rfbReleaseClientIterator(it);
 }

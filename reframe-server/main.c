@@ -20,7 +20,6 @@ static void _on_resize_event(RfVNCServer *v, int width, int height,
 {
 	struct _this *this = data;
 
-	g_debug("Got new size request: width %d, height %d.", width, height);
 	this->width = width;
 	this->height = height;
 }

@@ -43,7 +43,7 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	if (ret == 0) {
 		goto disconnected;
 	} else if (ret < 0) {
-		g_warning("Failed to send input request to socket.");
+		g_warning("Input: Failed to send input request to socket.");
 		goto stop;
 	}
 
@@ -51,7 +51,7 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	if (ret == 0) {
 		goto disconnected;
 	} else if (ret < 0) {
-		g_warning("Failed to send input events length to socket.");
+		g_warning("Input: Failed to send input events length to socket.");
 		goto stop;
 	}
 
@@ -59,7 +59,7 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	if (ret == 0) {
 		goto disconnected;
 	} else if (ret < 0) {
-		g_warning("Failed to send %lu * %ld bytes input events to socket.", length, sizeof(*ies));
+		g_warning("Input: Failed to send %lu * %ld bytes input events to socket.", length, sizeof(*ies));
 		goto stop;
 	}
 
@@ -86,7 +86,7 @@ static gboolean _send_frame_request(gpointer data)
 		g_warning("ReFrame Streamer disconnected.");
 		goto stop;
 	} else if (ret < 0) {
-		g_warning("Failed to send frame request to socket.");
+		g_warning("Frame: Failed to send frame request to socket.");
 		goto stop;
 	}
 
@@ -113,7 +113,7 @@ static void _schedule_frame_request(RfStreamer *this)
 		this->timer_id = g_timeout_add(
 			(this->max_interval - delta) / 1000, _send_frame_request, this);
 	} else {
-		g_warning("Converting frame too slow.");
+		g_warning("Frame: Converting frame too slow.");
 		this->timer_id = g_timeout_add(1, _send_frame_request, this);
 	}
 }
@@ -137,7 +137,7 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 		g_warning("ReFrame Streamer disconnected.");
 		goto stop;
 	} else if (ret < 0) {
-		g_warning("Failed to receive frame from socket.");
+		g_warning("Frame: Failed to receive frame from socket.");
 		goto stop;
 	}
 
@@ -154,7 +154,7 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 				b.fds[j] = g_unix_fd_list_get(fds, j, NULL);
 				// Some error happens.
 				if (b.fds[j] == -1) {
-					g_warning("Failed to receive frame fds from socket, only got %d of %d.", j, b.md.length);
+					g_warning("Frame: Failed to receive frame fds from socket, only got %d of %d.", j, b.md.length);
 					b.md.length = j;
 					goto cleanup;
 				}

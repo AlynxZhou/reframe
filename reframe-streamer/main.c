@@ -28,14 +28,14 @@
 	G_STMT_START { \
 		int e; \
 		if ((e = ioctl(__VA_ARGS__)))				\
-			g_warning("Failed to call ioctl() at line %d: %d.", __LINE__, e); \
+			g_warning("Input: Failed to call ioctl() at line %d: %d.", __LINE__, e); \
 	} G_STMT_END
 
 #define _write_may(fd,buf,count) \
 	G_STMT_START { \
 		ssize_t e = write((fd), (buf), (count)); \
 		if (e != (count)) \
-			g_warning("Failed to write %ld bytes to %d at line %d, actually wrote %ld bytes.", (count), (fd), __LINE__, e); \
+			g_warning("Input: Failed to write %ld bytes to %d at line %d, actually wrote %ld bytes.", (count), (fd), __LINE__, e); \
 	} G_STMT_END
 
 struct _this {
@@ -175,7 +175,7 @@ static ssize_t _on_frame_request(struct _this *this)
 	if (ret <= 0)
 		ret = _export_fb(this, fb_id, &b);
 	if (ret <= 0) {
-		g_warning("Failed to get frame.");
+		g_warning("Frame: Failed to get frame.");
 		return ret;
 	}
 
@@ -215,7 +215,7 @@ static ssize_t _on_frame_request(struct _this *this)
 		close(b.fds[i]);
 
 	if (ret < 0)
-		g_warning("Failed to send frame to socket.");
+		g_warning("Frame: Failed to send frame to socket.");
 	return ret;
 }
 
@@ -229,14 +229,14 @@ static ssize_t _on_input_request(struct _this *this)
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
 	if (ret <= 0) {
 		if (ret < 0)
-			g_warning("Failed to receive input events length from socket.");
+			g_warning("Input: Failed to receive input events length from socket.");
 		return ret;
 	}
 	ies = g_malloc_n(length, sizeof(*ies));
 	ret = g_input_stream_read(is, ies, length * sizeof(*ies), NULL, NULL);
 	if (ret < 0) {
 		if (ret < 0)
-			g_warning("Failed to receive %lu * %ld bytes input events length from socket.", length, sizeof(*ies));
+			g_warning("Input: Failed to receive %lu * %ld bytes input events length from socket.", length, sizeof(*ies));
 		return ret;
 	}
 	g_debug("Input: Received %lu * %ld bytes input events.", length, sizeof(*ies));
