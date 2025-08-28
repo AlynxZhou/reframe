@@ -68,7 +68,7 @@ static void _send_input_request(RfStreamer *this, struct input_event *ies, const
 	return;
 
 disconnected:
-	g_warning("ReFrame streamer disconnected.");
+	g_warning("ReFrame Streamer disconnected.");
 stop:
 	rf_streamer_stop(this);
 }
@@ -83,7 +83,7 @@ static gboolean _send_frame_request(gpointer data)
 
 	ret = g_output_stream_write(os, &request, sizeof(request), NULL, NULL);
 	if (ret == 0) {
-		g_warning("ReFrame streamer disconnected.");
+		g_warning("ReFrame Streamer disconnected.");
 		goto stop;
 	} else if (ret < 0) {
 		g_warning("Failed to send frame request to socket.");
@@ -134,7 +134,7 @@ static gboolean _on_socket_io(GSocket *socket, GIOCondition condition, gpointer 
 	ret = g_socket_receive_message(socket, NULL, &iov, 1, &msgs,
 				       &n_msgs, NULL, NULL, NULL);
 	if (ret == 0) {
-		g_warning("ReFrame streamer disconnected.");
+		g_warning("ReFrame Streamer disconnected.");
 		goto stop;
 	} else if (ret < 0) {
 		g_warning("Failed to receive frame from socket.");
@@ -262,7 +262,7 @@ int rf_streamer_start(RfStreamer *this)
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL);
 	if (this->connection == NULL) {
-		g_warning("Failed to connecting to ReFrame streamer.");
+		g_warning("Failed to connecting to ReFrame Streamer.");
 		return -2;
 	}
 	this->max_interval = 1000000 / rf_config_get_fps(this->config);
@@ -303,7 +303,7 @@ void rf_streamer_stop(RfStreamer *this)
 	}
 	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
 	if (error != NULL) {
-		g_warning("Failed to close ReFrame streamer connection: %s.", error->message);
+		g_warning("Failed to close ReFrame Streamer connection: %s.", error->message);
 		return;
 	}
 	g_clear_object(&this->connection);

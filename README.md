@@ -133,6 +133,10 @@ However, most of those cons are ideas from [@isjerryxiao](https://github.com/isj
 
 - ReFrame supports Wayland.
 
+# Special Thanks
+
+I am very appreciate to [@isjerryxiao](https://github.com/isjerryxiao/) for creating [kmsvnc](https://github.com/isjerryxiao/kmsvnc/) and giving advice for where could be fixed or improved in it. ReFrame is heavily inspired by kmsvnc and I've learnt a lot in it.
+
 # How to Debug
 
 ```

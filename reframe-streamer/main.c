@@ -289,7 +289,7 @@ int main(int argc, char *argv[])
 		{ "version", 'v', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
 		  &version, "Display version and exit.", NULL },
 		{ "socket", 's', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
-		  &socket_path, "Socket path of streamer.", "SOCKET" },
+		  &socket_path, "Socket path to communiate.", "SOCKET" },
 		{ "config", 'c', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &config_path, "Configuration file path.", "PATH" },
 		{ "keep-listen", 'k', G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
 		{ NULL, 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE, NULL, NULL,
 		  NULL }
 	};
-	g_autoptr(GOptionContext) context = g_option_context_new(" - ReFrame streamer");
+	g_autoptr(GOptionContext) context = g_option_context_new(" - ReFrame Streamer");
 	g_option_context_add_main_entries(context, options, NULL);
 	if (!g_option_context_parse_strv(context, &args, &error)) {
 		g_warning("Failed to parse options: %s.", error->message);
@@ -351,7 +351,7 @@ int main(int argc, char *argv[])
 		if (this->connection == NULL)
 			g_error("Failed to accept connection: %s.", error->message);
 
-		g_message("ReFrame server connected.");
+		g_message("ReFrame Server connected.");
 
 		_init_drm(this);
 		_init_uinput(this);
@@ -363,7 +363,7 @@ int main(int argc, char *argv[])
 			char request;
 			ret = g_input_stream_read(is, &request, sizeof(request), NULL, NULL);
 			if (ret == 0) {
-				g_message("ReFrame server disconnected.");
+				g_message("ReFrame Server disconnected.");
 				break;
 			} else if (ret < 0) {
 				g_warning("Failed to receive request from socket.");
@@ -382,7 +382,7 @@ int main(int argc, char *argv[])
 			}
 			if (ret <= 0) {
 				if (ret == 0)
-					g_message("ReFrame server disconnected.");
+					g_message("ReFrame Server disconnected.");
 				break;
 			}
 		}
