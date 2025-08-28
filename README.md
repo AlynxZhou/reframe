@@ -132,6 +132,7 @@ I only list pros of ReFrame, if you find cons of ReFrame, you can just use other
 - ReFrame supports NVIDIA driver by decoding frames with EGL and OpenGL ES, kmsvnc uses VA-API and it cannot decode frames of NVIDIA driver correctly.
 - ReFrame gets frame buffer on each frame, so it works correctly if your compositor uses double-buffers.
 - ReFrame splits into privilieged DRM/uinput part and unprivilieged VNC server part, kmsvnc runs the whole process as privilieged.
+- ReFrame supports resizing client window.
 
 However, most of those cons are ideas from [@isjerryxiao](https://github.com/isjerryxiao/), and ReFrame initially is designed to improve kmsvnc.
 
