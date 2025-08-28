@@ -101,47 +101,82 @@ clean_connector:
 	return id;
 }
 
-static ssize_t _on_frame_request(struct _this *this)
+static int _export_fb2(struct _this *this, uint32_t fb_id, RfBuffer *b)
 {
-	g_debug("Frame: Received frame request.");
-
-	RfBuffer b;
-	uint32_t fb_id = _get_fb_id(this->cfd, this->connector_id);
-	// TODO: Handle drmModeFB.
 	drmModeFB2 *fb = drmModeGetFB2(this->cfd, fb_id);
-	if (fb == NULL) {
-		g_warning("Failed to get frame.");
+	if (fb == NULL)
 		return -1;
-	}
 	g_debug("Frame: Got frame %u.", fb->fb_id);
-	// GUnixFDList refuses to send invalid fds like -1, so we need
-	// to pass the number of fds. We assume valid planes are
-	// continuous.
-	for (int i = 0; i < RF_MAX_PLANES; ++i)
-		b.fds[i] = -1;
-	b.md.length = 0;
 	for (int i = 0; i < RF_MAX_PLANES; ++i) {
 		if (fb->handles[i] == 0)
 			break;
 		drmPrimeHandleToFD(this->cfd, fb->handles[i],
-				   DRM_CLOEXEC, &b.fds[i]);
-		++b.md.length;
+					     DRM_CLOEXEC, &b->fds[i]);
+		if (b->fds[i] < 0)
+			break;
+		++b->md.length;
 	}
-	b.md.width = fb->width;
-	b.md.height = fb->height;
-	b.md.fourcc = fb->pixel_format;
-	b.md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
+	b->md.width = fb->width;
+	b->md.height = fb->height;
+	b->md.fourcc = fb->pixel_format;
+	b->md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
 		fb->modifier :
 		DRM_FORMAT_MOD_INVALID;
-	// b.md.modifier = fb->modifier;
 	for (int i = 0; i < RF_MAX_PLANES; ++i) {
 		if (fb->handles[i] != 0) {
-			b.md.offsets[i] = fb->offsets[i];
-			b.md.pitches[i] = fb->pitches[i];
-		} else {
-			b.md.offsets[i] = 0;
-			b.md.pitches[i] = 0;
+			b->md.offsets[i] = fb->offsets[i];
+			b->md.pitches[i] = fb->pitches[i];
 		}
+	}
+	drmModeFreeFB2(fb);
+	return b->md.length;
+}
+
+static int _export_fb(struct _this *this, uint32_t fb_id, RfBuffer *b)
+{
+	drmModeFB *fb = drmModeGetFB(this->cfd, fb_id);
+	if (fb == NULL)
+		return -1;
+	g_debug("Frame: Got frame %u.", fb->fb_id);
+	if (fb->handle == 0)
+		return 0;
+	drmPrimeHandleToFD(this->cfd, fb->handle, DRM_CLOEXEC, &b->fds[0]);
+	if (b->fds[0] < 0)
+		return 0;
+	b->md.length = 1;
+	b->md.width = fb->width;
+	b->md.height = fb->height;
+	b->md.fourcc = DRM_FORMAT_XRGB8888;
+	b->md.modifier = DRM_FORMAT_MOD_INVALID;
+	b->md.offsets[0] = 0;
+	b->md.pitches[0] = fb->pitch;
+	drmModeFreeFB(fb);
+	return b->md.length;
+}
+
+static ssize_t _on_frame_request(struct _this *this)
+{
+	g_debug("Frame: Received frame request.");
+
+	uint32_t fb_id = _get_fb_id(this->cfd, this->connector_id);
+	ssize_t ret = 0;
+	RfBuffer b;
+	// GUnixFDList refuses to send invalid fds like -1, so we need
+	// to pass the number of fds. We assume valid planes are
+	// continuous.
+	for (int i = 0; i < RF_MAX_PLANES; ++i) {
+		b.fds[i] = -1;
+		b.md.offsets[i] = 0;
+		b.md.pitches[i] = 0;
+	}
+	b.md.length = 0;
+	// Export DRM framebuffer to fds and metadata that EGL can import.
+	ret = _export_fb2(this, fb_id, &b);
+	if (ret <= 0)
+		ret = _export_fb(this, fb_id, &b);
+	if (ret <= 0) {
+		g_warning("Failed to get frame.");
+		return ret;
 	}
 
 	g_debug("Frame: Got frame metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
@@ -170,17 +205,14 @@ static ssize_t _on_frame_request(struct _this *this)
 	GSocketControlMessage *msg =
 		g_unix_fd_message_new_with_fd_list(fds);
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
-	ssize_t ret = 0;
 	ret = g_socket_send_message(socket, NULL, &iov, 1, &msg,
 				    1, G_SOCKET_MSG_NONE, NULL,
 				    NULL);
-
 	g_object_unref(fds);
 	g_object_unref(msg);
+
 	for (int i = 0; i < b.md.length; ++i)
 		close(b.fds[i]);
-
-	drmModeFreeFB2(fb);
 
 	if (ret < 0)
 		g_warning("Failed to send frame to socket.");
