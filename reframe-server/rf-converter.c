@@ -26,7 +26,7 @@ static void _init_egl(RfConverter *this)
 	EGLint count;
 	EGLint n;
 	EGLint size;
-	EGLConfig config;
+	EGLConfig config = NULL;
 	EGLConfig *configs;
 	EGLint config_attribs[] = { EGL_SURFACE_TYPE,
 				    EGL_PBUFFER_BIT,
