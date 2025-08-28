@@ -42,6 +42,7 @@ If you cannot meet those requirements (for example embedded devices without prop
 - libepoxy
 - libvncserver
 - libxkbcommon
+- libdrm
 - systemd (optional & recommanded)
 - meson
 - ninja
