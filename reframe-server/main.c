@@ -28,10 +28,11 @@ static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 {
 	struct _this *this = data;
 
-	g_autofree unsigned char *buf = rf_converter_convert(
+	g_autoptr(GByteArray) buf = rf_converter_convert(
 		this->converter, b, this->width, this->height
 	);
-	rf_vnc_server_update(this->vnc, buf);
+	if (buf != NULL)
+		rf_vnc_server_update(this->vnc, buf);
 }
 
 static void _on_first_client(RfVNCServer *v, gpointer data)

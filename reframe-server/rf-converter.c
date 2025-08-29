@@ -352,7 +352,7 @@ static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 	g_array_append_val(a, v);
 }
 
-unsigned char *rf_converter_convert(
+GByteArray *rf_converter_convert(
 	RfConverter *this,
 	const RfBuffer *b,
 	unsigned int width,
@@ -471,17 +471,24 @@ unsigned char *rf_converter_convert(
 	// g_debug("glDrawElements: %#x", glGetError());
 	glBindVertexArray(0);
 	glUseProgram(0);
-	unsigned char *buf =
-		g_malloc(RF_BYTES_PER_PIXEL * this->width * this->height);
+	GByteArray *buf = g_byte_array_sized_new(
+		RF_BYTES_PER_PIXEL * this->width * this->height
+	);
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
 	// But luckily LibVNCServer accepts RGBA by default.
 	glReadPixels(
-		0, 0, this->width, this->height, GL_RGBA, GL_UNSIGNED_BYTE, buf
+		0,
+		0,
+		this->width,
+		this->height,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		buf->data
 	);
 	// g_debug("glReadPixels: %#x", glGetError());
 	if (glGetError() != GL_NO_ERROR)
-		g_clear_pointer(&buf, g_free);
+		g_clear_pointer(&buf, g_byte_array_unref);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

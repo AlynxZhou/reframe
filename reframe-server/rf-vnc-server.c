@@ -10,12 +10,12 @@
 struct _RfVNCServer {
 	GSocketService parent_instance;
 	RfConfig *config;
+	GByteArray *buf;
 	rfbScreenInfo *screen;
 	GHashTable *connections;
 	GIOCondition io_flags;
 	unsigned int width;
 	unsigned int height;
-	char *buf;
 	char *passwords[2];
 	char *connector;
 	struct xkb_context *xkb_context;
@@ -203,19 +203,6 @@ static int _on_set_desktop_size(
 	if (width != this->width || height != this->height) {
 		this->width = width;
 		this->height = height;
-		g_free(this->buf);
-		this->buf = g_malloc0(
-			this->width * this->height * RF_BYTES_PER_PIXEL
-		);
-		rfbNewFramebuffer(
-			this->screen,
-			this->buf,
-			this->width,
-			this->height,
-			8,
-			3,
-			RF_BYTES_PER_PIXEL
-		);
 		g_debug("VNC: Emitting size request signal: width %d, height %d.",
 			width,
 			height);
@@ -242,10 +229,7 @@ static gboolean _incoming(
 			RF_BYTES_PER_PIXEL
 		);
 		this->screen->port = 0;
-		this->buf = g_malloc0(
-			this->width * this->height * RF_BYTES_PER_PIXEL
-		);
-		this->screen->frameBuffer = this->buf;
+		this->screen->frameBuffer = NULL;
 		this->screen->desktopName = this->connector;
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
@@ -295,9 +279,9 @@ static void _finalize(GObject *o)
 {
 	RfVNCServer *this = RF_VNC_SERVER(o);
 
-	g_clear_pointer(&this->buf, g_free);
 	g_clear_pointer(&this->passwords[0], g_free);
 	g_clear_pointer(&this->connector, g_free);
+	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->screen, rfbScreenCleanup);
 	g_clear_pointer(&this->connections, g_hash_table_unref);
 	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
@@ -321,6 +305,7 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	// comments in `_on_socket_io()`), so we also run callback here for
 	// output to also processing events for updating buffer.
 	this->io_flags = G_IO_IN | G_IO_PRI | G_IO_OUT;
+	this->buf = NULL;
 	this->connections = g_hash_table_new_full(
 		g_direct_hash,
 		g_direct_equal,
@@ -459,15 +444,26 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
 }
 
-void rf_vnc_server_update(RfVNCServer *this, const unsigned char *buf)
+void rf_vnc_server_update(RfVNCServer *this, GByteArray *buf)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
+	g_return_if_fail(buf != NULL);
 
-	if (buf == NULL || !this->running || this->screen == NULL ||
+	if (!this->running || this->screen == NULL ||
 	    !rfbIsActive(this->screen))
 		return;
 
-	memcpy(this->buf, buf, this->width * this->height * RF_BYTES_PER_PIXEL);
+	g_clear_pointer(&this->buf, g_byte_array_unref);
+	this->buf = g_byte_array_ref(buf);
+	rfbNewFramebuffer(
+		this->screen,
+		(char *)this->buf->data,
+		this->width,
+		this->height,
+		8,
+		3,
+		RF_BYTES_PER_PIXEL
+	);
 	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
 }
 
