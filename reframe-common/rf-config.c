@@ -45,11 +45,11 @@ RfConfig *rf_config_new(const char *config_path)
 
 char *rf_config_get_card_path(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
 	char *def = g_strdup("/dev/dri/card0");
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), def);
 
+	g_autoptr(GError) error = NULL;
 	char *card =
 		g_key_file_get_string(this->f, RF_CONFIG_GROUP, "card", &error);
 	if (error != NULL)
@@ -61,11 +61,11 @@ char *rf_config_get_card_path(RfConfig *this)
 
 char *rf_config_get_connector(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
 	char *def = g_strdup("eDP-1");
 
 	g_return_val_if_fail(RF_IS_CONFIG(this), def);
 
+	g_autoptr(GError) error = NULL;
 	char *connector = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP, "connector", &error
 	);
@@ -76,10 +76,9 @@ char *rf_config_get_connector(RfConfig *this)
 
 unsigned int rf_config_get_desktop_width(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
+	g_autoptr(GError) error = NULL;
 	unsigned int desktop_width = g_key_file_get_integer(
 		this->f, RF_CONFIG_GROUP, "desktop-width", &error
 	);
@@ -90,10 +89,9 @@ unsigned int rf_config_get_desktop_width(RfConfig *this)
 
 unsigned int rf_config_get_desktop_height(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
+	g_autoptr(GError) error = NULL;
 	unsigned int desktop_height = g_key_file_get_integer(
 		this->f, RF_CONFIG_GROUP, "desktop-height", &error
 	);
@@ -104,10 +102,9 @@ unsigned int rf_config_get_desktop_height(RfConfig *this)
 
 int rf_config_get_monitor_x(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
+	g_autoptr(GError) error = NULL;
 	int monitor_x = g_key_file_get_integer(
 		this->f, RF_CONFIG_GROUP, "monitor-x", &error
 	);
@@ -118,10 +115,9 @@ int rf_config_get_monitor_x(RfConfig *this)
 
 int rf_config_get_monitor_y(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
+	g_autoptr(GError) error = NULL;
 	int monitor_y = g_key_file_get_integer(
 		this->f, RF_CONFIG_GROUP, "monitor-y", &error
 	);
@@ -130,12 +126,31 @@ int rf_config_get_monitor_y(RfConfig *this)
 	return monitor_y;
 }
 
+unsigned int rf_config_get_rotation(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
+
+	g_autoptr(GError) error = NULL;
+	unsigned int rotation = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "rotation", &error
+	);
+	if (error != NULL)
+		return 0;
+	if (rotation % 90 != 0) {
+		g_warning(
+			"Got invalid monitor rotation angle %u, valid angles are clockwise 0, 90, 180, 270.",
+			rotation
+		);
+		rotation = rotation / 90 * 90;
+	}
+	return rotation % 360;
+}
+
 unsigned int rf_config_get_fps(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);
 
+	g_autoptr(GError) error = NULL;
 	unsigned int fps =
 		g_key_file_get_integer(this->f, RF_CONFIG_GROUP, "fps", &error);
 	if (error != NULL)
@@ -145,10 +160,9 @@ unsigned int rf_config_get_fps(RfConfig *this)
 
 unsigned int rf_config_get_port(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), 5933);
 
+	g_autoptr(GError) error = NULL;
 	unsigned int port = g_key_file_get_integer(
 		this->f, RF_CONFIG_GROUP, "port", &error
 	);
@@ -159,10 +173,9 @@ unsigned int rf_config_get_port(RfConfig *this)
 
 char *rf_config_get_password(RfConfig *this)
 {
-	g_autoptr(GError) error = NULL;
-
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
+	g_autoptr(GError) error = NULL;
 	char *password = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP, "password", &error
 	);

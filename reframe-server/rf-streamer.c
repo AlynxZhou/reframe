@@ -15,16 +15,17 @@ struct _RfStreamer {
 	GSocketConnection *connection;
 	GIOCondition io_flags;
 	GSource *source;
-	bool running;
 	unsigned int timer_id;
 	int64_t last_frame_time;
 	int64_t max_interval;
-	unsigned int width;
-	unsigned int height;
 	unsigned int desktop_width;
 	unsigned int desktop_height;
 	int monitor_x;
 	int monitor_y;
+	unsigned int rotation;
+	unsigned int width;
+	unsigned int height;
+	bool running;
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
 
@@ -215,8 +216,13 @@ _on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
 		b.md.pitches[3]);
 
 	if (this->width != b.md.width || this->height != b.md.height) {
-		this->width = b.md.width;
-		this->height = b.md.height;
+		if (this->rotation % 180 == 0) {
+			this->width = b.md.width;
+			this->height = b.md.height;
+		} else {
+			this->width = b.md.height;
+			this->height = b.md.width;
+		}
 	}
 
 	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
@@ -250,13 +256,23 @@ static void _dispose(GObject *o)
 
 static void rf_streamer_init(RfStreamer *this)
 {
-	this->running = false;
+	this->config = NULL;
+	this->client = NULL;
+	this->address = NULL;
+	this->connection = NULL;
+	this->io_flags = G_IO_IN | G_IO_PRI;
 	this->source = NULL;
-	this->last_frame_time = g_get_monotonic_time();
 	this->timer_id = 0;
+	this->last_frame_time = g_get_monotonic_time();
+	this->max_interval = 1000000 / 30;
+	this->desktop_width = 0;
+	this->desktop_height = 0;
+	this->monitor_x = 0;
+	this->monitor_y = 0;
+	this->rotation = 0;
 	this->width = RF_DEFAULT_WIDTH;
 	this->height = RF_DEFAULT_HEIGHT;
-	this->io_flags = G_IO_IN | G_IO_PRI;
+	this->running = false;
 }
 
 static void rf_streamer_class_init(RfStreamerClass *klass)
@@ -310,12 +326,14 @@ int rf_streamer_start(RfStreamer *this)
 	if (this->running)
 		return 0;
 
-	this->connection = g_socket_client_connect(
-		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
-	);
-	if (this->connection == NULL) {
-		g_warning("Failed to connecting to ReFrame Streamer.");
-		return -2;
+	// Keep all size initialization the same.
+	// Assuming most monitors are landscape.
+	this->rotation = rf_config_get_rotation(this->config);
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	if (this->rotation % 180 != 0) {
+		this->height = RF_DEFAULT_WIDTH;
+		this->width = RF_DEFAULT_HEIGHT;
 	}
 	this->max_interval = 1000000 / rf_config_get_fps(this->config);
 	this->desktop_width = rf_config_get_desktop_width(this->config);
@@ -328,6 +346,13 @@ int rf_streamer_start(RfStreamer *this)
 	g_debug("Input: Got monitor x %u and y %u.",
 		this->monitor_x,
 		this->monitor_y);
+	this->connection = g_socket_client_connect(
+		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
+	);
+	if (this->connection == NULL) {
+		g_warning("Failed to connecting to ReFrame Streamer.");
+		return -2;
+	}
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(
@@ -346,8 +371,6 @@ void rf_streamer_stop(RfStreamer *this)
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
 
-	g_autoptr(GError) error = NULL;
-
 	if (!this->running)
 		return;
 
@@ -363,6 +386,7 @@ void rf_streamer_stop(RfStreamer *this)
 		g_source_remove(this->timer_id);
 		this->timer_id = 0;
 	}
+	g_autoptr(GError) error = NULL;
 	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
 	if (error != NULL) {
 		g_warning(
@@ -381,13 +405,22 @@ void rf_streamer_send_keyboard_event(
 )
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
-	g_return_if_fail(this->running);
+
+	if (!this->running)
+		return;
 
 #define KEYBOARD_EVENT_LENGTH 2
-	struct input_event ies[KEYBOARD_EVENT_LENGTH] = {
-		{ .type = EV_KEY, .code = keycode, .value = down },
-		{ .type = EV_SYN, .code = SYN_REPORT, .value = 0 }
-	};
+	struct input_event ies[KEYBOARD_EVENT_LENGTH];
+	memset(ies, 0, KEYBOARD_EVENT_LENGTH * sizeof(*ies));
+
+	ies[0].type = EV_KEY;
+	ies[0].code = keycode;
+	ies[0].value = down;
+
+	ies[1].type = EV_SYN;
+	ies[1].code = SYN_REPORT;
+	ies[1].value = 0;
+
 	_send_input_request(this, ies, KEYBOARD_EVENT_LENGTH);
 }
 
@@ -403,7 +436,9 @@ void rf_streamer_send_pointer_event(
 )
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
-	g_return_if_fail(this->running);
+
+	if (!this->running)
+		return;
 
 	// Assuming user only have 1 monitor when they set desktop size to 0x0.
 	const int desktop_width = this->desktop_width > 0 ?

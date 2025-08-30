@@ -11,15 +11,15 @@ struct _RfVNCServer {
 	GSocketService parent_instance;
 	RfConfig *config;
 	GByteArray *buf;
-	rfbScreenInfo *screen;
 	GHashTable *connections;
 	GIOCondition io_flags;
-	unsigned int width;
-	unsigned int height;
-	char *passwords[2];
-	char *connector;
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
+	rfbScreenInfo *screen;
+	char *passwords[2];
+	char *connector;
+	unsigned int width;
+	unsigned int height;
 	bool running;
 };
 G_DEFINE_TYPE(RfVNCServer, rf_vnc_server, G_TYPE_SOCKET_SERVICE)
@@ -279,32 +279,20 @@ static void _finalize(GObject *o)
 {
 	RfVNCServer *this = RF_VNC_SERVER(o);
 
-	g_clear_pointer(&this->passwords[0], g_free);
 	g_clear_pointer(&this->connector, g_free);
-	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->passwords[0], g_free);
 	g_clear_pointer(&this->screen, rfbScreenCleanup);
-	g_clear_pointer(&this->connections, g_hash_table_unref);
 	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
 	g_clear_pointer(&this->xkb_context, xkb_context_unref);
+	g_clear_pointer(&this->connections, g_hash_table_unref);
+	g_clear_pointer(&this->buf, g_byte_array_unref);
 
 	G_OBJECT_CLASS(rf_vnc_server_parent_class)->finalize(o);
 }
 
 static void rf_vnc_server_init(RfVNCServer *this)
 {
-	this->running = false;
-	this->screen = NULL;
-	this->passwords[0] = NULL;
-	this->passwords[1] = NULL;
-	this->connector = NULL;
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
-	// Updating buffer to VNC clients requires to call processing events,
-	// otherwise the screen content won't be updated, however we cannot call
-	// processing events in `rf_vnc_server_update()` (for details read the
-	// comments in `_on_socket_io()`), so we also run callback here for
-	// output to also processing events for updating buffer.
-	this->io_flags = G_IO_IN | G_IO_PRI | G_IO_OUT;
+	this->config = NULL;
 	this->buf = NULL;
 	this->connections = g_hash_table_new_full(
 		g_direct_hash,
@@ -312,6 +300,12 @@ static void rf_vnc_server_init(RfVNCServer *this)
 		g_object_unref,
 		(GDestroyNotify)g_source_unref
 	);
+	// Updating buffer to VNC clients requires to call processing events,
+	// otherwise the screen content won't be updated, however we cannot call
+	// processing events in `rf_vnc_server_update()` (for details read the
+	// comments in `_on_socket_io()`), so we also run callback here for
+	// output to also processing events for updating buffer.
+	this->io_flags = G_IO_IN | G_IO_PRI | G_IO_OUT;
 	this->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (this->xkb_context == NULL)
 		g_error("Failed to create XKB context.");
@@ -321,6 +315,13 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	);
 	if (this->xkb_keymap == NULL)
 		g_error("Failed to create XKB context.");
+	this->screen = NULL;
+	this->passwords[0] = NULL;
+	this->passwords[1] = NULL;
+	this->connector = NULL;
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	this->running = false;
 }
 
 static void rf_vnc_server_class_init(RfVNCServerClass *klass)
@@ -417,6 +418,15 @@ void rf_vnc_server_start(RfVNCServer *this)
 	if (this->running)
 		return;
 
+	// Keep all size initialization the same.
+	unsigned int rotation = rf_config_get_rotation(this->config);
+	// Assuming most monitors are landscape.
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	if (rotation % 180 != 0) {
+		this->height = RF_DEFAULT_WIDTH;
+		this->width = RF_DEFAULT_HEIGHT;
+	}
 	g_autoptr(GError) error = NULL;
 	unsigned int port = rf_config_get_port(this->config);
 	g_debug("VNC: Listening on port %u.", port);

@@ -12,9 +12,9 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(RfStreamer, rf_streamer, RF, STREAMER, GObject)
 
 RfStreamer *rf_streamer_new(RfConfig *config);
-void rf_streamer_set_socket_path(RfStreamer *s, const char *socket_path);
+void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path);
 int rf_streamer_start(RfStreamer *this);
-void rf_streamer_stop(RfStreamer *s);
+void rf_streamer_stop(RfStreamer *this);
 void rf_streamer_send_keyboard_event(
 	RfStreamer *this,
 	uint32_t keycode,

@@ -39,8 +39,17 @@ static void _on_first_client(RfVNCServer *v, gpointer data)
 {
 	struct _this *this = data;
 
-	if (rf_streamer_start(this->streamer) < 0)
+	if (rf_streamer_start(this->streamer) < 0 ||
+	    rf_converter_start(this->converter) < 0)
 		rf_vnc_server_flush(this->vnc);
+}
+
+static void _on_last_client(RfVNCServer *v, gpointer data)
+{
+	struct _this *this = data;
+
+	rf_converter_stop(this->converter);
+	rf_streamer_stop(this->streamer);
 }
 
 int main(int argc, char *argv[])
@@ -107,14 +116,21 @@ int main(int argc, char *argv[])
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
 	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
+	// Keep all size initialization the same.
+	unsigned int rotation = rf_config_get_rotation(this->config);
+	// Assuming most monitors are landscape.
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	if (rotation % 180 != 0) {
+		this->height = RF_DEFAULT_WIDTH;
+		this->width = RF_DEFAULT_HEIGHT;
+	}
 	this->streamer = rf_streamer_new(this->config);
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
-	this->converter = rf_converter_new();
+	this->converter = rf_converter_new(this->config);
 	this->vnc = rf_vnc_server_new(this->config);
 	g_signal_connect_swapped(
 		this->streamer,
@@ -126,11 +142,8 @@ int main(int argc, char *argv[])
 	g_signal_connect(
 		this->vnc, "first-client", G_CALLBACK(_on_first_client), this
 	);
-	g_signal_connect_swapped(
-		this->vnc,
-		"last-client",
-		G_CALLBACK(rf_streamer_stop),
-		this->streamer
+	g_signal_connect(
+		this->vnc, "last-client", G_CALLBACK(_on_last_client), this
 	);
 	g_signal_connect(
 		this->vnc, "resize-event", G_CALLBACK(_on_resize_event), this

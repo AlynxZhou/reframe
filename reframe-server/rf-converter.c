@@ -7,6 +7,7 @@
 
 struct _RfConverter {
 	GObject parent_instance;
+	RfConfig *config;
 	EGLDisplay display;
 	EGLContext context;
 	unsigned int program;
@@ -14,12 +15,14 @@ struct _RfConverter {
 	unsigned int vertex_array;
 	unsigned int framebuffer;
 	unsigned int texture;
+	unsigned int rotation;
 	unsigned int width;
 	unsigned int height;
+	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
 
-static void _init_egl(RfConverter *this)
+static int _setup_egl(RfConverter *this)
 {
 	EGLint major;
 	EGLint minor;
@@ -48,11 +51,15 @@ static void _init_egl(RfConverter *this)
 	// clang-format on
 
 	this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	if (this->display == EGL_NO_DISPLAY)
-		g_error("EGL: Failed to get display: %d.", eglGetError());
+	if (this->display == EGL_NO_DISPLAY) {
+		g_warning("EGL: Failed to get display: %d.", eglGetError());
+		return -1;
+	}
 
-	if (!eglInitialize(this->display, &major, &minor))
-		g_error("EGL: Failed to initialize: %d.", eglGetError());
+	if (!eglInitialize(this->display, &major, &minor)) {
+		g_warning("EGL: Failed to initialize: %d.", eglGetError());
+		return -2;
+	}
 	g_debug("EGL: Version is major %d, minor %d.", major, minor);
 
 	eglBindAPI(EGL_OPENGL_ES_API);
@@ -73,10 +80,27 @@ static void _init_egl(RfConverter *this)
 	this->context = eglCreateContext(
 		this->display, config, EGL_NO_CONTEXT, context_attribs
 	);
-	if (this->context == EGL_NO_CONTEXT)
-		g_error("EGL: Failed to create context: %d.", eglGetError());
+	if (this->context == EGL_NO_CONTEXT) {
+		g_warning("EGL: Failed to create context: %d.", eglGetError());
+		return -3;
+	}
 
 	g_free(configs);
+
+	return 0;
+}
+
+static void _clean_egl(RfConverter *this)
+{
+	if (this->context != EGL_NO_CONTEXT) {
+		eglDestroyContext(this->display, this->context);
+		this->context = EGL_NO_CONTEXT;
+	}
+	if (this->display != EGL_NO_DISPLAY) {
+		eglTerminate(this->display);
+		this->display = EGL_NO_DISPLAY;
+	}
+	// eglReleaseThread();
 }
 
 #ifdef __DEBUG__
@@ -143,7 +167,7 @@ static unsigned int _make_shader(GLenum type, const char *s)
 	if (compiled == 0) {
 		glDeleteShader(shader);
 		g_debug("%s", s);
-		g_error("GL: Failed to compile shader.");
+		g_warning("GL: Failed to compile shader.");
 		return 0;
 	}
 	return shader;
@@ -167,27 +191,32 @@ static unsigned int _make_program(const char *vs, const char *fs)
 	glGetProgramiv(program, GL_LINK_STATUS, &linked);
 	if (linked == 0) {
 		glDeleteProgram(program);
-		g_error("GL: Failed to link program.");
+		g_warning("GL: Failed to link program.");
 		return 0;
 	}
 	return program;
 }
 
-static void _init_gl(RfConverter *this)
+static int _setup_gl(RfConverter *this)
 {
 	if (!eglMakeCurrent(
 		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
-	    ))
-		g_error("EGL: Failed to make context current: %d.",
-			eglGetError());
+	    )) {
+		g_warning(
+			"EGL: Failed to make context current: %d.",
+			eglGetError()
+		);
+		return -4;
+	}
 
 #ifdef __DEBUG__
 	glEnable(GL_DEBUG_OUTPUT);
 	glDebugMessageCallback(_gl_message, NULL);
 #endif
-	glDisable(GL_DEPTH_TEST);
+	// glEnable(GL_CULL_FACE);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
 	glDepthMask(false);
 
 	const char vs[] =
@@ -209,21 +238,22 @@ static void _init_gl(RfConverter *this)
 		"	out_color = texture(image, pass_coordinate);\n"
 		"}\n";
 	this->program = _make_program(vs, fs);
+	if (this->program == 0)
+		return -5;
 
 	glGenBuffers(3, this->buffers);
 
-	// FIXME: What if screen rotate? Do I need a rotate matrix?
 	// clang-format off
 	const float vertices[] = {
 		// x, y
-		// bottom left
-		-1.0f, -1.0f,
 		// top left
 		-1.0f, 1.0f,
+		// top right
+		1.0f, 1.0f,
 		// bottom right
 		1.0f, -1.0f,
-		// top right
-		1.0f, 1.0f
+		// bottom left
+		-1.0f, -1.0f
 	};
 	// clang-format on
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
@@ -233,18 +263,31 @@ static void _init_gl(RfConverter *this)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// clang-format off
-	const float coordinates[] = {
+	float coordinates[] = {
 		// u, v
-		// bottom left
-		0.0f, 0.0f,
 		// top left
 		0.0f, 1.0f,
+		// top right
+		1.0f, 1.0f,
 		// bottom right
 		1.0f, 0.0f,
-		// top right
-		1.0f, 1.0f
+		// bottom left
+		0.0f, 0.0f
 	};
 	// clang-format on
+	// We only support 90-degree rotation so we don't need a rotate matrix.
+	for (unsigned int r = this->rotation; r > 0; r -= 90) {
+		float u = coordinates[0];
+		float v = coordinates[1];
+		coordinates[0] = coordinates[2];
+		coordinates[1] = coordinates[3];
+		coordinates[2] = coordinates[4];
+		coordinates[3] = coordinates[5];
+		coordinates[4] = coordinates[6];
+		coordinates[5] = coordinates[7];
+		coordinates[6] = u;
+		coordinates[7] = v;
+	}
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
 	glBufferData(
 		GL_ARRAY_BUFFER, sizeof(coordinates), coordinates, GL_STATIC_DRAW
@@ -252,9 +295,10 @@ static void _init_gl(RfConverter *this)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// clang-format off
+	// Counter-clockwise is front!
 	const unsigned int indices[] = {
-		0, 1, 2,
-		3, 2, 1
+		0, 3, 1,
+		2, 1, 3
 	};
 	// clang-format on
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
@@ -302,36 +346,61 @@ static void _init_gl(RfConverter *this)
 	_gen_texture(this);
 
 	glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
+
+	return 0;
+}
+
+static void _clean_gl(RfConverter *this)
+{
+	if (this->texture != 0) {
+		glDeleteTextures(1, &this->texture);
+		this->texture = 0;
+	}
+	if (this->framebuffer != 0) {
+		glDeleteFramebuffers(1, &this->framebuffer);
+		this->framebuffer = 0;
+	}
+	if (this->vertex_array != 0) {
+		glDeleteVertexArrays(1, &this->vertex_array);
+		this->vertex_array = 0;
+	}
+	if (this->buffers[0] != 0) {
+		glDeleteBuffers(3, this->buffers);
+		this->buffers[0] = 0;
+		this->buffers[1] = 0;
+		this->buffers[2] = 0;
+	}
+	if (this->program != 0) {
+		glDeleteProgram(this->program);
+		this->program = 0;
+	}
 }
 
 static void _finalize(GObject *o)
 {
 	RfConverter *this = RF_CONVERTER(o);
 
-	glDeleteTextures(1, &this->texture);
-	glDeleteFramebuffers(1, &this->framebuffer);
-	glDeleteVertexArrays(1, &this->vertex_array);
-	glDeleteBuffers(3, this->buffers);
-	glDeleteProgram(this->program);
-
-	eglDestroyContext(this->display, this->context);
-	eglTerminate(this->display);
-	eglReleaseThread();
+	rf_converter_stop(this);
 
 	G_OBJECT_CLASS(rf_converter_parent_class)->finalize(o);
 }
 
 static void rf_converter_init(RfConverter *this)
 {
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
+	this->config = NULL;
+	this->context = EGL_NO_CONTEXT;
+	this->display = EGL_NO_DISPLAY;
 	this->program = 0;
+	this->buffers[0] = 0;
+	this->buffers[1] = 0;
+	this->buffers[2] = 0;
 	this->vertex_array = 0;
 	this->framebuffer = 0;
 	this->texture = 0;
-
-	_init_egl(this);
-	_init_gl(this);
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	this->rotation = 0;
+	this->running = false;
 }
 
 static void rf_converter_class_init(RfConverterClass *klass)
@@ -341,9 +410,57 @@ static void rf_converter_class_init(RfConverterClass *klass)
 	o_class->finalize = _finalize;
 }
 
-RfConverter *rf_converter_new(void)
+RfConverter *rf_converter_new(RfConfig *config)
 {
-	return g_object_new(RF_TYPE_CONVERTER, NULL);
+	RfConverter *this = g_object_new(RF_TYPE_CONVERTER, NULL);
+	this->config = config;
+	return this;
+}
+
+int rf_converter_start(RfConverter *this)
+{
+	g_return_val_if_fail(RF_IS_CONVERTER(this), -1);
+
+	if (this->running)
+		return 0;
+
+	// Keep all size initialization the same.
+	this->rotation = rf_config_get_rotation(this->config);
+	g_debug("GL: Got screen rotation %u.", this->rotation);
+	// Assuming most monitors are landscape.
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	if (this->rotation % 180 != 0) {
+		this->height = RF_DEFAULT_WIDTH;
+		this->width = RF_DEFAULT_HEIGHT;
+	}
+	int ret = 0;
+	ret = _setup_egl(this);
+	if (ret < 0) {
+		_clean_egl(this);
+		return ret;
+	}
+	ret = _setup_gl(this);
+	if (ret < 0) {
+		_clean_gl(this);
+		return ret;
+	}
+
+	this->running = true;
+	return 0;
+}
+
+void rf_converter_stop(RfConverter *this)
+{
+	g_return_if_fail(RF_IS_CONVERTER(this));
+
+	if (!this->running)
+		return;
+
+	this->running = false;
+
+	_clean_gl(this);
+	_clean_egl(this);
 }
 
 static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
@@ -359,6 +476,13 @@ GByteArray *rf_converter_convert(
 	unsigned int height
 )
 {
+	g_return_val_if_fail(RF_IS_CONVERTER(this), NULL);
+	g_return_val_if_fail(b != NULL, NULL);
+	g_return_val_if_fail(width > 0 && height > 0, NULL);
+
+	if (!this->running)
+		return NULL;
+
 	EGLAttrib fd_keys[RF_MAX_PLANES] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					     EGL_DMA_BUF_PLANE1_FD_EXT,
 					     EGL_DMA_BUF_PLANE2_FD_EXT,
@@ -435,8 +559,6 @@ GByteArray *rf_converter_convert(
 		return NULL;
 	}
 
-	width = width > 0 ? width : b->md.width;
-	height = height > 0 ? height : b->md.height;
 	if (this->texture == 0 || this->width != width ||
 	    this->height != height) {
 		this->width = width;

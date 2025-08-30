@@ -27,8 +27,8 @@ struct rf_buffer {
 typedef struct rf_buffer RfBuffer;
 GType rf_buffer_get_type(void);
 
-RfBuffer *rf_buffer_copy(RfBuffer *b);
-void rf_buffer_free(RfBuffer *b);
+RfBuffer *rf_buffer_copy(RfBuffer *this);
+void rf_buffer_free(RfBuffer *this);
 
 G_END_DECLS
 
