@@ -1,7 +1,7 @@
 [Unit]
 Description=ReFrame Remote Desktop Server for %i
-After=network-online.target
-Wants=network-online.target
+After=network.target
+Requires=reframe@%i.socket
 
 [Service]
 Type=exec
@@ -14,4 +14,5 @@ ExecStart=@bindir@/reframe-server --config=@confdir@/%i.conf --socket=%t/reframe
 Restart=on-failure
 
 [Install]
-WantedBy=graphical.target
+Also=reframe@%i.socket
+WantedBy=multi-user.target

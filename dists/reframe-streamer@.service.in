@@ -1,7 +1,6 @@
 [Unit]
 Description=ReFrame Remote Desktop Streamer for %i
-After=network-online.target reframe@%i.socket
-Wants=network-online.target
+After=reframe@%i.socket
 Requires=reframe@%i.socket
 
 [Service]
@@ -19,4 +18,4 @@ ExecStart=@bindir@/reframe-streamer --config=@confdir@/%i.conf --socket=%t/refra
 Restart=on-failure
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
