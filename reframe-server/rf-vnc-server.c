@@ -285,7 +285,6 @@ static void _finalize(GObject *o)
 	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
 	g_clear_pointer(&this->xkb_context, xkb_context_unref);
 	g_clear_pointer(&this->connections, g_hash_table_unref);
-	g_clear_pointer(&this->buf, g_byte_array_unref);
 
 	G_OBJECT_CLASS(rf_vnc_server_parent_class)->finalize(o);
 }
@@ -451,6 +450,7 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	this->running = false;
 
 	rf_vnc_server_flush(this);
+	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
 }
 
@@ -463,17 +463,19 @@ void rf_vnc_server_update(RfVNCServer *this, GByteArray *buf)
 	    !rfbIsActive(this->screen))
 		return;
 
-	g_clear_pointer(&this->buf, g_byte_array_unref);
-	this->buf = g_byte_array_ref(buf);
-	rfbNewFramebuffer(
-		this->screen,
-		(char *)this->buf->data,
-		this->width,
-		this->height,
-		8,
-		3,
-		RF_BYTES_PER_PIXEL
-	);
+	if (this->buf != buf) {
+		g_clear_pointer(&this->buf, g_byte_array_unref);
+		this->buf = g_byte_array_ref(buf);
+		rfbNewFramebuffer(
+			this->screen,
+			(char *)this->buf->data,
+			this->width,
+			this->height,
+			8,
+			3,
+			RF_BYTES_PER_PIXEL
+		);
+	}
 	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
 }
 

@@ -8,6 +8,7 @@
 struct _RfConverter {
 	GObject parent_instance;
 	RfConfig *config;
+	GByteArray *buf;
 	EGLDisplay display;
 	EGLContext context;
 	unsigned int program;
@@ -388,6 +389,7 @@ static void _finalize(GObject *o)
 static void rf_converter_init(RfConverter *this)
 {
 	this->config = NULL;
+	this->buf = NULL;
 	this->context = EGL_NO_CONTEXT;
 	this->display = EGL_NO_DISPLAY;
 	this->program = 0;
@@ -445,6 +447,9 @@ int rf_converter_start(RfConverter *this)
 		_clean_gl(this);
 		return ret;
 	}
+	this->buf = g_byte_array_sized_new(
+		RF_BYTES_PER_PIXEL * this->width * this->height
+	);
 
 	this->running = true;
 	return 0;
@@ -459,6 +464,7 @@ void rf_converter_stop(RfConverter *this)
 
 	this->running = false;
 
+	g_clear_pointer(&this->buf, g_byte_array_unref);
 	_clean_gl(this);
 	_clean_egl(this);
 }
@@ -559,11 +565,14 @@ GByteArray *rf_converter_convert(
 		return NULL;
 	}
 
-	if (this->texture == 0 || this->width != width ||
-	    this->height != height) {
+	if (this->width != width || this->height != height) {
 		this->width = width;
 		this->height = height;
 		_gen_texture(this);
+		g_clear_pointer(&this->buf, g_byte_array_unref);
+		this->buf = g_byte_array_sized_new(
+			RF_BYTES_PER_PIXEL * this->width * this->height
+		);
 	}
 
 	unsigned int texture;
@@ -580,7 +589,9 @@ GByteArray *rf_converter_convert(
 	// This would be the easiest way if I can use full OpenGL. However,
 	// libGL will pulls libGLX, I don't want that. With OpenGL ES we don't
 	// have `glGetTexImage()`, so we have to use framebuffers.
-	// glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, buf);
+	// glGetTexImage(
+	//	GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, this->buf->data
+	// );
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 	glViewport(0, 0, this->width, this->height);
@@ -593,9 +604,6 @@ GByteArray *rf_converter_convert(
 	// g_debug("glDrawElements: %#x", glGetError());
 	glBindVertexArray(0);
 	glUseProgram(0);
-	GByteArray *buf = g_byte_array_sized_new(
-		RF_BYTES_PER_PIXEL * this->width * this->height
-	);
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
 	// But luckily LibVNCServer accepts RGBA by default.
@@ -606,11 +614,11 @@ GByteArray *rf_converter_convert(
 		this->height,
 		GL_RGBA,
 		GL_UNSIGNED_BYTE,
-		buf->data
+		this->buf->data
 	);
 	// g_debug("glReadPixels: %#x", glGetError());
 	if (glGetError() != GL_NO_ERROR)
-		g_clear_pointer(&buf, g_byte_array_unref);
+		return NULL;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -619,5 +627,5 @@ GByteArray *rf_converter_convert(
 
 	eglDestroyImage(this->display, image);
 
-	return buf;
+	return g_byte_array_ref(this->buf);
 }
