@@ -417,6 +417,15 @@ void rf_vnc_server_start(RfVNCServer *this)
 	if (this->running)
 		return;
 
+	// Assuming most monitors are landscape.
+	unsigned int rotation = rf_config_get_rotation(this->config);
+	// Keep the same when initializing size here and in VNC server.
+	this->width = RF_DEFAULT_WIDTH;
+	this->height = RF_DEFAULT_HEIGHT;
+	if (rotation % 180 != 0) {
+		this->height = RF_DEFAULT_WIDTH;
+		this->width = RF_DEFAULT_HEIGHT;
+	}
 	g_autoptr(GError) error = NULL;
 	unsigned int port = rf_config_get_port(this->config);
 	g_debug("VNC: Listening on port %u.", port);

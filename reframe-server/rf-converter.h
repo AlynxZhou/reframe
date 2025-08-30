@@ -11,6 +11,8 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(RfConverter, rf_converter, RF, CONVERTER, GObject)
 
 RfConverter *rf_converter_new(void);
+int rf_converter_start(RfConverter *this);
+void rf_converter_stop(RfConverter *this);
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	const RfBuffer *b,
