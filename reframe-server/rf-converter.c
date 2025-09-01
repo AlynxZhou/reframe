@@ -438,21 +438,24 @@ int rf_converter_start(RfConverter *this)
 	}
 	int ret = 0;
 	ret = _setup_egl(this);
-	if (ret < 0) {
-		_clean_egl(this);
-		return ret;
-	}
+	if (ret < 0)
+		goto clean_egl;
 	ret = _setup_gl(this);
-	if (ret < 0) {
-		_clean_gl(this);
-		return ret;
-	}
+	if (ret < 0)
+		goto clean_gl;
 	this->buf = g_byte_array_sized_new(
 		RF_BYTES_PER_PIXEL * this->width * this->height
 	);
 
 	this->running = true;
-	return 0;
+	goto out;
+
+clean_gl:
+	_clean_gl(this);
+clean_egl:
+	_clean_egl(this);
+out:
+	return ret;
 }
 
 void rf_converter_stop(RfConverter *this)
