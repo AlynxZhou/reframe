@@ -85,7 +85,7 @@ First copy the example configuration and modify it according to your monitors.
 
 This program handles only 1 monitor, so I suggest to use your selected monitor connector name as configuration name.
 
-Connector name and card name can be found in `/sys/class/drm/`.
+DRM connector name and card name can be found in `/sys/class/drm/`.
 
 ```
 # cp /etc/reframe/example.conf /etc/reframe/DP-1.conf
@@ -93,11 +93,15 @@ Connector name and card name can be found in `/sys/class/drm/`.
 
 Set connector name and card name to what your system uses for your selected monitor.
 
+If you have multi-GPU (likely you are using a laptop with a integrated GPU and a discrete GPU), you need to select EGL device by setting device ID. EGL device must match DRM card, which is the one that outputs via selected connector (generally it is the integrated GPU). IDs can be found by running `eglinfo -B`.
+
 If you have more than 1 monitors, you need to set the size of the whole virtual desktop, and the position offset of your selected monitor.
 
 Unfortunately there are no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
 
-**You need to keep the same multi-monitors layout for display manager and user session to make remote login work correctly!**
+You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.**
+
+You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
 
 Then start the ReFrame systemd socket so it will run the privileged ReFrame Streamer systemd service on demand.
 

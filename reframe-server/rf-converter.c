@@ -8,6 +8,7 @@
 struct _RfConverter {
 	GObject parent_instance;
 	RfConfig *config;
+	int device_id;
 	GByteArray *buf;
 	EGLDisplay display;
 	EGLContext context;
@@ -51,7 +52,43 @@ static int _setup_egl(RfConverter *this)
 	};
 	// clang-format on
 
-	this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	if (this->device_id < 0) {
+		this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	} else {
+		// We assume EGL devices always hold the same ID on enumeration,
+		// otherwise we don't have a better approach to select device.
+		int max_devices = 0;
+		int num_devices = 0;
+		if (!eglQueryDevicesEXT(0, NULL, &max_devices)) {
+			g_warning(
+				"EGL: Failed to query max devices: %d.",
+				eglGetError()
+			);
+			return -6;
+		}
+		g_autofree EGLDeviceEXT *devices =
+			g_malloc0_n(max_devices, sizeof(*devices));
+		if (!eglQueryDevicesEXT(max_devices, devices, &num_devices)) {
+			g_warning(
+				"EGL: Failed to query devices: %d.",
+				eglGetError()
+			);
+			return -7;
+		}
+		if (this->device_id < num_devices) {
+			g_message("EGL: Using device ID %d.", this->device_id);
+		} else {
+			g_warning(
+				"EGL: Device ID is %d, but only got %d devices, using device ID 0.",
+				this->device_id,
+				num_devices
+			);
+			this->device_id = 0;
+		}
+		this->display = eglGetPlatformDisplayEXT(
+			EGL_PLATFORM_DEVICE_EXT, devices[this->device_id], NULL
+		);
+	}
 	if (this->display == EGL_NO_DISPLAY) {
 		g_warning("EGL: Failed to get display: %d.", eglGetError());
 		return -1;
@@ -389,6 +426,7 @@ static void _finalize(GObject *o)
 static void rf_converter_init(RfConverter *this)
 {
 	this->config = NULL;
+	this->device_id = -1;
 	this->buf = NULL;
 	this->context = EGL_NO_CONTEXT;
 	this->display = EGL_NO_DISPLAY;
@@ -426,9 +464,10 @@ int rf_converter_start(RfConverter *this)
 	if (this->running)
 		return 0;
 
+	this->device_id = rf_config_get_device_id(this->config);
 	// Keep all size initialization the same.
 	this->rotation = rf_config_get_rotation(this->config);
-	g_debug("GL: Got screen rotation %u.", this->rotation);
+	g_message("GL: Got screen rotation %u.", this->rotation);
 	// Assuming most monitors are landscape.
 	this->width = RF_DEFAULT_WIDTH;
 	this->height = RF_DEFAULT_HEIGHT;

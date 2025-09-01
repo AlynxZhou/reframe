@@ -335,17 +335,23 @@ int rf_streamer_start(RfStreamer *this)
 		this->height = RF_DEFAULT_WIDTH;
 		this->width = RF_DEFAULT_HEIGHT;
 	}
-	this->max_interval = 1000000 / rf_config_get_fps(this->config);
+	unsigned int fps = rf_config_get_fps(this->config);
+	this->max_interval = 1000000 / fps;
+	g_message("Frame: Got FPS %u.", fps);
 	this->desktop_width = rf_config_get_desktop_width(this->config);
 	this->desktop_height = rf_config_get_desktop_height(this->config);
-	g_debug("Input: Got desktop width %u and height %u.",
+	g_message(
+		"Input: Got desktop width %u and height %u.",
 		this->desktop_width,
-		this->desktop_height);
+		this->desktop_height
+	);
 	this->monitor_x = rf_config_get_monitor_x(this->config);
 	this->monitor_y = rf_config_get_monitor_y(this->config);
-	g_debug("Input: Got monitor x %u and y %u.",
+	g_message(
+		"Input: Got monitor x %u and y %u.",
 		this->monitor_x,
-		this->monitor_y);
+		this->monitor_y
+	);
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
 	);

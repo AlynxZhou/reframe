@@ -19,13 +19,13 @@
 #endif
 
 // clang-format off
-#define _ioctl_must(...)                                                  \
-	G_STMT_START {                                                    \
-		int e;                                                    \
-		if ((e = ioctl(__VA_ARGS__)))                             \
-			g_error("Failed to call ioctl() at line %d: %d.", \
-				__LINE__,                                 \
-				e);                                       \
+#define _ioctl_must(...)                                                         \
+	G_STMT_START {                                                           \
+		int e;                                                           \
+		if ((e = ioctl(__VA_ARGS__)))                                    \
+			g_error("Input: Failed to call ioctl() at line %d: %d.", \
+				__LINE__,                                        \
+				e);                                              \
 	} G_STMT_END
 #define _ioctl_may(...)                                                          \
 	G_STMT_START {                                                           \
@@ -73,7 +73,7 @@ _get_connector_id(int cfd, drmModeRes *res, const char *connector_name)
 			drmModeGetConnectorTypeName(connector->connector_type),
 			connector->connector_type_id
 		);
-		g_debug("Connector %s is %s.",
+		g_debug("DRM: Connector %s is %s.",
 			full_name,
 			connector->connection == DRM_MODE_CONNECTED ?
 				"connected" :
@@ -283,9 +283,10 @@ static void _init_drm(struct _this *this)
 	g_autofree char *card_path = rf_config_get_card_path(this->config);
 	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
 	if (this->cfd <= 0)
-		g_error("Failed to open card %s: %s.",
+		g_error("DRM: Failed to open card %s: %s.",
 			card_path,
 			strerror(errno));
+	g_message("DRM: Opened card %s.", card_path);
 
 	drmModeRes *res = NULL;
 	g_autofree char *connector_name = rf_config_get_connector(this->config);
@@ -293,16 +294,16 @@ static void _init_drm(struct _this *this)
 	this->connector_id = _get_connector_id(this->cfd, res, connector_name);
 	drmModeFreeResources(res);
 	if (this->connector_id == 0)
-		g_error("Failed to find a connected connector %s.",
+		g_error("DRM: Failed to find a connected connector %s.",
 			connector_name);
-	g_message("Found connected connector %s.", connector_name);
+	g_message("DRM: Found connected connector %s.", connector_name);
 }
 
 static void _init_uinput(struct _this *this)
 {
 	this->ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
 	if (this->ufd <= 0)
-		g_error("Failed to open uinput: %s.", strerror(errno));
+		g_error("Input: Failed to open uinput: %s.", strerror(errno));
 
 	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
 	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
