@@ -23,7 +23,7 @@ DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/log
 ## What ReFrame Won't Support
 
 - Sound: VNC has no sound support and I am not sure whether we can dump sound buffers in ALSA like what we do currently for graphics in DRM, and I think sound in display manager is not so useful, so maybe you can setup sound stream redirection for your session using PulseAudio/PipeWire-pulse, I think it already have network support.
-- No GPU/connector/EGL/OpenGL ES/DRM/KMS: You probably cannot run a modern Linux desktop environment if you are lacking of those, then why you want a remote desktop?
+- No GPU/connector/EGL/OpenGL ES/DRM/KMS: You probably cannot run a modern Linux desktop environment if you are lacking of those, then why you want a remote desktop? Don't you even have llvmpipe?
 - Game Streaming: ReFrame does not handle network streaming directly but uses existing tools like VNC, and VNC might be not optimized for low-latency. You may use some game streaming optimized apps like [Sunshine](https://github.com/LizardByte/Sunshine/).
 
 # Requirements
@@ -117,7 +117,7 @@ This program only works with connected monitors, however if you have no monitor 
 
 First you need to choose a connector to enable, for example `DP-1`, and then add kernel parameter `video="DP-1:D"` to enable it.
 
-Then you need to get a EDID binary, this is used to decide resolution, you can download a virtual one, and put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it.
+Then you need to get a EDID binary, this is used to decide resolution, you can dump your real monitor's EDID from `/sys/class/drm/card*-*/edid` or download a virtual one, and put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it. **If you have early KMS, please also add those EDID binaries to your initramfs.**
 
 Don't forget to use your selected connector name to replace `DP-1`.
 
