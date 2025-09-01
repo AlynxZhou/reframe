@@ -106,7 +106,7 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	bool wdown = mask & (1 << 4);
 	double rx = (double)x / this->width;
 	double ry = (double)y / this->height;
-	g_debug("Input: Received pointer at x %f and y %f, left %s, middle %s, right %s, wheel up %s, wheel down %s",
+	g_debug("Input: Received pointer at x %f and y %f, left %s, middle %s, right %s, wheel up %s, wheel down %s.",
 		rx,
 		ry,
 		_true_or_false(left),
@@ -229,6 +229,7 @@ static gboolean _incoming(
 			RF_BYTES_PER_PIXEL
 		);
 		this->screen->port = 0;
+		this->screen->ipv6port = 0;
 		this->screen->frameBuffer = NULL;
 		this->screen->desktopName = this->connector;
 		this->screen->versionString = "ReFrame VNC Server";
@@ -428,7 +429,7 @@ void rf_vnc_server_start(RfVNCServer *this)
 	}
 	g_autoptr(GError) error = NULL;
 	unsigned int port = rf_config_get_port(this->config);
-	g_debug("VNC: Listening on port %u.", port);
+	g_message("VNC: Listening on port %u.", port);
 	g_socket_listener_add_inet_port(
 		G_SOCKET_LISTENER(this), port, NULL, &error
 	);
