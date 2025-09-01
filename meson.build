@@ -64,9 +64,9 @@ summary({
   'confdir': confdir,
 }, section: 'Confiuration')
 if systemd.found()
-summary({
+  summary({
     'systemunitdir': systemunitdir,
     'sysusersdir': sysusersdir,
     'username': username
-}, section: 'Confiuration')
+  }, section: 'Confiuration')
 endif
