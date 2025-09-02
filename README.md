@@ -99,7 +99,7 @@ If you have more than 1 monitors, you need to set the size of the whole virtual 
 
 Unfortunately there are no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
 
-You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.**
+You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.
 
 You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
 
