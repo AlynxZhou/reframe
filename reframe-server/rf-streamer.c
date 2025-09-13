@@ -135,7 +135,7 @@ static void _schedule_frame_request(RfStreamer *this)
 }
 
 static gboolean
-_on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
+_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfStreamer *this = data;
 
@@ -362,7 +362,7 @@ int rf_streamer_start(RfStreamer *this)
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(
-		this->source, G_SOURCE_FUNC(_on_socket_io), this, NULL
+		this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL
 	);
 	g_source_attach(this->source, NULL);
 	_send_frame_request(this);

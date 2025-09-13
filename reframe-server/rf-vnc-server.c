@@ -129,19 +129,16 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 }
 
 static gboolean
-_on_socket_io(GSocket *socket, GIOCondition condition, gpointer data)
+_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfVNCServer *this = data;
 
 	if (!(condition & this->io_flags))
 		return G_SOURCE_CONTINUE;
 
-	// Ensure there is no other entry to call processing events except this!
-	// Especially don't call processing events while processing events!
-	// Otherwise we may get last client disconnection and release resources
-	// while processing other events and leads into segmentation fault.
 	if (rfbIsActive(this->screen))
 		rfbProcessEvents(this->screen, 0);
+
 	return G_SOURCE_CONTINUE;
 }
 
@@ -150,7 +147,7 @@ static void _attach_source(RfVNCServer *this, GSocketConnection *connection)
 	g_debug("VNC: Attaching source for connection %p.", connection);
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_io), this, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	g_hash_table_insert(this->connections, connection, source);
 }
@@ -174,14 +171,37 @@ static void _detach_source(RfVNCServer *this, GSocketConnection *connection)
 	}
 }
 
+// Those signals must be delayed to next event by using `g_idle_add()`, because
+// they are related to create/destroy resources and triggered during processing
+// events, it is not OK to release resources while still processing events so we
+// have to delay them until events are done.
+
+static gboolean _emit_first_client(gpointer data)
+{
+	RfVNCServer *this = data;
+
+	g_debug("VNC: Emitting first client signal.");
+	g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
+
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean _emit_last_client(gpointer data)
+{
+	RfVNCServer *this = data;
+
+	g_debug("VNC: Emitting last client signal.");
+	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
+
+	return G_SOURCE_REMOVE;
+}
+
 static void _on_client_gone(rfbClientRec *client)
 {
 	RfVNCServer *this = client->screen->screenData;
 	GSocketConnection *connection = client->clientData;
-	if (g_hash_table_size(this->connections) == 1) {
-		g_debug("VNC: Emitting last client signal.");
-		g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
-	}
+	if (g_hash_table_size(this->connections) == 1)
+		g_idle_add(_emit_last_client, this);
 	_detach_source(this, connection);
 }
 
@@ -255,10 +275,8 @@ static gboolean _incoming(
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
 	_attach_source(this, connection);
-	if (g_hash_table_size(this->connections) == 1) {
-		g_debug("VNC: Emitting first client signal.");
-		g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
-	}
+	if (g_hash_table_size(this->connections) == 1)
+		g_idle_add(_emit_first_client, this);
 	// Just in case client disconnects very soon.
 	if (client->sock == -1)
 		_on_client_gone(client);
@@ -300,12 +318,7 @@ static void rf_vnc_server_init(RfVNCServer *this)
 		g_object_unref,
 		(GDestroyNotify)g_source_unref
 	);
-	// Updating buffer to VNC clients requires to call processing events,
-	// otherwise the screen content won't be updated, however we cannot call
-	// processing events in `rf_vnc_server_update()` (for details read the
-	// comments in `_on_socket_io()`), so we also run callback here for
-	// output to also processing events for updating buffer.
-	this->io_flags = G_IO_IN | G_IO_PRI | G_IO_OUT;
+	this->io_flags = G_IO_IN | G_IO_PRI;
 	this->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (this->xkb_context == NULL)
 		g_error("Failed to create XKB context.");
@@ -478,13 +491,15 @@ void rf_vnc_server_update(RfVNCServer *this, GByteArray *buf)
 		);
 	}
 	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
+	rfbProcessEvents(this->screen, 0);
 }
 
 void rf_vnc_server_flush(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	if (this->screen == NULL)
+	if (!this->running || this->screen == NULL ||
+	    !rfbIsActive(this->screen))
 		return;
 
 	rfbClientIteratorPtr it = rfbGetClientIterator(this->screen);
@@ -492,4 +507,5 @@ void rf_vnc_server_flush(RfVNCServer *this)
 	while ((cl = rfbClientIteratorNext(it)))
 		rfbCloseClient(cl);
 	rfbReleaseClientIterator(it);
+	rfbProcessEvents(this->screen, 0);
 }
