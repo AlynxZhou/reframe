@@ -48,11 +48,24 @@ Or use other AUR helpers.
 
 #### Install From `archlinuxcn`
 
-First [add archlinuxcn repo to your system](ttps://www.archlinuxcn.org/archlinux-cn-repo-and-mirror/).
+First [add archlinuxcn repo to your system](https://www.archlinuxcn.org/archlinux-cn-repo-and-mirror/).
 
 ```
 # pacman -S reframe
 ```
+
+### openSUSE
+
+#### Install from OBS
+
+Packages can be found in [my OBS project](https://build.opensuse.org/package/show/home:AZhou/reframe/).
+
+```
+# zypper ar https://download.opensuse.org/repositories/home:/AZhou/openSUSE_Tumbleweed/home:AZhou.repo
+# zypper in reframe
+```
+
+Leap users please replace URL for Tumbleweed with URL for your Leap version.
 
 ## Build from Source
 
@@ -103,16 +116,16 @@ You need to keep the same multi-monitors layout **both of user session and displ
 
 You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
 
-Then start the ReFrame systemd socket so it will run the privileged ReFrame Streamer systemd service on demand.
-
-```
-# systemctl start reframe@DP-1.socket
-```
-
 Then start the ReFrame Server systemd service so it will listen to VNC clients.
 
 ```
 # systemctl start reframe-server@DP-1.service
+```
+
+ReFrame Server systemd service should automatically pulls ReFrame systemd socket, which will trigger the privileged ReFrame Streamer systemd service on demand. If not, start the ReFrame systemd socket manually.
+
+```
+# systemctl start reframe@DP-1.socket
 ```
 
 ### Headless Setup
