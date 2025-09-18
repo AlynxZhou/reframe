@@ -38,6 +38,10 @@ if systemd.found()
     },
     install_dir: sysusersdir
   )
+  meson.add_install_script(
+    'systemd-sysusers',
+    skip_if_destdir: true
+  )
 
   install_data(
     'example.conf',
