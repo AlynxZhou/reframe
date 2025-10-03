@@ -531,6 +531,8 @@ GByteArray *rf_converter_convert(
 	if (!this->running)
 		return NULL;
 
+	GByteArray *res = NULL;
+
 	EGLAttrib fd_keys[RF_MAX_PLANES] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					     EGL_DMA_BUF_PLANE1_FD_EXT,
 					     EGL_DMA_BUF_PLANE2_FD_EXT,
@@ -594,7 +596,7 @@ GByteArray *rf_converter_convert(
 
 	if (image == EGL_NO_IMAGE) {
 		g_warning("EGL: Failed to create image: %d.", eglGetError());
-		return NULL;
+		goto out;
 	}
 
 	if (!eglMakeCurrent(
@@ -604,7 +606,7 @@ GByteArray *rf_converter_convert(
 			"EGL: Failed to make context current: %d.",
 			eglGetError()
 		);
-		return NULL;
+		goto clean_image;
 	}
 
 	if (this->width != width || this->height != height) {
@@ -636,6 +638,7 @@ GByteArray *rf_converter_convert(
 	// );
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
+
 	glViewport(0, 0, this->width, this->height);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glUseProgram(this->program);
@@ -659,15 +662,17 @@ GByteArray *rf_converter_convert(
 		this->buf->data
 	);
 	// g_debug("glReadPixels: %#x", glGetError());
-	if (glGetError() != GL_NO_ERROR)
-		return NULL;
+	if (glGetError() == GL_NO_ERROR)
+		res = g_byte_array_ref(this->buf);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glDeleteTextures(1, &texture);
 
+clean_image:
 	eglDestroyImage(this->display, image);
 
-	return g_byte_array_ref(this->buf);
+out:
+	return res;
 }
