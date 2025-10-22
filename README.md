@@ -18,7 +18,7 @@ DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/log
 ## What ReFrame May Support in Future
 
 - RDP
-- Draw Remote Cursor: Cursor are typically handled in another plane, I currently have no idea on how to handle it.
+- Draw Remote Cursor: Cursors are typically handled in a independent plane, I currently have no idea on how to handle it. VNC clients typically draw a cursor in their window, but if you really need the remote cursor, you can work around it by using software rendered cursor instead of hardware rendered cursor, so your compositor will blend the cursor into primary plane and ReFrame can capture it, for example, setting `MUTTER_DEBUG_DISABLE_HW_CURSORS=1` will let GNOME use software rendered cursor.
 
 ## What ReFrame Won't Support
 
