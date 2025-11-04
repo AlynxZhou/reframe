@@ -23,6 +23,7 @@ struct _RfStreamer {
 	int monitor_x;
 	int monitor_y;
 	unsigned int rotation;
+	// These are the real size of monitor and have nothing with VNC.
 	unsigned int width;
 	unsigned int height;
 	bool running;
@@ -270,8 +271,8 @@ static void rf_streamer_init(RfStreamer *this)
 	this->monitor_x = 0;
 	this->monitor_y = 0;
 	this->rotation = 0;
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
+	this->width = 0;
+	this->height = 0;
 	this->running = false;
 }
 
@@ -326,15 +327,6 @@ int rf_streamer_start(RfStreamer *this)
 	if (this->running)
 		return 0;
 
-	// Keep all size initialization the same.
-	// Assuming most monitors are landscape.
-	this->rotation = rf_config_get_rotation(this->config);
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
-	if (this->rotation % 180 != 0) {
-		this->height = RF_DEFAULT_WIDTH;
-		this->width = RF_DEFAULT_HEIGHT;
-	}
 	unsigned int fps = rf_config_get_fps(this->config);
 	this->max_interval = 1000000 / fps;
 	g_message("Frame: Got FPS %u.", fps);
@@ -352,6 +344,10 @@ int rf_streamer_start(RfStreamer *this)
 		this->monitor_x,
 		this->monitor_y
 	);
+	this->rotation = rf_config_get_rotation(this->config);
+	g_message("Frame: Got screen rotation %u.", this->rotation);
+	this->width = 0;
+	this->height = 0;
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
 	);

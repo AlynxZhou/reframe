@@ -221,8 +221,6 @@ static int _on_set_desktop_size(
 {
 	RfVNCServer *this = client->screen->screenData;
 	if (width != this->width || height != this->height) {
-		this->width = width;
-		this->height = height;
 		g_debug("VNC: Emitting size request signal: width %d, height %d.",
 			width,
 			height);
@@ -332,8 +330,8 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	this->passwords[0] = NULL;
 	this->passwords[1] = NULL;
 	this->connector = NULL;
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
+	this->width = 0;
+	this->height = 0;
 	this->running = false;
 }
 
@@ -431,15 +429,6 @@ void rf_vnc_server_start(RfVNCServer *this)
 	if (this->running)
 		return;
 
-	// Keep all size initialization the same.
-	unsigned int rotation = rf_config_get_rotation(this->config);
-	// Assuming most monitors are landscape.
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
-	if (rotation % 180 != 0) {
-		this->height = RF_DEFAULT_WIDTH;
-		this->width = RF_DEFAULT_HEIGHT;
-	}
 	g_autoptr(GError) error = NULL;
 	unsigned int port = rf_config_get_port(this->config);
 	g_message("VNC: Listening on port %u.", port);
@@ -450,6 +439,9 @@ void rf_vnc_server_start(RfVNCServer *this)
 		g_error("Failed to listen on port %u: %s.",
 			port,
 			error->message);
+
+	this->width = 0;
+	this->height = 0;
 
 	this->running = true;
 }
@@ -468,18 +460,31 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
 }
 
-void rf_vnc_server_update(RfVNCServer *this, GByteArray *buf)
+void rf_vnc_server_update(
+	RfVNCServer *this,
+	GByteArray *buf,
+	unsigned int width,
+	unsigned int height
+)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 	g_return_if_fail(buf != NULL);
+	g_return_if_fail(width > 0 && height > 0);
 
 	if (!this->running || this->screen == NULL ||
 	    !rfbIsActive(this->screen))
 		return;
 
-	if (this->buf != buf) {
-		g_clear_pointer(&this->buf, g_byte_array_unref);
-		this->buf = g_byte_array_ref(buf);
+	if (this->buf != buf || this->width != width ||
+	    this->height != height) {
+		if (this->buf != buf) {
+			g_clear_pointer(&this->buf, g_byte_array_unref);
+			this->buf = g_byte_array_ref(buf);
+		}
+		if (this->width != width || this->height != height) {
+			this->width = width;
+			this->height = height;
+		}
 		rfbNewFramebuffer(
 			this->screen,
 			(char *)this->buf->data,

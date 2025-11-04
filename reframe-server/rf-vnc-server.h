@@ -13,7 +13,12 @@ G_DECLARE_FINAL_TYPE(RfVNCServer, rf_vnc_server, RF, VNC_SERVER, GSocketService)
 RfVNCServer *rf_vnc_server_new(RfConfig *config);
 void rf_vnc_server_start(RfVNCServer *this);
 void rf_vnc_server_stop(RfVNCServer *this);
-void rf_vnc_server_update(RfVNCServer *this, GByteArray *buf);
+void rf_vnc_server_update(
+	RfVNCServer *this,
+	GByteArray *buf,
+	unsigned int width,
+	unsigned int height
+);
 void rf_vnc_server_flush(RfVNCServer *this);
 
 G_END_DECLS

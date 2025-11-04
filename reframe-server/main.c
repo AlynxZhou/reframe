@@ -13,6 +13,7 @@ struct _this {
 	RfVNCServer *vnc;
 	unsigned int width;
 	unsigned int height;
+	unsigned int rotation;
 };
 
 static void
@@ -28,16 +29,30 @@ static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 {
 	struct _this *this = data;
 
+	if (this->width == 0 && this->height == 0) {
+		if (this->rotation % 180 == 0) {
+			this->width = b->md.width;
+			this->height = b->md.height;
+		} else {
+			this->width = b->md.height;
+			this->height = b->md.width;
+		}
+	}
+
 	g_autoptr(GByteArray) buf = rf_converter_convert(
 		this->converter, b, this->width, this->height
 	);
 	if (buf != NULL)
-		rf_vnc_server_update(this->vnc, buf);
+		rf_vnc_server_update(this->vnc, buf, this->width, this->height);
 }
 
 static void _on_first_client(RfVNCServer *v, gpointer data)
 {
 	struct _this *this = data;
+
+	this->rotation = rf_config_get_rotation(this->config);
+	this->width = 0;
+	this->height = 0;
 
 	if (rf_streamer_start(this->streamer) < 0 ||
 	    rf_converter_start(this->converter) < 0)
@@ -118,15 +133,9 @@ int main(int argc, char *argv[])
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
-	// Keep all size initialization the same.
-	unsigned int rotation = rf_config_get_rotation(this->config);
-	// Assuming most monitors are landscape.
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
-	if (rotation % 180 != 0) {
-		this->height = RF_DEFAULT_WIDTH;
-		this->width = RF_DEFAULT_HEIGHT;
-	}
+	this->rotation = rf_config_get_rotation(this->config);
+	this->width = 0;
+	this->height = 0;
 	this->streamer = rf_streamer_new(this->config);
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
@@ -165,6 +174,7 @@ int main(int argc, char *argv[])
 	this->main_loop = g_main_loop_new(NULL, FALSE);
 	g_main_loop_run(this->main_loop);
 
+	rf_vnc_server_stop(this->vnc);
 	g_object_unref(this->vnc);
 	g_object_unref(this->converter);
 	g_object_unref(this->streamer);

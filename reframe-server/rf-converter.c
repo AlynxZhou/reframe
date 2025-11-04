@@ -381,8 +381,6 @@ static int _setup_gl(RfConverter *this)
 
 	glGenFramebuffers(1, &this->framebuffer);
 
-	_gen_texture(this);
-
 	glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
 
 	return 0;
@@ -437,8 +435,8 @@ static void rf_converter_init(RfConverter *this)
 	this->vertex_array = 0;
 	this->framebuffer = 0;
 	this->texture = 0;
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
+	this->width = 0;
+	this->height = 0;
 	this->rotation = 0;
 	this->running = false;
 }
@@ -465,16 +463,10 @@ int rf_converter_start(RfConverter *this)
 		return 0;
 
 	this->device_id = rf_config_get_device_id(this->config);
-	// Keep all size initialization the same.
 	this->rotation = rf_config_get_rotation(this->config);
 	g_message("GL: Got screen rotation %u.", this->rotation);
-	// Assuming most monitors are landscape.
-	this->width = RF_DEFAULT_WIDTH;
-	this->height = RF_DEFAULT_HEIGHT;
-	if (this->rotation % 180 != 0) {
-		this->height = RF_DEFAULT_WIDTH;
-		this->width = RF_DEFAULT_HEIGHT;
-	}
+	this->width = 0;
+	this->height = 0;
 	int ret = 0;
 	ret = _setup_egl(this);
 	if (ret < 0)
@@ -482,9 +474,6 @@ int rf_converter_start(RfConverter *this)
 	ret = _setup_gl(this);
 	if (ret < 0)
 		goto clean_gl;
-	this->buf = g_byte_array_sized_new(
-		RF_BYTES_PER_PIXEL * this->width * this->height
-	);
 
 	this->running = true;
 	goto out;
