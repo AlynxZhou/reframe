@@ -130,7 +130,8 @@ static void _schedule_frame_request(RfStreamer *this)
 			this
 		);
 	} else {
-		g_warning("Frame: Converting frame too slow.");
+		if (this->last_frame_time != -1)
+			g_warning("Frame: Converting frame too slow.");
 		this->timer_id = g_timeout_add(1, _send_frame_request, this);
 	}
 }
@@ -264,7 +265,7 @@ static void rf_streamer_init(RfStreamer *this)
 	this->io_flags = G_IO_IN | G_IO_PRI;
 	this->source = NULL;
 	this->timer_id = 0;
-	this->last_frame_time = g_get_monotonic_time();
+	this->last_frame_time = -1;
 	this->max_interval = 1000000 / 30;
 	this->desktop_width = 0;
 	this->desktop_height = 0;
@@ -327,6 +328,7 @@ int rf_streamer_start(RfStreamer *this)
 	if (this->running)
 		return 0;
 
+	this->last_frame_time = -1;
 	unsigned int fps = rf_config_get_fps(this->config);
 	this->max_interval = 1000000 / fps;
 	g_message("Frame: Got FPS %u.", fps);
@@ -361,7 +363,7 @@ int rf_streamer_start(RfStreamer *this)
 		this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL
 	);
 	g_source_attach(this->source, NULL);
-	_send_frame_request(this);
+	_schedule_frame_request(this);
 
 	this->running = true;
 	g_debug("Emitting ReFrame Streamer start signal.");

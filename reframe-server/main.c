@@ -54,8 +54,8 @@ static void _on_first_client(RfVNCServer *v, gpointer data)
 	this->width = 0;
 	this->height = 0;
 
-	if (rf_streamer_start(this->streamer) < 0 ||
-	    rf_converter_start(this->converter) < 0)
+	if (rf_converter_start(this->converter) < 0 ||
+	    rf_streamer_start(this->streamer) < 0)
 		rf_vnc_server_flush(this->vnc);
 }
 
@@ -63,8 +63,8 @@ static void _on_last_client(RfVNCServer *v, gpointer data)
 {
 	struct _this *this = data;
 
-	rf_converter_stop(this->converter);
 	rf_streamer_stop(this->streamer);
+	rf_converter_stop(this->converter);
 }
 
 int main(int argc, char *argv[])
