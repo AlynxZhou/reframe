@@ -70,3 +70,8 @@ if systemd.found()
     'username': username
   }, section: 'Confiuration')
 endif
+
+meson.add_install_script(
+  'meson_post_install.sh',
+  skip_if_destdir: true
+)

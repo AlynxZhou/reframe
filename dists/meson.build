@@ -9,7 +9,6 @@ if systemd.found()
     },
     install_dir: systemunitdir
   )
-
   configure_file(
     input: 'reframe-streamer@.service.in',
     output: 'reframe-streamer@.service',
@@ -20,7 +19,6 @@ if systemd.found()
     },
     install_dir: systemunitdir
   )
-
   configure_file(
     input: 'reframe@.socket.in',
     output: 'reframe@.socket',
@@ -37,10 +35,6 @@ if systemd.found()
       'username': username
     },
     install_dir: sysusersdir
-  )
-  meson.add_install_script(
-    'systemd-sysusers',
-    skip_if_destdir: true
   )
 
   install_data(
