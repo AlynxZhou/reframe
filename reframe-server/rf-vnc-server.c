@@ -236,6 +236,7 @@ static gboolean _incoming(
 )
 {
 	RfVNCServer *this = RF_VNC_SERVER(service);
+
 	if (this->screen == NULL) {
 		this->screen = rfbGetScreen(
 			0,
@@ -296,8 +297,6 @@ static void _finalize(GObject *o)
 {
 	RfVNCServer *this = RF_VNC_SERVER(o);
 
-	g_clear_pointer(&this->connector, g_free);
-	g_clear_pointer(&this->passwords[0], g_free);
 	g_clear_pointer(&this->screen, rfbScreenCleanup);
 	g_clear_pointer(&this->xkb_keymap, xkb_keymap_unref);
 	g_clear_pointer(&this->xkb_context, xkb_context_unref);
@@ -417,8 +416,6 @@ RfVNCServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfVNCServer *this = g_object_new(RF_TYPE_VNC_SERVER, NULL);
 	this->config = config;
-	this->passwords[0] = rf_config_get_password(this->config);
-	this->connector = rf_config_get_connector(this->config);
 	return this;
 }
 
@@ -440,14 +437,25 @@ void rf_vnc_server_start(RfVNCServer *this)
 			port,
 			error->message);
 
+	this->passwords[0] = rf_config_get_password(this->config);
+	this->connector = rf_config_get_connector(this->config);
+
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
-	if (this->width != 0 && this->height != 0)
+	if (this->width == 0 || this->height == 0) {
+		// `0x0` is not a valid size for VNC, so we set a initial value
+		// here and wait until it resizes to first frame size in main.
+		// Remember this is only for making VNC happy and we keep `0x0`
+		// in main so it knows we need to resize later.
+		this->width = 800;
+		this->height = 600;
+	} else {
 		g_message(
 			"VNC: Got default width %u and height %u.",
 			this->width,
 			this->height
 		);
+	}
 
 	this->running = true;
 }
@@ -463,6 +471,8 @@ void rf_vnc_server_stop(RfVNCServer *this)
 
 	rf_vnc_server_flush(this);
 	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->connector, g_free);
+	g_clear_pointer(&this->passwords[0], g_free);
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
 }
 

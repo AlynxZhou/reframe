@@ -29,7 +29,7 @@ static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 {
 	struct _this *this = data;
 
-	if (this->width == 0 && this->height == 0) {
+	if (this->width == 0 || this->height == 0) {
 		if (this->rotation % 180 == 0) {
 			this->width = b->md.width;
 			this->height = b->md.height;
