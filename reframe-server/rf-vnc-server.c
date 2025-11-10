@@ -221,7 +221,7 @@ static int _on_set_desktop_size(
 {
 	RfVNCServer *this = client->screen->screenData;
 	if (width != this->width || height != this->height) {
-		g_debug("VNC: Emitting size request signal: width %d, height %d.",
+		g_debug("VNC: Emitting resize signal for width %d and height %d.",
 			width,
 			height);
 		g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
@@ -266,7 +266,7 @@ static gboolean _incoming(
 	}
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	int fd = g_socket_get_fd(socket);
-	g_debug("VNC: New connection socket fd: %d.", fd);
+	g_debug("VNC: New connection socket fd %d.", fd);
 	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
 	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = g_object_ref(connection);

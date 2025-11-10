@@ -10,6 +10,7 @@ struct _RfConverter {
 	RfConfig *config;
 	int device_id;
 	GByteArray *buf;
+	unsigned int gles_major;
 	EGLDisplay display;
 	EGLContext context;
 	unsigned int program;
@@ -35,12 +36,12 @@ static int _setup_egl(RfConverter *this)
 	EGLConfig *configs;
 	// clang-format off
 	EGLint config_attribs[] = {
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
 		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
 		EGL_ALPHA_SIZE, 8,
-		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
 		EGL_NONE
 	};
 	EGLint context_attribs[] = {
@@ -98,13 +99,20 @@ static int _setup_egl(RfConverter *this)
 		g_warning("EGL: Failed to initialize: %d.", eglGetError());
 		return -2;
 	}
-	g_debug("EGL: Version is major %d, minor %d.", major, minor);
+	g_debug("EGL: Got version major %d and minor %d.", major, minor);
 
 	eglBindAPI(EGL_OPENGL_ES_API);
 
 	eglGetConfigs(this->display, NULL, 0, &count);
 	configs = g_malloc_n(count, sizeof(*configs));
-	eglChooseConfig(this->display, config_attribs, configs, count, &n);
+	if (!eglChooseConfig(
+		    this->display, config_attribs, configs, count, &n
+	    )) {
+		config_attribs[1] = EGL_OPENGL_ES2_BIT;
+		eglChooseConfig(
+			this->display, config_attribs, configs, count, &n
+		);
+	}
 	for (int i = 0; i < n; ++i) {
 		eglGetConfigAttrib(
 			this->display, configs[i], EGL_BUFFER_SIZE, &size
@@ -115,9 +123,20 @@ static int _setup_egl(RfConverter *this)
 		}
 	}
 
+	this->gles_major = 3;
 	this->context = eglCreateContext(
 		this->display, config, EGL_NO_CONTEXT, context_attribs
 	);
+	if (this->context == EGL_NO_CONTEXT) {
+		g_message(
+			"EGL: Failed to create GLES v3 context, fallback to GLES v2."
+		);
+		this->gles_major = 2;
+		context_attribs[1] = 2;
+		this->context = eglCreateContext(
+			this->display, config, EGL_NO_CONTEXT, context_attribs
+		);
+	}
 	if (this->context == EGL_NO_CONTEXT) {
 		g_warning("EGL: Failed to create context: %d.", eglGetError());
 		return -3;
@@ -156,42 +175,6 @@ static void _gl_message(
 		g_warning("GL: Failed to call command: %s.", message);
 }
 #endif
-
-static void _gen_texture(RfConverter *this)
-{
-	g_debug("GL: Generating new texture for width %d and height %d.",
-		this->width,
-		this->height);
-
-	if (this->texture != 0)
-		glDeleteTextures(1, &this->texture);
-
-	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
-	glGenTextures(1, &this->texture);
-	glBindTexture(GL_TEXTURE_2D, this->texture);
-	glTexImage2D(
-		GL_TEXTURE_2D,
-		0,
-		GL_RGBA,
-		this->width,
-		this->height,
-		0,
-		GL_RGBA,
-		GL_UNSIGNED_BYTE,
-		NULL
-	);
-	glFramebufferTexture2D(
-		GL_FRAMEBUFFER,
-		GL_COLOR_ATTACHMENT0,
-		GL_TEXTURE_2D,
-		this->texture,
-		0
-	);
-	GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
-	glDrawBuffers(1, &draw_buffer);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
 
 static unsigned int _make_shader(GLenum type, const char *s)
 {
@@ -235,6 +218,52 @@ static unsigned int _make_program(const char *vs, const char *fs)
 	return program;
 }
 
+static void _bind_buffers(RfConverter *this)
+{
+	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
+	glVertexAttribPointer(
+		glGetAttribLocation(this->program, "in_position"),
+		2,
+		GL_FLOAT,
+		GL_FALSE,
+		2 * sizeof(float),
+		0
+	);
+	glEnableVertexAttribArray(
+		glGetAttribLocation(this->program, "in_position")
+	);
+
+	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
+	glVertexAttribPointer(
+		glGetAttribLocation(this->program, "in_coordinate"),
+		2,
+		GL_FLOAT,
+		GL_FALSE,
+		2 * sizeof(float),
+		0
+	);
+	glEnableVertexAttribArray(
+		glGetAttribLocation(this->program, "in_coordinate")
+	);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
+}
+
+static void _unbind_buffers(RfConverter *this)
+{
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDisableVertexAttribArray(
+		glGetAttribLocation(this->program, "in_position")
+	);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDisableVertexAttribArray(
+		glGetAttribLocation(this->program, "in_coordinate")
+	);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
 static int _setup_gl(RfConverter *this)
 {
 	if (!eglMakeCurrent(
@@ -257,27 +286,53 @@ static int _setup_gl(RfConverter *this)
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(false);
 
-	const char vs[] =
-		"#version 300 es\n"
-		"in vec2 in_position;\n"
-		"in vec2 in_coordinate;\n"
-		"out vec2 pass_coordinate;\n"
-		"void main() {\n"
-		"	gl_Position = vec4(in_position, 0.0f, 1.0f);\n"
-		"	pass_coordinate = in_coordinate;\n"
-		"}\n";
-	const char fs[] =
-		"#version 300 es\n"
-		"precision mediump float;\n"
-		"uniform sampler2D image;\n"
-		"in vec2 pass_coordinate;\n"
-		"out vec4 out_color;\n"
-		"void main() {\n"
-		"	out_color = texture(image, pass_coordinate);\n"
-		"}\n";
-	this->program = _make_program(vs, fs);
+	if (this->gles_major >= 3) {
+		const char vs[] =
+			"#version 300 es\n"
+			"in vec2 in_position;\n"
+			"in vec2 in_coordinate;\n"
+			"out vec2 pass_coordinate;\n"
+			"void main() {\n"
+			"	gl_Position = vec4(in_position, 0.0f, 1.0f);\n"
+			"	pass_coordinate = in_coordinate;\n"
+			"}\n";
+		const char fs[] =
+			"#version 300 es\n"
+			"precision mediump float;\n"
+			"uniform sampler2D image;\n"
+			"in vec2 pass_coordinate;\n"
+			"out vec4 out_color;\n"
+			"void main() {\n"
+			"	out_color = texture(image, pass_coordinate);\n"
+			"}\n";
+		this->program = _make_program(vs, fs);
+	} else {
+		const char vs[] =
+			"#version 100\n"
+			"attribute vec2 in_position;\n"
+			"attribute vec2 in_coordinate;\n"
+			"varying vec2 pass_coordinate;\n"
+			"void main() {\n"
+			"	gl_Position = vec4(in_position, 0.0, 1.0);\n"
+			"	pass_coordinate = in_coordinate;\n"
+			"}\n";
+		const char fs[] =
+			"#version 100\n"
+			"precision mediump float;\n"
+			"uniform sampler2D image;\n"
+			"varying vec2 pass_coordinate;\n"
+			"void main() {\n"
+			"	gl_FragColor = texture2D(image, pass_coordinate);\n"
+			"}\n";
+		this->program = _make_program(vs, fs);
+	}
 	if (this->program == 0)
 		return -5;
+
+	glUseProgram(this->program);
+	// Use texture 0 for this sampler. This only needs to be done once.
+	glUniform1i(glGetUniformLocation(this->program, "image"), 0);
+	glUseProgram(0);
 
 	glGenBuffers(3, this->buffers);
 
@@ -345,39 +400,13 @@ static int _setup_gl(RfConverter *this)
 	);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-	glGenVertexArrays(1, &this->vertex_array);
+	if (this->gles_major >= 3) {
+		glGenVertexArrays(1, &this->vertex_array);
 
-	glBindVertexArray(this->vertex_array);
-
-	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
-	glVertexAttribPointer(
-		glGetAttribLocation(this->program, "in_position"),
-		2,
-		GL_FLOAT,
-		GL_FALSE,
-		2 * sizeof(*vertices),
-		0
-	);
-	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_position")
-	);
-
-	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
-	glVertexAttribPointer(
-		glGetAttribLocation(this->program, "in_coordinate"),
-		2,
-		GL_FLOAT,
-		GL_FALSE,
-		2 * sizeof(*coordinates),
-		0
-	);
-	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_coordinate")
-	);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
-
-	glBindVertexArray(0);
+		glBindVertexArray(this->vertex_array);
+		_bind_buffers(this);
+		glBindVertexArray(0);
+	}
 
 	glGenFramebuffers(1, &this->framebuffer);
 
@@ -426,8 +455,9 @@ static void rf_converter_init(RfConverter *this)
 	this->config = NULL;
 	this->device_id = -1;
 	this->buf = NULL;
-	this->context = EGL_NO_CONTEXT;
+	this->gles_major = 3;
 	this->display = EGL_NO_DISPLAY;
+	this->context = EGL_NO_CONTEXT;
 	this->program = 0;
 	this->buffers[0] = 0;
 	this->buffers[1] = 0;
@@ -504,6 +534,42 @@ static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 {
 	g_array_append_val(a, k);
 	g_array_append_val(a, v);
+}
+
+static void _gen_texture(RfConverter *this)
+{
+	g_debug("GL: Generating new texture for width %d and height %d.",
+		this->width,
+		this->height);
+
+	if (this->texture != 0)
+		glDeleteTextures(1, &this->texture);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
+	glGenTextures(1, &this->texture);
+	glBindTexture(GL_TEXTURE_2D, this->texture);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		GL_RGBA,
+		this->width,
+		this->height,
+		0,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		NULL
+	);
+	glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		GL_TEXTURE_2D,
+		this->texture,
+		0
+	);
+	GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
+	glDrawBuffers(1, &draw_buffer);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 GByteArray *rf_converter_convert(
@@ -610,6 +676,7 @@ GByteArray *rf_converter_convert(
 
 	unsigned int texture;
 	glGenTextures(1, &texture);
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	// Setting sampling filter to scaling texture automatically.
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -631,12 +698,16 @@ GByteArray *rf_converter_convert(
 	glViewport(0, 0, this->width, this->height);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glUseProgram(this->program);
-	glUniform1i(glGetUniformLocation(this->program, "image"), 0);
-	glActiveTexture(GL_TEXTURE0);
-	glBindVertexArray(this->vertex_array);
+	if (this->gles_major >= 3)
+		glBindVertexArray(this->vertex_array);
+	else
+		_bind_buffers(this);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	// g_debug("glDrawElements: %#x", glGetError());
-	glBindVertexArray(0);
+	if (this->gles_major >= 3)
+		glBindVertexArray(0);
+	else
+		_unbind_buffers(this);
 	glUseProgram(0);
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
