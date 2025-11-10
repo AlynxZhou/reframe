@@ -17,6 +17,8 @@ unsigned int rf_config_get_desktop_height(RfConfig *this);
 int rf_config_get_monitor_x(RfConfig *this);
 int rf_config_get_monitor_y(RfConfig *this);
 unsigned int rf_config_get_rotation(RfConfig *this);
+unsigned int rf_config_get_default_width(RfConfig *this);
+unsigned int rf_config_get_default_height(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
 unsigned int rf_config_get_port(RfConfig *this);
 char *rf_config_get_password(RfConfig *this);

@@ -112,6 +112,10 @@ If you have more than 1 monitors, you need to set the size of the whole virtual 
 
 Unfortunately there are no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
 
+If you rotated your monitor, set the value of `rotation` to the angle.
+
+By default it will try to resize the VNC client size to monitor size on start and follow the resize of VNC client, however, if you are using a VNC client that does not support resizing, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
+
 You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.
 
 You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.

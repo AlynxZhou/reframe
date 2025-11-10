@@ -159,6 +159,32 @@ unsigned int rf_config_get_rotation(RfConfig *this)
 	return rotation % 360;
 }
 
+unsigned int rf_config_get_default_width(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
+
+	g_autoptr(GError) error = NULL;
+	unsigned int default_width = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "default-width", &error
+	);
+	if (error != NULL)
+		return 0;
+	return default_width;
+}
+
+unsigned int rf_config_get_default_height(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
+
+	g_autoptr(GError) error = NULL;
+	unsigned int default_height = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "default-height", &error
+	);
+	if (error != NULL)
+		return 0;
+	return default_height;
+}
+
 unsigned int rf_config_get_fps(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);

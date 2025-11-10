@@ -440,8 +440,14 @@ void rf_vnc_server_start(RfVNCServer *this)
 			port,
 			error->message);
 
-	this->width = 0;
-	this->height = 0;
+	this->width = rf_config_get_default_width(this->config);
+	this->height = rf_config_get_default_height(this->config);
+	if (this->width != 0 && this->height != 0)
+		g_message(
+			"VNC: Got default width %u and height %u.",
+			this->width,
+			this->height
+		);
 
 	this->running = true;
 }

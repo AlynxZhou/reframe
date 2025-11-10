@@ -51,8 +51,8 @@ static void _on_first_client(RfVNCServer *v, gpointer data)
 	struct _this *this = data;
 
 	this->rotation = rf_config_get_rotation(this->config);
-	this->width = 0;
-	this->height = 0;
+	this->width = rf_config_get_default_width(this->config);
+	this->height = rf_config_get_default_height(this->config);
 
 	if (rf_converter_start(this->converter) < 0 ||
 	    rf_streamer_start(this->streamer) < 0)
@@ -134,8 +134,8 @@ int main(int argc, char *argv[])
 	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
 	this->rotation = rf_config_get_rotation(this->config);
-	this->width = 0;
-	this->height = 0;
+	this->width = rf_config_get_default_width(this->config);
+	this->height = rf_config_get_default_height(this->config);
 	this->streamer = rf_streamer_new(this->config);
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
