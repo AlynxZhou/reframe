@@ -1,4 +1,6 @@
+#include "glib.h"
 #include <epoxy/egl.h>
+#include <epoxy/egl_generated.h>
 #include <epoxy/gl.h>
 #include <libdrm/drm_fourcc.h>
 
@@ -8,7 +10,7 @@
 struct _RfConverter {
 	GObject parent_instance;
 	RfConfig *config;
-	int device_id;
+	char *card_path;
 	GByteArray *buf;
 	unsigned int gles_major;
 	EGLDisplay display;
@@ -24,6 +26,40 @@ struct _RfConverter {
 	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
+
+static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
+{
+	int max_devices = 0;
+	int num_devices = 0;
+	EGLDeviceEXT device = EGL_NO_DEVICE_EXT;
+	if (!eglQueryDevicesEXT(0, NULL, &max_devices)) {
+		g_warning(
+			"EGL: Failed to query max devices: %d.", eglGetError()
+		);
+		return EGL_NO_DISPLAY;
+	}
+	g_autofree EGLDeviceEXT *devices =
+		g_malloc0_n(max_devices, sizeof(*devices));
+	if (!eglQueryDevicesEXT(max_devices, devices, &num_devices)) {
+		g_warning("EGL: Failed to query devices: %d.", eglGetError());
+		return EGL_NO_DISPLAY;
+	}
+	for (size_t i = 0; i < num_devices; ++i) {
+		if (g_strcmp0(
+			    card_path,
+			    eglQueryDeviceStringEXT(
+				    devices[i], EGL_DRM_DEVICE_FILE_EXT
+			    )
+		    ) == 0) {
+			device = devices[i];
+			break;
+		}
+	}
+	if (device == EGL_NO_DEVICE_EXT)
+		return EGL_NO_DISPLAY;
+	g_message("EGL: Got device for %s.", card_path);
+	return eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, device, NULL);
+}
 
 static int _setup_egl(RfConverter *this)
 {
@@ -53,45 +89,17 @@ static int _setup_egl(RfConverter *this)
 	};
 	// clang-format on
 
-	if (this->device_id < 0) {
-		this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	} else {
-		// We assume EGL devices always hold the same ID on enumeration,
-		// otherwise we don't have a better approach to select device.
-		int max_devices = 0;
-		int num_devices = 0;
-		if (!eglQueryDevicesEXT(0, NULL, &max_devices)) {
-			g_warning(
-				"EGL: Failed to query max devices: %d.",
-				eglGetError()
-			);
-			return -6;
-		}
-		g_autofree EGLDeviceEXT *devices =
-			g_malloc0_n(max_devices, sizeof(*devices));
-		if (!eglQueryDevicesEXT(max_devices, devices, &num_devices)) {
-			g_warning(
-				"EGL: Failed to query devices: %d.",
-				eglGetError()
-			);
-			return -7;
-		}
-		if (this->device_id < num_devices) {
-			g_message("EGL: Using device ID %d.", this->device_id);
-		} else {
-			g_warning(
-				"EGL: Device ID is %d, but only got %d devices, using device ID 0.",
-				this->device_id,
-				num_devices
-			);
-			this->device_id = 0;
-		}
-		this->display = eglGetPlatformDisplayEXT(
-			EGL_PLATFORM_DEVICE_EXT, devices[this->device_id], NULL
+	this->display = _get_egl_display_from_drm_card(this->card_path);
+	if (this->display == EGL_NO_DISPLAY) {
+		g_warning(
+			"EGL: Failed to get platform display. Fallback to default display (may not work if you have more than one GPUs)."
 		);
+		this->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	}
 	if (this->display == EGL_NO_DISPLAY) {
-		g_warning("EGL: Failed to get display: %d.", eglGetError());
+		g_warning(
+			"EGL: Failed to get default display: %d.", eglGetError()
+		);
 		return -1;
 	}
 
@@ -453,7 +461,7 @@ static void _finalize(GObject *o)
 static void rf_converter_init(RfConverter *this)
 {
 	this->config = NULL;
-	this->device_id = -1;
+	this->card_path = NULL;
 	this->buf = NULL;
 	this->gles_major = 3;
 	this->display = EGL_NO_DISPLAY;
@@ -492,7 +500,7 @@ int rf_converter_start(RfConverter *this)
 	if (this->running)
 		return 0;
 
-	this->device_id = rf_config_get_device_id(this->config);
+	this->card_path = rf_config_get_card_path(this->config);
 	this->rotation = rf_config_get_rotation(this->config);
 	g_message("GL: Got screen rotation %u.", this->rotation);
 	this->width = 0;
@@ -526,6 +534,7 @@ void rf_converter_stop(RfConverter *this)
 	this->running = false;
 
 	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->card_path, g_free);
 	_clean_gl(this);
 	_clean_egl(this);
 }

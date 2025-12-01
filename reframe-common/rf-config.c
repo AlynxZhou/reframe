@@ -74,19 +74,6 @@ char *rf_config_get_connector(RfConfig *this)
 	return connector;
 }
 
-int rf_config_get_device_id(RfConfig *this)
-{
-	g_return_val_if_fail(RF_IS_CONFIG(this), -1);
-
-	g_autoptr(GError) error = NULL;
-	int device_id = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "device-id", &error
-	);
-	if (error != NULL)
-		return -1;
-	return device_id;
-}
-
 unsigned int rf_config_get_desktop_width(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
