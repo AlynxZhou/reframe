@@ -161,7 +161,7 @@ _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 		goto stop;
 	}
 
-	for (int i = 0; i < RF_MAX_PLANES; ++i)
+	for (int i = 0; i < RF_MAX_FDS; ++i)
 		b.fds[i] = -1;
 
 	// We should only receive 1 message each time, but if we get many
@@ -192,30 +192,7 @@ _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 		}
 	}
 
-	g_debug("Frame: Got frame metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
-		b.md.length,
-		b.md.width,
-		b.md.height,
-		(b.md.fourcc >> 0) & 0xff,
-		(b.md.fourcc >> 8) & 0xff,
-		(b.md.fourcc >> 16) & 0xff,
-		(b.md.fourcc >> 24) & 0xff,
-		b.md.modifier);
-	g_debug("Frame: Got frame fds: %d %d %d %d.",
-		b.fds[0],
-		b.fds[1],
-		b.fds[2],
-		b.fds[3]);
-	g_debug("Frame: Got frame offsets: %u %u %u %u.",
-		b.md.offsets[0],
-		b.md.offsets[1],
-		b.md.offsets[2],
-		b.md.offsets[3]);
-	g_debug("Frame: Got frame pitches: %u %u %u %u.",
-		b.md.pitches[0],
-		b.md.pitches[1],
-		b.md.pitches[2],
-		b.md.pitches[3]);
+	rf_buffer_debug(&b);
 
 	if (this->width != b.md.width || this->height != b.md.height) {
 		if (this->rotation % 180 == 0) {
