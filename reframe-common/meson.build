@@ -1,4 +1,5 @@
 sources = files(
+  'rf-common.c',
   'rf-buffer.c',
   'rf-config.c'
 )

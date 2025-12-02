@@ -493,6 +493,15 @@ RfConverter *rf_converter_new(RfConfig *config)
 	return this;
 }
 
+void rf_converter_set_card_path(RfConverter *this, const char *card_path)
+{
+	g_return_if_fail(RF_IS_CONVERTER(this));
+	g_return_if_fail(card_path != NULL);
+
+	g_clear_pointer(&this->card_path, g_free);
+	this->card_path = g_strdup(card_path);
+}
+
 int rf_converter_start(RfConverter *this)
 {
 	g_return_val_if_fail(RF_IS_CONVERTER(this), -1);
@@ -500,7 +509,10 @@ int rf_converter_start(RfConverter *this)
 	if (this->running)
 		return 0;
 
-	this->card_path = rf_config_get_card_path(this->config);
+	if (this->card_path == NULL) {
+		g_warning("EGL: Card path is not set, fallback to config.");
+		this->card_path = rf_config_get_card_path(this->config);
+	}
 	this->rotation = rf_config_get_rotation(this->config);
 	g_message("GL: Got screen rotation %u.", this->rotation);
 	this->width = 0;

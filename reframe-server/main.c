@@ -25,6 +25,14 @@ _on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
 	this->height = height;
 }
 
+static void _on_card_path(RfStreamer *s, const char *card_path, gpointer data)
+{
+	struct _this *this = data;
+	rf_converter_set_card_path(this->converter, card_path);
+	if (rf_converter_start(this->converter) < 0)
+		rf_vnc_server_flush(this->vnc);
+}
+
 static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
 {
 	struct _this *this = data;
@@ -54,8 +62,7 @@ static void _on_first_client(RfVNCServer *v, gpointer data)
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
 
-	if (rf_converter_start(this->converter) < 0 ||
-	    rf_streamer_start(this->streamer) < 0)
+	if (rf_streamer_start(this->streamer) < 0)
 		rf_vnc_server_flush(this->vnc);
 }
 
@@ -146,6 +153,9 @@ int main(int argc, char *argv[])
 		"stop",
 		G_CALLBACK(rf_vnc_server_flush),
 		this->vnc
+	);
+	g_signal_connect(
+		this->streamer, "card-path", G_CALLBACK(_on_card_path), this
 	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
 	g_signal_connect(

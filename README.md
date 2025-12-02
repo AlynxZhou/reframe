@@ -94,9 +94,13 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 
 **Security Warning**: VNC data streams are not encrypted even with password authenciation, so **never** expose this to public network directly! Connecting to it via VPN is a better idea.
 
-First copy the example configuration and modify it according to your monitors.
+If you happen to have only 1 connected monitor and you never rotate it, it should work out of the box without modify the example configuration. Run `systemctl start reframe-server@example.service` and try connecting to it.
 
-This program handles only 1 monitor, so I suggest to use your selected monitor connector name as configuration name.
+If it cannot correctly find your monitor, you need to manually select monitor via DRM card and connector.
+
+#### Select Monitor via DRM Card and Connector
+
+First copy the example configuration and modify it. This program handles only 1 monitor, so I suggest to use your selected monitor connector name as configuration name.
 
 DRM connector name and card name can be found in `/sys/class/drm/`.
 
@@ -106,19 +110,9 @@ DRM connector name and card name can be found in `/sys/class/drm/`.
 
 Set connector name and card name to what your system uses for your selected monitor.
 
-If you have multi-GPU (likely you are using a laptop with a integrated GPU and a discrete GPU), you need to select EGL device by setting device ID. EGL device must match DRM card, which is the one that outputs via selected connector (generally it is the integrated GPU). IDs can be found by running `eglinfo -B`.
-
-If you have more than 1 monitors, you need to set the size of the whole virtual desktop, and the position offset of your selected monitor.
-
-Unfortunately there are no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
-
 If you rotated your monitor, set the value of `rotation` to the angle.
 
 By default it will try to resize the VNC client size to monitor size on start and follow the resize of VNC client, however, if you are using a VNC client that does not support resizing, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
-
-You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.
-
-You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
 
 Then start the ReFrame Server systemd service so it will listen to VNC clients.
 
@@ -132,7 +126,17 @@ ReFrame Server systemd service should automatically pulls ReFrame systemd socket
 # systemctl start reframe@DP-1.socket
 ```
 
-### Headless Setup
+#### Multi-monitor
+
+If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make mouse input position mapping works.
+
+Unfortunately there are no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
+
+You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.
+
+You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
+
+#### Headless Setup
 
 This program only works with connected monitors, however if you have no monitor connected ("headless"), you can still use it because Linux kernel could force enable a connector to pretend there is a monitor and the GPU driver will work.
 
@@ -142,7 +146,7 @@ Then you need to get a EDID binary, this is used to decide resolution, you can d
 
 Don't forget to use your selected connector name to replace `DP-1`.
 
-Then you can reboot your system, and continue to modify the configuration.
+Then you can reboot your system, and come back to modify the configuration.
 
 # Compare with Other Linux Remote Desktop Implementations
 

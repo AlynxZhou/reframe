@@ -45,15 +45,13 @@ RfConfig *rf_config_new(const char *config_path)
 
 char *rf_config_get_card_path(RfConfig *this)
 {
-	char *def = g_strdup("/dev/dri/card0");
-
-	g_return_val_if_fail(RF_IS_CONFIG(this), def);
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
 	char *card =
 		g_key_file_get_string(this->f, RF_CONFIG_GROUP, "card", &error);
-	if (error != NULL)
-		return def;
+	if (error != NULL || card == NULL || card[0] == '\0')
+		return NULL;
 	char *card_path = g_strdup_printf("/dev/dri/%s", card);
 	g_free(card);
 	return card_path;
@@ -61,16 +59,14 @@ char *rf_config_get_card_path(RfConfig *this)
 
 char *rf_config_get_connector(RfConfig *this)
 {
-	char *def = g_strdup("eDP-1");
-
-	g_return_val_if_fail(RF_IS_CONFIG(this), def);
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
 	char *connector = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP, "connector", &error
 	);
-	if (error != NULL)
-		return def;
+	if (error != NULL || connector == NULL || connector[0] == '\0')
+		return NULL;
 	return connector;
 }
 
@@ -205,7 +201,7 @@ char *rf_config_get_password(RfConfig *this)
 	char *password = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP, "password", &error
 	);
-	if (error != NULL)
+	if (error != NULL || password == NULL || password[0] == '\0')
 		return NULL;
 	return password;
 }

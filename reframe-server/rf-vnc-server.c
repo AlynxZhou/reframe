@@ -250,7 +250,8 @@ static gboolean _incoming(
 		this->screen->port = 0;
 		this->screen->ipv6port = 0;
 		this->screen->frameBuffer = NULL;
-		this->screen->desktopName = this->connector;
+		if (this->connector != NULL)
+			this->screen->desktopName = this->connector;
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
