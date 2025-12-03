@@ -1,3 +1,4 @@
+#include "rf-common.h"
 #include <glib.h>
 
 #include "rf-buffer.h"
@@ -11,8 +12,11 @@ RfBuffer *rf_buffer_copy(RfBuffer *this)
 
 void rf_buffer_debug(RfBuffer *this)
 {
-	g_debug("Frame: Got buffer metadata: length %u, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
+	g_debug("Frame: Got buffer metadata: length %u, type %s, crtc_x %ld, crtc_y %ld, width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
 		this->md.length,
+		rf_plane_type(this->md.type),
+		this->md.crtc_x,
+		this->md.crtc_y,
 		this->md.width,
 		this->md.height,
 		(this->md.fourcc >> 0) & 0xff,

@@ -10,6 +10,10 @@ G_BEGIN_DECLS
 
 struct rf_buffer_metadata {
 	unsigned int length;
+	// DRM plane type.
+	uint32_t type;
+	int64_t crtc_x;
+	int64_t crtc_y;
 	uint32_t width;
 	uint32_t height;
 	uint32_t fourcc;

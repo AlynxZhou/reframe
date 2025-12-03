@@ -17,6 +17,7 @@ int rf_converter_start(RfConverter *this);
 void rf_converter_stop(RfConverter *this);
 GByteArray *rf_converter_convert(
 	RfConverter *this,
+	size_t length,
 	const RfBuffer *b,
 	unsigned int width,
 	unsigned int height

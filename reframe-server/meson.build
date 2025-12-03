@@ -12,13 +12,15 @@ headers = files(
 )
 
 dependencies = []
+cc = meson.get_compiler('c')
+m = cc.find_library('m')
 glib = dependency('glib-2.0', required: true)
 gio = dependency('gio-2.0', required: true)
 gio_unix = dependency('gio-unix-2.0', required: true)
 epoxy = dependency('epoxy', required: true)
 libvncserver = dependency('libvncserver', required: true)
 xkbcommon = dependency('xkbcommon', required: true)
-dependencies += [glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
+dependencies += [m, glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
 
 dependencies += [reframe_common_dep]
 

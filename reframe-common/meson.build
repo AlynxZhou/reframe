@@ -13,7 +13,8 @@ headers = files(
 dependencies = []
 glib = dependency('glib-2.0', required: true)
 gobject = dependency('gobject-2.0', required: true)
-dependencies += [glib, gobject]
+libdrm = dependency('libdrm', required: true)
+dependencies += [glib, gobject, libdrm]
 
 include_directories = []
 # For `config.h`.

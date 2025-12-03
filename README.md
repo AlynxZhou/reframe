@@ -14,17 +14,18 @@ DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/log
 - Pointer/Keyboard
 - Remote Login
 - Headless Setup
+- Draw Remote Cursor
 
 ## What ReFrame May Support in Future
 
-- RDP
-- Draw Remote Cursor: Cursors are typically handled in a independent plane, I currently have no idea on how to handle it. VNC clients typically draw a cursor in their window, but if you really need the remote cursor, you can work around it by using software rendered cursor instead of hardware rendered cursor, so your compositor will blend the cursor into primary plane and ReFrame can capture it, for example, setting `MUTTER_DEBUG_DISABLE_HW_CURSORS=1` will let GNOME use software rendered cursor.
+- RDP: There should be no difference between supporting VNC and RDP for ReFrame, but personally I use VNC, if you need RDP support and implement it by yourself, I'll be very grateful if you send a PR.
 
 ## What ReFrame Won't Support
 
 - Sound: VNC has no sound support and I am not sure whether we can dump sound buffers in ALSA like what we do currently for graphics in DRM, and I think sound in display manager is not so useful, so maybe you can setup sound stream redirection for your session using PulseAudio/PipeWire-pulse, I think it already have network support.
 - No GPU/connector/EGL/OpenGL ES/DRM/KMS: You probably cannot run a modern Linux desktop environment if you are lacking of those, then why you want a remote desktop? Don't you even have llvmpipe?
 - Game Streaming: ReFrame does not handle network streaming directly but uses existing tools like VNC, and VNC might be not optimized for low-latency. You may use some game streaming optimized apps like [Sunshine](https://github.com/LizardByte/Sunshine/).
+- DRM Overlay Plane: Currently only a few compositors support overlay plane as a experimental feature, typically they pass video frames to overlay plane so they don't need to decode and composite those frames and let hardware deal with those frames to reduce power comsumption. However handling such overlay planes in ReFrame only means moving such decoding and compositing operations from compositor to ReFrame (and due to natural limitations it is not reliable), thus you get no benefits. So you could just disable overlay plane support in your compositor.
 
 # Requirements
 

@@ -1,3 +1,5 @@
+#include "gio/gio.h"
+#include "glib-object.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <gio/gunixfdmessage.h>
@@ -24,8 +26,8 @@ struct _RfStreamer {
 	int monitor_y;
 	unsigned int rotation;
 	// These are the real size of monitor and have nothing with VNC.
-	unsigned int width;
-	unsigned int height;
+	uint32_t frame_width;
+	uint32_t frame_height;
 	bool running;
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
@@ -97,6 +99,64 @@ static void _schedule_frame_msg(RfStreamer *this)
 	}
 }
 
+static ssize_t _on_buffer(GSocketConnection *connection, RfBuffer *b)
+{
+	ssize_t ret = 0;
+	GSocket *socket = g_socket_connection_get_socket(connection);
+	GInputVector iov = { &b->md, sizeof(b->md) };
+	GSocketControlMessage **msgs = NULL;
+	int n_msgs = 0;
+
+	b->md.length = 0;
+	for (int i = 0; i < RF_MAX_FDS; ++i)
+		b->fds[i] = -1;
+
+	ret = g_socket_receive_message(
+		socket, NULL, &iov, 1, &msgs, &n_msgs, NULL, NULL, NULL
+	);
+	if (ret <= 0)
+		return ret;
+
+	// We should only receive 1 message each time.
+	if (n_msgs != 1) {
+		g_warning("Frame: Expect 1 fd message but got %d.", n_msgs);
+		return -2;
+	}
+
+	if (!G_IS_UNIX_FD_MESSAGE(msgs[n_msgs - 1])) {
+		g_warning("Frame: Failed to get fd message.");
+		return -2;
+	}
+
+	// We don't need to free GUnixFDList because
+	// GUnixFDMessage does not return a reference so we
+	// are not taking ownership of it.
+	//
+	// See <https://docs.gtk.org/gio-unix/type_func.FDMessage.get_fd_list.html>.
+	GUnixFDMessage *msg = G_UNIX_FD_MESSAGE(msgs[n_msgs - 1]);
+	GUnixFDList *fds = g_unix_fd_message_get_fd_list(msg);
+	for (int i = 0; i < b->md.length; ++i) {
+		b->fds[i] = g_unix_fd_list_get(fds, i, NULL);
+		// Some error happens.
+		if (b->fds[i] == -1) {
+			g_warning(
+				"Frame: Expect %d fds but got %d.",
+				b->md.length,
+				i
+			);
+			b->md.length = i;
+			break;
+		}
+	}
+
+	for (int i = 0; i < n_msgs; ++i)
+		g_object_unref(msgs[i]);
+	g_free(msgs);
+
+	rf_buffer_debug(b);
+	return ret;
+}
+
 static ssize_t _on_frame_msg(RfStreamer *this)
 {
 	g_debug("Frame: Received frame message.");
@@ -110,74 +170,34 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	if (ret <= 0)
 		goto out;
 
-	GSocket *socket = g_socket_connection_get_socket(this->connection);
-	RfBuffer b;
-	GInputVector iov = { &b.md, sizeof(b.md) };
-	GSocketControlMessage **msgs = NULL;
-	int n_msgs = 0;
-
-	ret = g_socket_receive_message(
-		socket, NULL, &iov, 1, &msgs, &n_msgs, NULL, NULL, NULL
-	);
-	if (ret <= 0)
-		goto out;
-
-	for (int i = 0; i < RF_MAX_FDS; ++i)
-		b.fds[i] = -1;
-
-	// We should only receive 1 message each time.
-	if (n_msgs != 1) {
-		g_warning("Frame: Expect 1 fd message but got %d.", n_msgs);
-		goto out;
-	}
-
-	if (!G_IS_UNIX_FD_MESSAGE(msgs[n_msgs - 1])) {
-		g_warning("Frame: Failed to get fd message.");
-		goto out;
-	}
-
-	// We don't need to free GUnixFDList because
-	// GUnixFDMessage does not return a reference so we
-	// are not taking ownership of it.
-	//
-	// See <https://docs.gtk.org/gio-unix/type_func.FDMessage.get_fd_list.html>.
-	GUnixFDMessage *msg = G_UNIX_FD_MESSAGE(msgs[n_msgs - 1]);
-	GUnixFDList *fds = g_unix_fd_message_get_fd_list(msg);
-	for (int i = 0; i < b.md.length; ++i) {
-		b.fds[i] = g_unix_fd_list_get(fds, i, NULL);
-		// Some error happens.
-		if (b.fds[i] == -1) {
-			g_warning(
-				"Frame: Expect %d fds but got %d.",
-				b.md.length,
-				i
-			);
-			b.md.length = i;
+	g_autofree RfBuffer *bufs = g_malloc0(length * sizeof(*bufs));
+	for (size_t i = 0; i < length; ++i) {
+		ret = _on_buffer(this->connection, &bufs[i]);
+		if (ret <= 0)
 			goto out;
-		}
 	}
 
-	rf_buffer_debug(&b);
-
-	if (this->width != b.md.width || this->height != b.md.height) {
-		if (this->rotation % 180 == 0) {
-			this->width = b.md.width;
-			this->height = b.md.height;
-		} else {
-			this->width = b.md.height;
-			this->height = b.md.width;
-		}
+	RfBuffer *primary = &bufs[0];
+	// Currently we assume primary size is always the same as monitor
+	// size. However, maybe we should use CRTC size actually?
+	uint32_t frame_width = primary->md.width;
+	uint32_t frame_height = primary->md.height;
+	if (this->rotation % 180 != 0) {
+		frame_width = primary->md.height;
+		frame_height = primary->md.width;
+	}
+	if (this->frame_width != frame_width ||
+	    this->frame_height != frame_height) {
+		this->frame_width = frame_width;
+		this->frame_height = frame_height;
 	}
 
-	g_signal_emit(this, sigs[SIG_FRAME], 0, &b);
+	g_signal_emit(this, sigs[SIG_FRAME], 0, length, bufs);
 
 out:
-	for (int i = 0; i < b.md.length; ++i)
-		close(b.fds[i]);
-
-	for (int i = 0; i < n_msgs; ++i)
-		g_object_unref(msgs[i]);
-	g_free(msgs);
+	for (size_t i = 0; i < length; ++i)
+		for (int j = 0; j < bufs[i].md.length; ++j)
+			close(bufs[i].fds[j]);
 
 	if (ret <= 0) {
 		g_warning("Frame: Failed to receive frame message: %ld.", ret);
@@ -284,8 +304,8 @@ static void rf_streamer_init(RfStreamer *this)
 	this->monitor_x = 0;
 	this->monitor_y = 0;
 	this->rotation = 0;
-	this->width = 0;
-	this->height = 0;
+	this->frame_width = 0;
+	this->frame_height = 0;
 	this->running = false;
 }
 
@@ -310,8 +330,9 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 		NULL,
 		NULL,
 		G_TYPE_NONE,
-		1,
-		RF_TYPE_BUFFER
+		2,
+		G_TYPE_INT,
+		G_TYPE_POINTER
 	);
 	sigs[SIG_CARD_PATH] = g_signal_new(
 		"card-path",
@@ -372,8 +393,8 @@ int rf_streamer_start(RfStreamer *this)
 	);
 	this->rotation = rf_config_get_rotation(this->config);
 	g_message("Frame: Got screen rotation %u.", this->rotation);
-	this->width = 0;
-	this->height = 0;
+	this->frame_width = 0;
+	this->frame_height = 0;
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
 	);
@@ -471,15 +492,17 @@ void rf_streamer_send_pointer_event(
 	// Assuming user only have 1 monitor when they set desktop size to 0x0.
 	const int desktop_width = this->desktop_width > 0 ?
 					  this->desktop_width :
-					  this->width + this->monitor_x;
+					  this->monitor_x + this->frame_width;
 	const int desktop_height = this->desktop_height > 0 ?
 					   this->desktop_height :
-					   this->height + this->monitor_y;
+					   this->monitor_y + this->frame_height;
 	// Typically desktop environment will map uinput `EV_ABS` max size to
 	// the whole virtual desktop, so we need to convert the position to
 	// global position in the virtual desktop.
-	const double x = (rx * this->width + this->monitor_x) / desktop_width;
-	const double y = (ry * this->height + this->monitor_y) / desktop_height;
+	const double x =
+		(this->monitor_x + rx * this->frame_width) / desktop_width;
+	const double y =
+		(this->monitor_y + ry * this->frame_height) / desktop_height;
 	g_debug("Input: Calculated global position x %f and y %f.", x, y);
 
 	size_t length = (wup || wdown) ? 7 : 6;

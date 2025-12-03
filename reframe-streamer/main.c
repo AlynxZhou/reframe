@@ -55,23 +55,94 @@
 struct _this {
 	RfConfig *config;
 	GSocketConnection *connection;
+	char *card_path;
 	int cfd;
+	uint32_t crtc_id;
 	uint32_t primary_id;
+	uint32_t cursor_id;
 	int ufd;
 };
 
-static int _export_fb2(struct _this *this, uint32_t fb_id, RfBuffer *b)
+// You need to explicitly cast the type of returned value.
+static uint64_t _get_plane_prop(
+	int cfd,
+	uint32_t plane_id,
+	const char *name,
+	uint64_t default_value
+)
 {
-	drmModeFB2 *fb = drmModeGetFB2(this->cfd, fb_id);
+	uint64_t value = default_value;
+
+	drmModeObjectProperties *props = drmModeObjectGetProperties(
+		cfd, plane_id, DRM_MODE_OBJECT_PLANE
+	);
+	if (props == NULL)
+		return -1;
+
+	for (size_t i = 0; i < props->count_props; ++i) {
+		drmModePropertyRes *prop =
+			drmModeGetProperty(cfd, props->props[i]);
+		if (prop == NULL)
+			continue;
+		if (g_strcmp0(prop->name, name) == 0)
+			value = props->prop_values[i];
+		drmModeFreeProperty(prop);
+	}
+
+	drmModeFreeObjectProperties(props);
+
+	return value;
+}
+
+// We have to get plane via ID every frame to get the newest framebuffer.
+static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
+{
+	uint32_t plane_id = 0;
+
+	drmModePlaneRes *pres = drmModeGetPlaneResources(cfd);
+	if (pres == NULL) {
+		g_warning("DRM: Failed to get plane resources.");
+		return 0;
+	}
+
+	g_debug("DRM: Finding plane of type %s and CRTC ID %u.",
+		rf_plane_type(type),
+		crtc_id);
+
+	for (size_t i = 0; i < pres->count_planes; ++i) {
+		if (_get_plane_prop(
+			    cfd, pres->planes[i], "type", DRM_PLANE_TYPE_OVERLAY
+		    ) != type)
+			continue;
+		drmModePlane *plane = drmModeGetPlane(cfd, pres->planes[i]);
+		if (plane == NULL)
+			continue;
+		// Ignore unrelated planes.
+		g_debug("DRM: Plane ID %u is of type %s belongs to CRTC ID %u.",
+			plane->plane_id,
+			rf_plane_type(type),
+			plane->crtc_id);
+		if (plane->crtc_id == crtc_id)
+			plane_id = plane->plane_id;
+		drmModeFreePlane(plane);
+		if (plane_id != 0)
+			break;
+	}
+
+	drmModeFreePlaneResources(pres);
+	return plane_id;
+}
+
+static int _export_fb2(int cfd, RfBuffer *b, uint32_t fb_id)
+{
+	drmModeFB2 *fb = drmModeGetFB2(cfd, fb_id);
 	if (fb == NULL)
 		return -1;
-	g_debug("Frame: Got FB2 framebuffer %u.", fb->fb_id);
+	g_debug("Frame: Got FB2 framebuffer ID %u.", fb->fb_id);
 	for (int i = 0; i < RF_MAX_FDS; ++i) {
 		if (fb->handles[i] == 0)
 			break;
-		drmPrimeHandleToFD(
-			this->cfd, fb->handles[i], DRM_CLOEXEC, &b->fds[i]
-		);
+		drmPrimeHandleToFD(cfd, fb->handles[i], DRM_CLOEXEC, &b->fds[i]);
 		if (b->fds[i] < 0)
 			break;
 		++b->md.length;
@@ -90,15 +161,15 @@ static int _export_fb2(struct _this *this, uint32_t fb_id, RfBuffer *b)
 	return b->md.length;
 }
 
-static int _export_fb(struct _this *this, uint32_t fb_id, RfBuffer *b)
+static int _export_fb(int cfd, RfBuffer *b, uint32_t fb_id)
 {
-	drmModeFB *fb = drmModeGetFB(this->cfd, fb_id);
+	drmModeFB *fb = drmModeGetFB(cfd, fb_id);
 	if (fb == NULL)
 		return -1;
-	g_debug("Frame: Got FB framebuffer %u.", fb->fb_id);
+	g_debug("Frame: Got FB framebuffer ID %u.", fb->fb_id);
 	if (fb->handle == 0)
 		return 0;
-	drmPrimeHandleToFD(this->cfd, fb->handle, DRM_CLOEXEC, &b->fds[0]);
+	drmPrimeHandleToFD(cfd, fb->handle, DRM_CLOEXEC, &b->fds[0]);
 	if (b->fds[0] < 0)
 		return 0;
 	b->md.length = 1;
@@ -112,13 +183,47 @@ static int _export_fb(struct _this *this, uint32_t fb_id, RfBuffer *b)
 	return b->md.length;
 }
 
-static ssize_t _send_frame_msg(struct _this *this, RfBuffer *b)
+static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
+{
+	drmModePlane *plane = drmModeGetPlane(cfd, plane_id);
+	if (plane == NULL)
+		return 0;
+	uint32_t fb_id = plane->fb_id;
+	b->md.type = type;
+	b->md.crtc_x = (int64_t)_get_plane_prop(cfd, plane_id, "CRTC_X", 0);
+	b->md.crtc_y = (int64_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
+	drmModeFreePlane(plane);
+	if (fb_id == 0)
+		return 0;
+	g_debug("Frame: Got %s plane framebuffer ID %u.",
+		rf_plane_type(type),
+		fb_id);
+
+	int ret = 0;
+	// GUnixFDList refuses to send invalid fds like -1, so we need
+	// to pass the number of fds. We assume valid planes are
+	// continuous.
+	b->md.length = 0;
+	for (int i = 0; i < RF_MAX_FDS; ++i) {
+		b->fds[i] = -1;
+		b->md.offsets[i] = 0;
+		b->md.pitches[i] = 0;
+	}
+	// Export DRM framebuffer to fds and metadata that EGL can import.
+	ret = _export_fb2(cfd, b, fb_id);
+	if (ret <= 0)
+		ret = _export_fb(cfd, b, fb_id);
+	if (ret <= 0) {
+		g_warning("Frame: Failed to get frame.");
+		return ret;
+	}
+	rf_buffer_debug(b);
+	return ret;
+}
+
+static ssize_t _send_buffer(GSocketConnection *connection, RfBuffer *b)
 {
 	ssize_t ret = 0;
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, 1);
-	if (ret <= 0)
-		return ret;
-
 	GOutputVector iov = { &b->md, sizeof(b->md) };
 	GUnixFDList *fds = g_unix_fd_list_new();
 	// This won't take the ownership so we need to close fds.
@@ -128,13 +233,28 @@ static ssize_t _send_frame_msg(struct _this *this, RfBuffer *b)
 		g_unix_fd_list_append(fds, b->fds[i], NULL);
 	// This won't take the ownership so we need to free GUnixFDList.
 	GSocketControlMessage *msg = g_unix_fd_message_new_with_fd_list(fds);
-	GSocket *socket = g_socket_connection_get_socket(this->connection);
+	GSocket *socket = g_socket_connection_get_socket(connection);
 	ret = g_socket_send_message(
 		socket, NULL, &iov, 1, &msg, 1, G_SOCKET_MSG_NONE, NULL, NULL
 	);
 	g_object_unref(fds);
 	g_object_unref(msg);
+	return ret;
+}
 
+static ssize_t
+_send_frame_msg(struct _this *this, size_t length, RfBuffer *bufs)
+{
+	ssize_t ret = 0;
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, length);
+	if (ret <= 0)
+		return ret;
+
+	for (size_t i = 0; i < length; ++i) {
+		ret = _send_buffer(this->connection, &bufs[i]);
+		if (ret <= 0)
+			break;
+	}
 	return ret;
 }
 
@@ -151,35 +271,38 @@ static ssize_t _on_frame_msg(struct _this *this)
 	if (ret <= 0)
 		goto out;
 
-	drmModePlane *primary = drmModeGetPlane(this->cfd, this->primary_id);
-	uint32_t fb_id = primary->fb_id;
-	drmModeFreePlane(primary);
-	g_debug("Frame: Got primary plane framebuffer %u.", fb_id);
-	RfBuffer b;
-	// GUnixFDList refuses to send invalid fds like -1, so we need
-	// to pass the number of fds. We assume valid planes are
-	// continuous.
-	for (int i = 0; i < RF_MAX_FDS; ++i) {
-		b.fds[i] = -1;
-		b.md.offsets[i] = 0;
-		b.md.pitches[i] = 0;
-	}
-	b.md.length = 0;
-	// Export DRM framebuffer to fds and metadata that EGL can import.
-	ret = _export_fb2(this, fb_id, &b);
+	RfBuffer bufs[2];
+	length = 0;
+	ret = _make_buffer(
+		this->cfd,
+		&bufs[length++],
+		this->primary_id,
+		DRM_PLANE_TYPE_PRIMARY
+	);
 	if (ret <= 0)
-		ret = _export_fb(this, fb_id, &b);
-	if (ret <= 0) {
-		g_warning("Frame: Failed to get frame.");
 		return ret;
+
+	if (this->cursor_id == 0)
+		this->cursor_id = _get_plane_id(
+			this->cfd, this->crtc_id, DRM_PLANE_TYPE_CURSOR
+		);
+	if (this->cursor_id != 0) {
+		ret = _make_buffer(
+			this->cfd,
+			&bufs[length++],
+			this->cursor_id,
+			DRM_PLANE_TYPE_CURSOR
+		);
+		// It is OK to ignore cursor plane if failed.
+		if (ret <= 0)
+			--length;
 	}
 
-	rf_buffer_debug(&b);
+	ret = _send_frame_msg(this, length, bufs);
 
-	ret = _send_frame_msg(this, &b);
-
-	for (int i = 0; i < b.md.length; ++i)
-		close(b.fds[i]);
+	for (size_t i = 0; i < length; ++i)
+		for (int j = 0; j < bufs[i].md.length; ++j)
+			close(bufs[i].fds[j]);
 
 out:
 	if (ret <= 0)
@@ -240,12 +363,22 @@ static inline char *_get_connector_name(drmModeConnector *connector)
 	);
 }
 
-static drmModeConnector *
-_get_connector(int cfd, drmModeRes *res, const char *connector_name)
+static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 {
+	drmModeConnector *connector = NULL;
+
+	drmModeRes *res = drmModeGetResources(cfd);
+	if (res == NULL) {
+		g_warning("DRM: Failed to get resources.");
+		return NULL;
+	}
+
+	if (connector_name != NULL)
+		g_debug("DRM: Finding connector for connector %s.",
+			connector_name);
+
 	for (int i = 0; i < res->count_connectors; ++i) {
-		drmModeConnector *connector =
-			drmModeGetConnector(cfd, res->connectors[i]);
+		connector = drmModeGetConnector(cfd, res->connectors[i]);
 		if (connector == NULL)
 			continue;
 		g_autofree char *full_name = _get_connector_name(connector);
@@ -257,17 +390,40 @@ _get_connector(int cfd, drmModeRes *res, const char *connector_name)
 		if (connector->connection == DRM_MODE_CONNECTED &&
 		    (connector_name == NULL ||
 		     g_strcmp0(full_name, connector_name) == 0))
-			return connector;
+			break;
 		drmModeFreeConnector(connector);
 	}
-	return NULL;
+
+	drmModeFreeResources(res);
+	return connector;
 }
 
-static drmModeConnector *_get_card_and_connected_connector(struct _this *this)
+static drmModeConnector *_get_selected_card_and_connector(
+	struct _this *this,
+	const char *card_path,
+	const char *connector_name
+)
+{
+	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
+	if (this->cfd < 0) {
+		g_warning(
+			"DRM: Failed to open card %s: %s.",
+			card_path,
+			strerror(errno)
+		);
+		return NULL;
+	}
+	g_message("DRM: Opened card %s.", card_path);
+
+	return _get_connector(this->cfd, connector_name);
+}
+
+static drmModeConnector *_get_connected_card_and_connector(struct _this *this)
 {
 	g_autoptr(GDir) dir = g_dir_open("/dev/dri", 0, NULL);
 	if (dir == NULL)
 		return NULL;
+
 	const char *name = NULL;
 	while ((name = g_dir_read_name(dir)) != NULL) {
 		if (!g_str_has_prefix(name, "card"))
@@ -279,23 +435,16 @@ static drmModeConnector *_get_card_and_connected_connector(struct _this *this)
 			continue;
 		g_debug("DRM: Finding the first connected connector on card %s.",
 			card_path);
-		drmModeRes *res = NULL;
-		res = drmModeGetResources(cfd);
-		if (res == NULL)
-			goto next;
-		drmModeConnector *connector = _get_connector(cfd, res, NULL);
+		drmModeConnector *connector = _get_connector(cfd, NULL);
 		if (connector != NULL) {
 			this->cfd = cfd;
-			if (_send_card_path_msg(this, card_path) == 0)
-				return NULL;
+			this->card_path = g_strdup(card_path);
 			g_message(
 				"DRM: Found the first connected connector on card %s.",
 				card_path
 			);
 			return connector;
 		}
-		drmModeFreeResources(res);
-	next:
 		close(cfd);
 	}
 	return NULL;
@@ -308,121 +457,65 @@ static drmModeCrtc *_get_crtc(int cfd, drmModeConnector *connector)
 
 	encoder = drmModeGetEncoder(cfd, connector->encoder_id);
 	if (encoder == NULL)
-		goto out;
+		return NULL;
+
 	crtc = drmModeGetCrtc(cfd, encoder->crtc_id);
 
 	drmModeFreeEncoder(encoder);
 
-out:
 	return crtc;
 }
 
-static int32_t _get_plane_type(int cfd, uint32_t plane_id)
+static void _setup_drm(struct _this *this)
 {
-	int32_t type = -1;
+	this->primary_id = 0;
+	this->cursor_id = 0;
 
-	drmModeObjectProperties *props = drmModeObjectGetProperties(
-		cfd, plane_id, DRM_MODE_OBJECT_PLANE
-	);
-	if (props == NULL)
-		goto out;
-
-	for (size_t i = 0; i < props->count_props; ++i) {
-		drmModePropertyRes *prop =
-			drmModeGetProperty(cfd, props->props[i]);
-		if (prop == NULL)
-			continue;
-		if (g_strcmp0(prop->name, "type") == 0)
-			type = props->prop_values[i];
-		drmModeFreeProperty(prop);
-	}
-
-	drmModeFreeObjectProperties(props);
-
-out:
-	return type;
-}
-
-// We have to get plane via ID every frame to get the newest framebuffer.
-static uint32_t
-_get_plane_id(int cfd, drmModePlaneRes *pres, uint32_t crtc_id, int32_t type)
-{
-	uint32_t plane_id = 0;
-
-	for (size_t i = 0; i < pres->count_planes; ++i) {
-		if (_get_plane_type(cfd, pres->planes[i]) != type)
-			continue;
-		drmModePlane *plane = drmModeGetPlane(cfd, pres->planes[i]);
-		if (plane == NULL)
-			continue;
-		// Ignore unrelated planes.
-		if (plane->crtc_id == crtc_id)
-			plane_id = plane->plane_id;
-		drmModeFreePlane(plane);
-	}
-
-	return plane_id;
-}
-
-static ssize_t _setup_drm(struct _this *this)
-{
-	g_autofree char *card_path = rf_config_get_card_path(this->config);
+	this->crtc_id = 0;
+	this->card_path = rf_config_get_card_path(this->config);
 	g_autofree char *connector_name = rf_config_get_connector(this->config);
 	drmModeConnector *connector = NULL;
-	if (card_path != NULL) {
-		this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
-		if (this->cfd < 0)
-			g_error("DRM: Failed to open card %s: %s.",
-				card_path,
-				strerror(errno));
-		g_message("DRM: Opened card %s.", card_path);
-		if (_send_card_path_msg(this, card_path) == 0)
-			return 0;
-
-		drmModeRes *res = NULL;
-		res = drmModeGetResources(this->cfd);
-		if (res == NULL)
-			g_error("DRM: Failed to get resources.");
-		connector = _get_connector(this->cfd, res, connector_name);
-		drmModeFreeResources(res);
-	} else {
-		connector = _get_card_and_connected_connector(this);
-	}
+	if (this->card_path != NULL)
+		connector = _get_selected_card_and_connector(
+			this, this->card_path, connector_name
+		);
+	else
+		connector = _get_connected_card_and_connector(this);
 	if (connector == NULL)
 		g_error("DRM: Failed to find a connected connector.");
+
 	if (connector_name == NULL)
 		connector_name = _get_connector_name(connector);
 	g_message("DRM: Found connected connector %s.", connector_name);
+
 	drmModeCrtc *crtc = _get_crtc(this->cfd, connector);
 	drmModeFreeConnector(connector);
 	if (crtc == NULL)
 		g_error("DRM: Failed to find a CRTC for connector.");
-	int ret =
-		drmSetClientCap(this->cfd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
-	if (ret < 0)
-		g_error("DRM: Failed to set universal planes capability.");
-	drmModePlaneRes *pres = NULL;
-	pres = drmModeGetPlaneResources(this->cfd);
-	if (pres == NULL)
-		g_error("DRM: Failed to get plane resources.");
-	this->primary_id = _get_plane_id(
-		this->cfd, pres, crtc->crtc_id, DRM_PLANE_TYPE_PRIMARY
-	);
-	drmModeFreePlaneResources(pres);
+	this->crtc_id = crtc->crtc_id;
 	drmModeFreeCrtc(crtc);
+
+	// This is needed to get primary and cursor planes.
+	if (drmSetClientCap(this->cfd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) < 0)
+		g_warning("DRM: Failed to set universal planes capability.");
+
+	// This is needed to get `CRTC_X/Y` properties of planes.
+	if (drmSetClientCap(this->cfd, DRM_CLIENT_CAP_ATOMIC, 1) < 0)
+		g_warning("DRM: Failed to set atomic capability.");
+
+	this->primary_id =
+		_get_plane_id(this->cfd, this->crtc_id, DRM_PLANE_TYPE_PRIMARY);
 	if (this->primary_id == 0)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
-
-	return 1;
 }
 
 static void _clean_drm(struct _this *this)
 {
-	if (this->cfd < 0)
-		return;
-
-	close(this->cfd);
-	this->cfd = -1;
+	if (this->cfd >= 0) {
+		close(this->cfd);
+		this->cfd = -1;
+	}
+	g_clear_pointer(&this->card_path, g_free);
 }
 
 static void _setup_uinput(struct _this *this)
@@ -470,12 +563,11 @@ static void _setup_uinput(struct _this *this)
 
 static void _clean_uinput(struct _this *this)
 {
-	if (this->ufd < 0)
-		return;
-
-	_ioctl_may(this->ufd, UI_DEV_DESTROY);
-	close(this->ufd);
-	this->ufd = -1;
+	if (this->ufd >= 0) {
+		_ioctl_may(this->ufd, UI_DEV_DESTROY);
+		close(this->ufd);
+		this->ufd = -1;
+	}
 }
 
 int main(int argc, char *argv[])
@@ -594,9 +686,10 @@ int main(int argc, char *argv[])
 
 		g_message("ReFrame Server connected.");
 
-		if (_setup_drm(this) <= 0)
-			goto clean;
+		_setup_drm(this);
 		_setup_uinput(this);
+
+		_send_card_path_msg(this, this->card_path);
 
 		while (true) {
 			ssize_t ret = 0;
@@ -608,7 +701,7 @@ int main(int argc, char *argv[])
 				is, &type, sizeof(type), NULL, NULL
 			);
 			if (ret <= 0)
-				goto out;
+				break;
 
 			switch (type) {
 			case RF_MSG_TYPE_FRAME:
@@ -620,13 +713,10 @@ int main(int argc, char *argv[])
 			default:
 				break;
 			}
-
-		out:
 			if (ret <= 0)
 				break;
 		}
 
-	clean:
 		g_message("ReFrame Server disconnected.");
 
 		_clean_uinput(this);

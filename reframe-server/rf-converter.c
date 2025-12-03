@@ -5,6 +5,7 @@
 #include <libdrm/drm_fourcc.h>
 
 #include "rf-common.h"
+#include <stdint.h>
 #include "rf-converter.h"
 
 struct _RfConverter {
@@ -26,6 +27,248 @@ struct _RfConverter {
 	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
+
+#include <math.h>
+
+#define PI 3.141593f
+
+#define MARRAY(M) ((M).m)
+
+typedef float scalar;
+/*
+ * vec2 is a scalar[2] like this:
+ * | 0 |
+ * | 1 |
+ */
+typedef struct {
+	scalar v[2];
+} vec2;
+/*
+ * vec3 is a scalar[3] like this:
+ * | 0 |
+ * | 1 |
+ * | 2 |
+ */
+typedef struct {
+	scalar v[3];
+} vec3;
+/*
+ * vec4 is a scalar[4] like this:
+ * | 0 |
+ * | 1 |
+ * | 2 |
+ * | 4 |
+ */
+typedef struct {
+	scalar v[4];
+} vec4;
+/*
+ * mat4 is a scalar[16] like this:
+ * |   0   4   8  12   |
+ * |   1   5   9  13   |
+ * |   2   6  10  14   |
+ * |   3   7  11  15   |
+ */
+typedef struct {
+	scalar m[16];
+} mat4;
+
+scalar sradians(scalar degrees)
+{
+	return degrees * PI / 180.0f;
+}
+
+vec3 v3s(scalar s1, scalar s2, scalar s3)
+{
+	vec3 v;
+	v.v[0] = s1;
+	v.v[1] = s2;
+	v.v[2] = s3;
+	return v;
+}
+
+vec3 v3add(vec3 v1, vec3 v2)
+{
+	return v3s(v1.v[0] + v2.v[0], v1.v[1] + v2.v[1], v1.v[2] + v2.v[2]);
+}
+
+vec3 v3substract(vec3 v1, vec3 v2)
+{
+	return v3s(v1.v[0] - v2.v[0], v1.v[1] - v2.v[1], v1.v[2] - v2.v[2]);
+}
+
+vec3 v3cross(vec3 v1, vec3 v2)
+{
+	return v3s(
+		v1.v[1] * v2.v[2] - v1.v[2] * v2.v[1],
+		v1.v[2] * v2.v[0] - v1.v[0] * v2.v[2],
+		v1.v[0] * v2.v[1] - v1.v[1] * v2.v[0]
+	);
+}
+
+scalar v3dot(vec3 v1, vec3 v2)
+{
+	return v1.v[0] * v2.v[0] + v1.v[1] * v2.v[1] + v1.v[2] * v2.v[2];
+}
+
+scalar v3length(vec3 v)
+{
+	return sqrtf(v3dot(v, v));
+}
+
+vec3 v3smultiply(vec3 v, scalar s)
+{
+	return v3s(v.v[0] * s, v.v[1] * s, v.v[2] * s);
+}
+
+vec3 v3normalize(vec3 v)
+{
+	return v3smultiply(v, 1.0f / v3length(v));
+}
+
+mat4 m4multiply(mat4 m1, mat4 m2)
+{
+	mat4 m;
+	for (unsigned int i = 0; i < 4; ++i) {
+		for (unsigned int j = 0; j < 4; ++j) {
+			m.m[i * 4 + j] = 0.0f;
+			for (unsigned int k = 0; k < 4; ++k) {
+				m.m[i * 4 + j] +=
+					m1.m[k * 4 + j] * m2.m[i * 4 + k];
+			}
+		}
+	}
+	return m;
+}
+
+mat4 m4translate(vec3 delta)
+{
+	mat4 m;
+	m.m[0] = 1.0f;
+	m.m[1] = 0.0f;
+	m.m[2] = 0.0f;
+	m.m[3] = 0.0f;
+	m.m[4] = 0.0f;
+	m.m[5] = 1.0f;
+	m.m[6] = 0.0f;
+	m.m[7] = 0.0f;
+	m.m[8] = 0.0f;
+	m.m[9] = 0.0f;
+	m.m[10] = 1.0f;
+	m.m[11] = 0.0f;
+	m.m[12] = delta.v[0];
+	m.m[13] = delta.v[1];
+	m.m[14] = delta.v[2];
+	m.m[15] = 1.0f;
+	return m;
+}
+
+mat4 m4scale(vec3 scale)
+{
+	mat4 m;
+	m.m[0] = scale.v[0];
+	m.m[1] = 0.0f;
+	m.m[2] = 0.0f;
+	m.m[3] = 0.0f;
+	m.m[4] = 0.0f;
+	m.m[5] = scale.v[1];
+	m.m[6] = 0.0f;
+	m.m[7] = 0.0f;
+	m.m[8] = 0.0f;
+	m.m[9] = 0.0f;
+	m.m[10] = scale.v[2];
+	m.m[11] = 0.0f;
+	m.m[12] = 0.0f;
+	m.m[13] = 0.0f;
+	m.m[14] = 0.0f;
+	m.m[15] = 1.0f;
+	return m;
+}
+
+mat4 m4rotate(vec3 axis, scalar angle)
+{
+	mat4 m;
+	// In left hand coordinate,
+	// positive angle leads to a counter-clockwise rotation.
+	axis = v3normalize(axis);
+	const scalar s = sinf(angle);
+	const scalar c = cosf(angle);
+	const scalar temp = 1.0f - c;
+	m.m[0] = temp * axis.v[0] * axis.v[0] + c;
+	m.m[1] = temp * axis.v[0] * axis.v[1] - axis.v[2] * s;
+	m.m[2] = temp * axis.v[2] * axis.v[0] + axis.v[1] * s;
+	m.m[3] = 0.0f;
+	m.m[4] = temp * axis.v[0] * axis.v[1] + axis.v[2] * s;
+	m.m[5] = temp * axis.v[1] * axis.v[1] + c;
+	m.m[6] = temp * axis.v[1] * axis.v[2] - axis.v[0] * s;
+	m.m[7] = 0.0f;
+	m.m[8] = temp * axis.v[2] * axis.v[0] - axis.v[1] * s;
+	m.m[9] = temp * axis.v[1] * axis.v[2] + axis.v[0] * s;
+	m.m[10] = temp * axis.v[2] * axis.v[2] + c;
+	m.m[11] = 0.0f;
+	m.m[12] = 0.0f;
+	m.m[13] = 0.0f;
+	m.m[14] = 0.0f;
+	m.m[15] = 1.0f;
+	return m;
+}
+
+mat4 m4ortho(
+	scalar left,
+	scalar right,
+	scalar top,
+	scalar bottom,
+	scalar near,
+	scalar far
+)
+{
+	mat4 m;
+	m.m[0] = 2 / (right - left);
+	m.m[1] = 0;
+	m.m[2] = 0;
+	m.m[3] = 0;
+	m.m[4] = 0;
+	m.m[5] = 2 / (top - bottom);
+	m.m[6] = 0;
+	m.m[7] = 0;
+	m.m[8] = 0;
+	m.m[9] = 0;
+	m.m[10] = -2 / (far - near);
+	m.m[11] = 0;
+	m.m[12] = -(right + left) / (right - left);
+	m.m[13] = -(top + bottom) / (top - bottom);
+	m.m[14] = -(far + near) / (far - near);
+	m.m[15] = 1;
+	return m;
+}
+
+mat4 m4camera(vec3 eye, vec3 target, vec3 up)
+{
+	mat4 m;
+	vec3 direction = v3normalize(v3substract(target, eye));
+	// We are using a left hand coordinate,
+	// but camera matrix needs right direction,
+	// so we change cross sequence.
+	vec3 right = v3normalize(v3cross(up, direction));
+	up = v3cross(direction, right);
+	m.m[0] = right.v[0];
+	m.m[1] = up.v[0];
+	m.m[2] = -direction.v[0];
+	m.m[3] = 0.0f;
+	m.m[4] = right.v[1];
+	m.m[5] = up.v[1];
+	m.m[6] = -direction.v[1];
+	m.m[7] = 0.0f;
+	m.m[8] = right.v[2];
+	m.m[9] = up.v[2];
+	m.m[10] = -direction.v[2];
+	m.m[11] = 0.0f;
+	m.m[12] = -v3dot(right, eye);
+	m.m[13] = -v3dot(up, eye);
+	m.m[14] = v3dot(direction, eye);
+	m.m[15] = 1.0f;
+	return m;
+}
 
 static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 {
@@ -288,26 +531,34 @@ static int _setup_gl(RfConverter *this)
 	glEnable(GL_DEBUG_OUTPUT);
 	glDebugMessageCallback(_gl_message, NULL);
 #endif
-	// glEnable(GL_CULL_FACE);
-	glDisable(GL_CULL_FACE);
-	glDisable(GL_BLEND);
-	glDisable(GL_DEPTH_TEST);
-	glDepthMask(false);
+	glEnable(GL_CULL_FACE);
+	// glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(true);
 
 	if (this->gles_major >= 3) {
 		const char vs[] =
 			"#version 300 es\n"
+			"uniform mat4 mvp;\n"
 			"in vec2 in_position;\n"
 			"in vec2 in_coordinate;\n"
 			"out vec2 pass_coordinate;\n"
 			"void main() {\n"
-			"	gl_Position = vec4(in_position, 0.0f, 1.0f);\n"
+			"	gl_Position = mvp * vec4(in_position, 0.0f, 1.0f);\n"
 			"	pass_coordinate = in_coordinate;\n"
 			"}\n";
 		const char fs[] =
 			"#version 300 es\n"
+			"#ifdef GL_OES_EGL_image_external_essl3\n"
+			"#extension GL_OES_EGL_image_external_essl3 : require\n"
+			"#else\n"
+			"#extension GL_OES_EGL_image_external : require\n"
+			"#endif\n"
 			"precision mediump float;\n"
-			"uniform sampler2D image;\n"
+			"uniform samplerExternalOES image;\n"
 			"in vec2 pass_coordinate;\n"
 			"out vec4 out_color;\n"
 			"void main() {\n"
@@ -317,17 +568,19 @@ static int _setup_gl(RfConverter *this)
 	} else {
 		const char vs[] =
 			"#version 100\n"
+			"uniform mat4 mvp;\n"
 			"attribute vec2 in_position;\n"
 			"attribute vec2 in_coordinate;\n"
 			"varying vec2 pass_coordinate;\n"
 			"void main() {\n"
-			"	gl_Position = vec4(in_position, 0.0, 1.0);\n"
+			"	gl_Position = mvp * vec4(in_position, 0.0, 1.0);\n"
 			"	pass_coordinate = in_coordinate;\n"
 			"}\n";
 		const char fs[] =
 			"#version 100\n"
+			"#extension GL_OES_EGL_image_external : require\n"
 			"precision mediump float;\n"
-			"uniform sampler2D image;\n"
+			"uniform samplerExternalOES image;\n"
 			"varying vec2 pass_coordinate;\n"
 			"void main() {\n"
 			"	gl_FragColor = texture2D(image, pass_coordinate);\n"
@@ -348,13 +601,13 @@ static int _setup_gl(RfConverter *this)
 	const float vertices[] = {
 		// x, y
 		// top left
-		-1.0f, 1.0f,
+		0.0f, 1.0f,
 		// top right
 		1.0f, 1.0f,
 		// bottom right
-		1.0f, -1.0f,
+		1.0f, 0.0f,
 		// bottom left
-		-1.0f, -1.0f
+		0.0f, 0.0f
 	};
 	// clang-format on
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
@@ -376,7 +629,8 @@ static int _setup_gl(RfConverter *this)
 		0.0f, 0.0f
 	};
 	// clang-format on
-	// We only support 90-degree rotation so we don't need a rotate matrix.
+	// Rotating texture to match the direction of model is easier than
+	// rotate the model with matrix.
 	for (unsigned int r = this->rotation; r > 0; r -= 90) {
 		float u = coordinates[0];
 		float v = coordinates[1];
@@ -559,7 +813,7 @@ static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 
 static void _gen_texture(RfConverter *this)
 {
-	g_debug("GL: Generating new texture for width %d and height %d.",
+	g_debug("GL: Generating new texture for width %u and height %u.",
 		this->width,
 		this->height);
 
@@ -593,22 +847,8 @@ static void _gen_texture(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-GByteArray *rf_converter_convert(
-	RfConverter *this,
-	const RfBuffer *b,
-	unsigned int width,
-	unsigned int height
-)
+static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 {
-	g_return_val_if_fail(RF_IS_CONVERTER(this), NULL);
-	g_return_val_if_fail(b != NULL, NULL);
-	g_return_val_if_fail(width > 0 && height > 0, NULL);
-
-	if (!this->running)
-		return NULL;
-
-	GByteArray *res = NULL;
-
 	EGLAttrib fd_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					  EGL_DMA_BUF_PLANE1_FD_EXT,
 					  EGL_DMA_BUF_PLANE2_FD_EXT,
@@ -661,7 +901,7 @@ GByteArray *rf_converter_convert(
 	//
 	// See <https://registry.khronos.org/EGL/extensions/EXT/EGL_EXT_image_dma_buf_import.txt>.
 	EGLImage image = eglCreateImage(
-		this->display,
+		display,
 		EGL_NO_CONTEXT,
 		EGL_LINUX_DMA_BUF_EXT,
 		(EGLClientBuffer)NULL,
@@ -670,10 +910,159 @@ GByteArray *rf_converter_convert(
 
 	g_array_free(image_attribs, true);
 
+	return image;
+}
+
+static void _draw_rect(
+	RfConverter *this,
+	EGLImage image,
+	int64_t sx,
+	int64_t sy,
+	uint32_t sw,
+	uint32_t sh,
+	uint32_t sz,
+	uint32_t frame_width,
+	uint32_t frame_height
+)
+{
+	unsigned int texture;
+	glGenTextures(1, &texture);
+	glActiveTexture(GL_TEXTURE0);
+	// While `GL_TEXTURE_2D` does work for most cases, it won't work with
+	// NVIDIA and linear modifier (which is used by TTY), we have to use
+	// `GL_TEXTURE_EXTERNAL_OES`.
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture);
+	// Setting sampling filter to scaling texture automatically.
+	glTexParameteri(
+		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE
+	);
+	glTexParameteri(
+		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE
+	);
+	glTexParameteri(
+		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR
+	);
+	glTexParameteri(
+		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR
+	);
+	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
+	// g_debug("glEGLImageTargetTexture2DOES: %#x", glGetError());
+
+	// This would be the easiest way if I can use full OpenGL. However,
+	// libGL will pulls libGLX, I don't want that. With OpenGL ES we don't
+	// have `glGetTexImage()`, so we have to use framebuffers.
+	// glGetTexImage(GL_TEXTURE_EXTERNAL_OES, 0, GL_BGRA, GL_UNSIGNED_BYTE, this->buf->data);
+
+	// Convert physical (CRTC) coordinate to logical coordinate.
+	int tx = sx;
+	int ty = sy;
+	int tw = sw;
+	int th = sh;
+	int tz = sz;
+	switch (this->rotation / 90) {
+	case 1:
+		tx = frame_height - (sy + sh);
+		ty = sx;
+		break;
+	case 2:
+		tx = frame_width - (sx + sw);
+		ty = frame_height - (sy + sh);
+		break;
+	case 3:
+		tx = sy;
+		ty = frame_width - (sx + sw);
+		break;
+	default:
+		break;
+	}
+	if (this->rotation % 180 != 0) {
+		uint32_t temp = frame_width;
+		frame_width = frame_height;
+		frame_height = temp;
+		tw = sh;
+		th = sw;
+	}
+	mat4 view = m4camera(
+		// My position.
+		v3s(0.0f, 0.0f, 0.0f),
+		// My direction.
+		v3add(v3s(0.0f, 0.0f, 0.0f), v3s(0.0f, 0.0f, 1.0f)),
+		// My up.
+		v3s(0.0f, 1.0f, 0.0f)
+	);
+	mat4 projection =
+		m4ortho(0.0f, frame_width, frame_height, 0.0f, 0.1f, 100.0f);
+	mat4 model = m4multiply(
+		// Position.
+		m4translate(v3s(tx, ty, tz)),
+		// Size.
+		m4scale(v3s(tw, th, 1.0f))
+	);
+	mat4 mvp = m4multiply(projection, m4multiply(view, model));
+
+	glUseProgram(this->program);
+	if (this->gles_major >= 3)
+		glBindVertexArray(this->vertex_array);
+	else
+		_bind_buffers(this);
+	glUniformMatrix4fv(
+		glGetUniformLocation(this->program, "mvp"), 1, false, MARRAY(mvp)
+	);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	// g_debug("glDrawElements: %#x", glGetError());
+	if (this->gles_major >= 3)
+		glBindVertexArray(0);
+	else
+		_unbind_buffers(this);
+	glUseProgram(0);
+
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+	glDeleteTextures(1, &texture);
+}
+
+static void _draw_buffer(
+	RfConverter *this,
+	const RfBuffer *b,
+	uint32_t z,
+	uint32_t frame_width,
+	uint32_t frame_height
+)
+{
+	EGLImage image = _make_image(this->display, b);
 	if (image == EGL_NO_IMAGE) {
 		g_warning("EGL: Failed to create image: %d.", eglGetError());
-		goto out;
+		return;
 	}
+
+	_draw_rect(
+		this,
+		image,
+		b->md.crtc_x,
+		b->md.crtc_y,
+		b->md.width,
+		b->md.height,
+		z,
+		frame_width,
+		frame_height
+	);
+	eglDestroyImage(this->display, image);
+}
+
+GByteArray *rf_converter_convert(
+	RfConverter *this,
+	size_t length,
+	const RfBuffer *bufs,
+	unsigned int width,
+	unsigned int height
+)
+{
+	g_return_val_if_fail(RF_IS_CONVERTER(this), NULL);
+	g_return_val_if_fail(length > 0 && length < 3, NULL);
+	g_return_val_if_fail(bufs != NULL, NULL);
+	g_return_val_if_fail(width > 0 && height > 0, NULL);
+
+	if (!this->running)
+		return NULL;
 
 	if (!eglMakeCurrent(
 		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
@@ -682,8 +1071,10 @@ GByteArray *rf_converter_convert(
 			"EGL: Failed to make context current: %d.",
 			eglGetError()
 		);
-		goto clean_image;
+		return NULL;
 	}
+
+	GByteArray *res = NULL;
 
 	if (this->width != width || this->height != height) {
 		this->width = width;
@@ -695,41 +1086,21 @@ GByteArray *rf_converter_convert(
 		);
 	}
 
-	unsigned int texture;
-	glGenTextures(1, &texture);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, texture);
-	// Setting sampling filter to scaling texture automatically.
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
-	// g_debug("glEGLImageTargetTexture2DOES: %#x", glGetError());
-
-	// This would be the easiest way if I can use full OpenGL. However,
-	// libGL will pulls libGLX, I don't want that. With OpenGL ES we don't
-	// have `glGetTexImage()`, so we have to use framebuffers.
-	// glGetTexImage(
-	//	GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, this->buf->data
-	// );
+	const RfBuffer *primary = &bufs[0];
+	// Currently we assume primary size is always the same as monitor
+	// size. However, maybe we should use CRTC size actually?
+	uint32_t frame_width = primary->md.width;
+	uint32_t frame_height = primary->md.height;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 
 	glViewport(0, 0, this->width, this->height);
-	glClear(GL_COLOR_BUFFER_BIT);
-	glUseProgram(this->program);
-	if (this->gles_major >= 3)
-		glBindVertexArray(this->vertex_array);
-	else
-		_bind_buffers(this);
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-	// g_debug("glDrawElements: %#x", glGetError());
-	if (this->gles_major >= 3)
-		glBindVertexArray(0);
-	else
-		_unbind_buffers(this);
-	glUseProgram(0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	_draw_buffer(this, &bufs[0], 3, frame_width, frame_height);
+	if (length == 2)
+		_draw_buffer(this, &bufs[1], 2, frame_width, frame_height);
+
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
 	// But luckily LibVNCServer accepts RGBA by default.
@@ -748,12 +1119,5 @@ GByteArray *rf_converter_convert(
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	glBindTexture(GL_TEXTURE_2D, 0);
-	glDeleteTextures(1, &texture);
-
-clean_image:
-	eglDestroyImage(this->display, image);
-
-out:
 	return res;
 }

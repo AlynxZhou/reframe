@@ -33,22 +33,24 @@ static void _on_card_path(RfStreamer *s, const char *card_path, gpointer data)
 		rf_vnc_server_flush(this->vnc);
 }
 
-static void _on_frame(RfStreamer *s, const RfBuffer *b, gpointer data)
+static void
+_on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 {
 	struct _this *this = data;
 
+	const RfBuffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
 		if (this->rotation % 180 == 0) {
-			this->width = b->md.width;
-			this->height = b->md.height;
+			this->width = primary->md.width;
+			this->height = primary->md.height;
 		} else {
-			this->width = b->md.height;
-			this->height = b->md.width;
+			this->width = primary->md.height;
+			this->height = primary->md.width;
 		}
 	}
 
 	g_autoptr(GByteArray) buf = rf_converter_convert(
-		this->converter, b, this->width, this->height
+		this->converter, length, bufs, this->width, this->height
 	);
 	if (buf != NULL)
 		rf_vnc_server_update(this->vnc, buf, this->width, this->height);

@@ -8,7 +8,6 @@ G_BEGIN_DECLS
 
 #define RF_BYTES_PER_PIXEL 4
 
-
 /**
  * Socket IPC between Streamer and Server follows header and payload format:
  *
@@ -18,6 +17,10 @@ G_BEGIN_DECLS
  *
  * Some messages does not have payload, then length should be 0 and cannot be
  * omitted. If payload is a string, it should contain the `\0`.
+ *
+ * For frame type, the payload length is the number of planes, 0 is always the
+ * primary plane, follows with an optional cursor plane. For other types, the
+ * payload length is the number of bytes.
  */
 #define RF_MSG_TYPE_FRAME 'F'
 #define RF_MSG_TYPE_INPUT 'I'
@@ -27,6 +30,7 @@ G_BEGIN_DECLS
 #define RF_POINTER_MAX INT16_MAX
 
 ssize_t rf_send_header(GSocketConnection *connection, char type, size_t length);
+const char *rf_plane_type(uint32_t type);
 
 G_END_DECLS
 
