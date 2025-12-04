@@ -293,7 +293,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 			&bufs[length++],
 			this->cursor_id,
 			DRM_PLANE_TYPE_CURSOR
-	);
+		);
 		// It is OK to ignore cursor plane if failed.
 		if (ret <= 0)
 			--length;
@@ -399,27 +399,8 @@ static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 	return connector;
 }
 
-static drmModeConnector *_get_selected_card_and_connector(
-	struct _this *this,
-	const char *card_path,
-	const char *connector_name
-)
-{
-	this->cfd = open(card_path, O_RDONLY | O_CLOEXEC);
-	if (this->cfd < 0) {
-		g_warning(
-			"DRM: Failed to open card %s: %s.",
-			card_path,
-			strerror(errno)
-		);
-		return NULL;
-	}
-	g_message("DRM: Opened card %s.", card_path);
-
-	return _get_connector(this->cfd, connector_name);
-}
-
-static drmModeConnector *_get_connected_card_and_connector(struct _this *this)
+static drmModeConnector *
+_get_connected_card_and_connector(struct _this *this, const char *connector_name)
 {
 	g_autoptr(GDir) dir = g_dir_open("/dev/dri", 0, NULL);
 	if (dir == NULL)
@@ -436,7 +417,8 @@ static drmModeConnector *_get_connected_card_and_connector(struct _this *this)
 			continue;
 		g_debug("DRM: Finding the first connected connector on card %s.",
 			card_path);
-		drmModeConnector *connector = _get_connector(cfd, NULL);
+		drmModeConnector *connector =
+			_get_connector(cfd, connector_name);
 		if (connector != NULL) {
 			this->cfd = cfd;
 			this->card_path = g_strdup(card_path);
@@ -449,6 +431,26 @@ static drmModeConnector *_get_connected_card_and_connector(struct _this *this)
 		close(cfd);
 	}
 	return NULL;
+}
+
+static drmModeConnector *
+_get_card_and_connector(struct _this *this, const char *connector_name)
+{
+	if (this->card_path == NULL)
+		return _get_connected_card_and_connector(this, connector_name);
+
+	this->cfd = open(this->card_path, O_RDONLY | O_CLOEXEC);
+	if (this->cfd < 0) {
+		g_warning(
+			"DRM: Failed to open card %s: %s.",
+			this->card_path,
+			strerror(errno)
+		);
+		return NULL;
+	}
+	g_message("DRM: Opened card %s.", this->card_path);
+
+	return _get_connector(this->cfd, connector_name);
 }
 
 static drmModeCrtc *_get_crtc(int cfd, drmModeConnector *connector)
@@ -474,18 +476,13 @@ static void _setup_drm(struct _this *this)
 	this->cursor = true;
 
 	this->crtc_id = 0;
+
 	this->card_path = rf_config_get_card_path(this->config);
 	g_autofree char *connector_name = rf_config_get_connector(this->config);
-	drmModeConnector *connector = NULL;
-	if (this->card_path != NULL)
-		connector = _get_selected_card_and_connector(
-			this, this->card_path, connector_name
-		);
-	else
-		connector = _get_connected_card_and_connector(this);
+	drmModeConnector *connector =
+		_get_card_and_connector(this, connector_name);
 	if (connector == NULL)
 		g_error("DRM: Failed to find a connected connector.");
-
 	if (connector_name == NULL)
 		connector_name = _get_connector_name(connector);
 	g_message("DRM: Found connected connector %s.", connector_name);
@@ -511,7 +508,10 @@ static void _setup_drm(struct _this *this)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
 
 	this->cursor = rf_config_get_cursor(this->config);
-	g_message("DRM: Cursor plane is %s.", this->cursor ? "enabled" : "disabled");
+	g_message(
+		"DRM: Cursor plane is %s.",
+		this->cursor ? "enabled" : "disabled"
+	);
 }
 
 static void _clean_drm(struct _this *this)
