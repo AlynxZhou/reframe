@@ -93,11 +93,13 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 
 # Usage
 
-**Security Warning**: VNC data streams are not encrypted even with password authenciation, so **never** expose this to public network directly! Connecting to it via VPN is a better idea.
+**Security Suggestion**: VNC data streams are not encrypted even with password authenciation, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
 
-If you happen to have only 1 connected monitor and you never rotate it, it should work out of the box without modify the example configuration. Run `systemctl start reframe-server@example.service` and try connecting to it via port `5933`.
+If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. Run `systemctl start reframe-server@example.service` and try connecting to it via port `5933`.
 
-If it cannot correctly find your monitor, you need to manually select monitor via DRM card and connector.
+You need to disable automatic screen blank for **both user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
+
+If it cannot find your monitor, you need to manually select monitor via DRM card and connector.
 
 ## Select Monitor via DRM Card and Connector
 
@@ -129,17 +131,15 @@ ReFrame Server systemd service should automatically pulls ReFrame systemd socket
 
 ## Multi-monitor
 
-If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make mouse input position mapping works.
+If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make mouse position mapping works.
 
 Unfortunately there is no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to the right border of your right most monitor, the current x value is `desktop-width`, and then move the cursor to the bottom border of your bottom most monitor, the current y value is `desktop-height`, and then move the cursor to the top left corner of your selected monitor, the current x and y value is `monitor-x` and `monitor-y`.
 
-You need to keep the same multi-monitors layout **both of user session and display manager session** to make remote login work correctly.
-
-You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
+You need to keep the same multi-monitors layout for **both user session and display manager session** to make remote login work correctly.
 
 ## Headless Setup
 
-This program only works with connected monitors, however if you have no monitor connected ("headless"), you can still use it because Linux kernel could force enable a connector to pretend there is a monitor and the GPU driver will work.
+This program only works with connected monitors, however if you have no monitor connected ("headless"), you can still use it because Linux kernel could force enable a connector to pretend there is a monitor and the GPU driver will still work.
 
 First you need to choose a connector to enable, for example `DP-1`, and then add kernel parameter `video="DP-1:D"` to enable it.
 
