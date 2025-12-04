@@ -59,6 +59,7 @@ struct _this {
 	int cfd;
 	uint32_t crtc_id;
 	uint32_t primary_id;
+	bool cursor;
 	uint32_t cursor_id;
 	int ufd;
 };
@@ -282,7 +283,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 	if (ret <= 0)
 		return ret;
 
-	if (this->cursor_id == 0)
+	if (this->cursor && this->cursor_id == 0)
 		this->cursor_id = _get_plane_id(
 			this->cfd, this->crtc_id, DRM_PLANE_TYPE_CURSOR
 		);
@@ -292,7 +293,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 			&bufs[length++],
 			this->cursor_id,
 			DRM_PLANE_TYPE_CURSOR
-		);
+	);
 		// It is OK to ignore cursor plane if failed.
 		if (ret <= 0)
 			--length;
@@ -470,6 +471,7 @@ static void _setup_drm(struct _this *this)
 {
 	this->primary_id = 0;
 	this->cursor_id = 0;
+	this->cursor = true;
 
 	this->crtc_id = 0;
 	this->card_path = rf_config_get_card_path(this->config);
@@ -507,6 +509,9 @@ static void _setup_drm(struct _this *this)
 		_get_plane_id(this->cfd, this->crtc_id, DRM_PLANE_TYPE_PRIMARY);
 	if (this->primary_id == 0)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
+
+	this->cursor = rf_config_get_cursor(this->config);
+	g_message("DRM: Cursor plane is %s.", this->cursor ? "enabled" : "disabled");
 }
 
 static void _clean_drm(struct _this *this)

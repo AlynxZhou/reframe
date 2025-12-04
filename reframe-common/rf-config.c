@@ -70,6 +70,26 @@ char *rf_config_get_connector(RfConfig *this)
 	return connector;
 }
 
+unsigned int rf_config_get_rotation(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
+
+	g_autoptr(GError) error = NULL;
+	unsigned int rotation = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP, "rotation", &error
+	);
+	if (error != NULL)
+		return 0;
+	if (rotation % 90 != 0) {
+		g_warning(
+			"Got invalid monitor rotation angle %u, valid angles are clockwise 0, 90, 180, 270.",
+			rotation
+		);
+		rotation = rotation / 90 * 90;
+	}
+	return rotation % 360;
+}
+
 unsigned int rf_config_get_desktop_width(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
@@ -122,26 +142,6 @@ int rf_config_get_monitor_y(RfConfig *this)
 	return monitor_y;
 }
 
-unsigned int rf_config_get_rotation(RfConfig *this)
-{
-	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
-
-	g_autoptr(GError) error = NULL;
-	unsigned int rotation = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "rotation", &error
-	);
-	if (error != NULL)
-		return 0;
-	if (rotation % 90 != 0) {
-		g_warning(
-			"Got invalid monitor rotation angle %u, valid angles are clockwise 0, 90, 180, 270.",
-			rotation
-		);
-		rotation = rotation / 90 * 90;
-	}
-	return rotation % 360;
-}
-
 unsigned int rf_config_get_default_width(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
@@ -166,6 +166,19 @@ unsigned int rf_config_get_default_height(RfConfig *this)
 	if (error != NULL)
 		return 0;
 	return default_height;
+}
+
+bool rf_config_get_cursor(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), true);
+
+	g_autoptr(GError) error = NULL;
+	gboolean cursor = g_key_file_get_boolean(
+		this->f, RF_CONFIG_GROUP, "cursor", &error
+	);
+	if (error != NULL)
+		return true;
+	return cursor ? true : false;
 }
 
 unsigned int rf_config_get_fps(RfConfig *this)
