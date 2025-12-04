@@ -91,7 +91,7 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 # meson install
 ```
 
-### Usage
+# Usage
 
 **Security Warning**: VNC data streams are not encrypted even with password authenciation, so **never** expose this to public network directly! Connecting to it via VPN is a better idea.
 
@@ -99,7 +99,7 @@ If you happen to have only 1 connected monitor and you never rotate it, it shoul
 
 If it cannot correctly find your monitor, you need to manually select monitor via DRM card and connector.
 
-#### Select Monitor via DRM Card and Connector
+## Select Monitor via DRM Card and Connector
 
 First copy the example configuration and modify it. This program handles only 1 monitor, so I suggest to use your selected monitor connector name as configuration name.
 
@@ -127,7 +127,7 @@ ReFrame Server systemd service should automatically pulls ReFrame systemd socket
 # systemctl start reframe@DP-1.socket
 ```
 
-#### Multi-monitor
+## Multi-monitor
 
 If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make mouse input position mapping works.
 
@@ -137,7 +137,7 @@ You need to keep the same multi-monitors layout **both of user session and displ
 
 You need to disable automatic screen blank for **both of user session and display manager session**, otherwise the connector might be set to disconnected and we cannot get frames for it.
 
-#### Headless Setup
+## Headless Setup
 
 This program only works with connected monitors, however if you have no monitor connected ("headless"), you can still use it because Linux kernel could force enable a connector to pretend there is a monitor and the GPU driver will work.
 
@@ -157,10 +157,10 @@ I only list pros of ReFrame, if you find cons of ReFrame, you can just use other
 
 - ReFrame supports NVIDIA driver by decoding frames with EGL and OpenGL ES, kmsvnc uses VA-API and it cannot decode frames of NVIDIA driver correctly.
 - ReFrame gets frame buffer on each frame, so it works correctly if your compositor uses double-buffers.
-- ReFrame splits into privilieged DRM/uinput part and unprivilieged VNC server part, kmsvnc runs the whole process as privilieged.
+- ReFrame splits into privilieged DRM/uinput part and unprivilieged VNC server part, kmsvnc runs as a whole privilieged process.
 - ReFrame supports resizing client window.
 
-However, most of those cons are ideas from [@isjerryxiao](https://github.com/isjerryxiao/), and ReFrame initially is designed to improve kmsvnc.
+However, most of those improvements are ideas from [@isjerryxiao](https://github.com/isjerryxiao/), and ReFrame initially is designed as a better re-implementation of kmsvnc.
 
 ## [RustDesk](https://github.com/rustdesk/rustdesk/)
 
@@ -169,7 +169,7 @@ However, most of those cons are ideas from [@isjerryxiao](https://github.com/isj
 ## [GNOME Remote Desktop](https://gitlab.gnome.org/GNOME/gnome-remote-desktop/)
 
 - ReFrame supports non-GNOME desktop environments.
-- ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it).
+- ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decide to write my own solution).
 
 ## [wayvnc](https://github.com/any1/wayvnc/)
 
@@ -182,12 +182,3 @@ However, most of those cons are ideas from [@isjerryxiao](https://github.com/isj
 # Special Thanks
 
 I am very appreciate to [@isjerryxiao](https://github.com/isjerryxiao/) for creating [kmsvnc](https://github.com/isjerryxiao/kmsvnc/) and giving advice for where could be fixed or improved in it. ReFrame is heavily inspired by kmsvnc and I've learnt a lot in it.
-
-# How to Debug
-
-```
-$ mkdir build && cd build && meson setup --prefix=/usr --buildtype=debug . .. && meson compile
-# setcap cap_sys_admin+ep reframe-streamer/reframe-streamer
-$ G_MESSAGES_DEBUG=ReFrame ./reframe-streamer/reframe-streamer --config=/etc/reframe/DP-1.conf --keep-listen
-$ EGL_PLATFORM=surfaceless G_MESSAGES_DEBUG=ReFrame ./reframe-server/reframe-server --config=/etc/reframe/DP-1.conf
-```
