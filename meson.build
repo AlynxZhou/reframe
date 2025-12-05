@@ -52,10 +52,10 @@ configure_file(
   configuration: conf_data
 )
 
+subdir('dists')
 subdir('reframe-common')
 subdir('reframe-streamer')
 subdir('reframe-server')
-subdir('dists')
 
 summary({
   'buildtype': get_option('buildtype'),

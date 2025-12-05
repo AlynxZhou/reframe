@@ -6,7 +6,7 @@ Requires=reframe@%i.socket
 [Service]
 Type=exec
 # We have to run this as root to get permissions on `/dev/dri/card*` and
-# `/dev/uinput`, then we drop permissions as much as we can.
+# `/dev/uinput`, then we drop all unused permissions.
 CapabilityBoundingSet=CAP_SYS_ADMIN
 ProtectHome=true
 ProtectSystem=strict
