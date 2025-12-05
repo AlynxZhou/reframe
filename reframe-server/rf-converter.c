@@ -271,6 +271,8 @@ mat4 m4camera(vec3 eye, vec3 target, vec3 up)
 
 static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 {
+	if (card_path == NULL)
+		return EGL_NO_DISPLAY;
 	int max_devices = 0;
 	int num_devices = 0;
 	EGLDeviceEXT device = EGL_NO_DEVICE_EXT;
@@ -287,7 +289,9 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 		return EGL_NO_DISPLAY;
 	}
 	for (size_t i = 0; i < num_devices; ++i) {
-		const char *f = eglQueryDeviceStringEXT(devices[i], EGL_DRM_DEVICE_FILE_EXT);
+		const char *f = eglQueryDeviceStringEXT(
+			devices[i], EGL_DRM_DEVICE_FILE_EXT
+		);
 		if (g_strcmp0(card_path, f) == 0) {
 			device = devices[i];
 			break;
@@ -769,19 +773,18 @@ int rf_converter_start(RfConverter *this)
 	int ret = 0;
 	ret = _setup_egl(this);
 	if (ret < 0)
-		goto clean_egl;
+		goto out;
 	ret = _setup_gl(this);
 	if (ret < 0)
-		goto clean_gl;
+		goto out;
 
 	this->running = true;
-	goto out;
 
-clean_gl:
-	_clean_gl(this);
-clean_egl:
-	_clean_egl(this);
 out:
+	if (ret < 0) {
+		_clean_gl(this);
+		_clean_egl(this);
+	}
 	return ret;
 }
 
