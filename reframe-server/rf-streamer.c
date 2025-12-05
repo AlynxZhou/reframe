@@ -1,7 +1,6 @@
-#include "gio/gio.h"
-#include "glib-object.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <gio/gio.h>
 #include <gio/gunixfdmessage.h>
 #include <linux/uinput.h>
 

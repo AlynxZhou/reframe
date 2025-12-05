@@ -2,7 +2,6 @@
 #define __RF_STREAMER_H__
 
 #include <stdbool.h>
-#include <gio/gio.h>
 
 #include "rf-config.h"
 

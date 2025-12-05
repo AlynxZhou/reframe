@@ -1,11 +1,8 @@
-#include "glib.h"
 #include <epoxy/egl.h>
-#include <epoxy/egl_generated.h>
 #include <epoxy/gl.h>
 #include <libdrm/drm_fourcc.h>
 
 #include "rf-common.h"
-#include <stdint.h>
 #include "rf-converter.h"
 
 struct _RfConverter {
@@ -28,6 +25,7 @@ struct _RfConverter {
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
 
+// Begin mvmath.
 #include <math.h>
 
 #define PI 3.141593f
@@ -35,7 +33,7 @@ G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
 #define MARRAY(M) ((M).m)
 
 typedef float scalar;
-/*
+/**
  * vec2 is a scalar[2] like this:
  * | 0 |
  * | 1 |
@@ -43,7 +41,7 @@ typedef float scalar;
 typedef struct {
 	scalar v[2];
 } vec2;
-/*
+/**
  * vec3 is a scalar[3] like this:
  * | 0 |
  * | 1 |
@@ -52,7 +50,7 @@ typedef struct {
 typedef struct {
 	scalar v[3];
 } vec3;
-/*
+/**
  * vec4 is a scalar[4] like this:
  * | 0 |
  * | 1 |
@@ -62,7 +60,7 @@ typedef struct {
 typedef struct {
 	scalar v[4];
 } vec4;
-/*
+/**
  * mat4 is a scalar[16] like this:
  * |   0   4   8  12   |
  * |   1   5   9  13   |
@@ -269,6 +267,7 @@ mat4 m4camera(vec3 eye, vec3 target, vec3 up)
 	m.m[15] = 1.0f;
 	return m;
 }
+// End mvmath.
 
 static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 {
@@ -288,12 +287,8 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 		return EGL_NO_DISPLAY;
 	}
 	for (size_t i = 0; i < num_devices; ++i) {
-		if (g_strcmp0(
-			    card_path,
-			    eglQueryDeviceStringEXT(
-				    devices[i], EGL_DRM_DEVICE_FILE_EXT
-			    )
-		    ) == 0) {
+		const char *f = eglQueryDeviceStringEXT(devices[i], EGL_DRM_DEVICE_FILE_EXT);
+		if (g_strcmp0(card_path, f) == 0) {
 			device = devices[i];
 			break;
 		}
