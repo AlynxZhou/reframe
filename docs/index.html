@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="theme-color" content="#33363b">
+    <meta name="msapplication-TileColor" content="#33363b">
+    <link rel="canonical" href="https://reframe.alynx.one/">
+    <link rel="stylesheet" href="/css/index.css">
+    <title>ReFrame Remote Desktop</title>
+  </head>
+  <body>
+    <header>
+      <h1>ReFrame Remote Desktop</h1>
+      <p>DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/login…</p>
+    </header>
+
+    <main>
+      <section id="screenshots">
+        <h2>Screenshots</h2>
+        <img src="/images/screenshot-1.png" alt="Screenshot 1" />
+        <img src="/images/screenshot-2.png" alt="Screenshot 2" />
+      </section>
+
+      <section id="features">
+        <h2>Features</h2>
+        <h3>What ReFrame Currently Supports</h3>
+        <ul>
+          <li>VNC</li>
+          <li>Wayland/X11/TTY</li>
+          <li>Intel/AMD/NVIDIA</li>
+          <li>Pointer/Keyboard</li>
+          <li>Remote Login</li>
+          <li>Headless Setup</li>
+          <li>Draw Remote Cursor</li>
+        </ul>
+        <h3>What ReFrame May Support in Future</h3>
+        <ul>
+          <li>RDP: PR is always welcome.</li>
+        </ul>
+        <h3>What ReFrame Won't Support</h3>
+        <ul>
+          <li>Sound</li>
+          <li>No GPU/connector/EGL/OpenGL ES/DRM/KMS</li>
+          <li>Game Streaming</li>
+          <li>DRM Overlay Plane</li>
+        </ul>
+      </section>
+
+      <section id="requirements">
+        <h2>Requirements</h2>
+        <p>A GPU that:</p>
+        <ul>
+          <li>supports DRM/KMS.</li>
+          <li>has proper EGL/OpenGL ES implementation.</li>
+          <li>is able to output to monitors.</li>
+        </ul>
+        <p>If you can run a modern Linux desktop environment, it is likely you already meet those requirements.</p>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <p>Please refer to <a href="https://github.com/AlynxZhou/reframe#install" target="_blank" rel="external nofollow noreferrer noopener">the install section in README.md</a>.</p>
+      </section>
+
+      <section id="usage">
+        <h2>Usage</h2>
+        <p><strong>Security Suggestion:</strong> VNC data streams are not encrypted even with password authenciation, so <strong>NEVER</strong> expose this to public network directly! Connecting to it via VPN is recommended.</p>
+        <ol>
+          <li>Disable automatic screen blank for both user session and display manager session.</li>
+          <li>Run <code>systemctl start reframe-server@example.service</code> and try connecting to it via port <code>5933</code>.</li>
+        </ol>
+        <p>For more detailed usage instructions, please refer to the <a href="https://github.com/AlynxZhou/reframe#usage" target="_blank" rel="external nofollow noreferrer noopener">README</a>.</p>
+      </section>
+
+      <section id="comparison">
+        <h2>Comparison with Other Linux Remote Desktop</h2>
+        <ul>
+          <li>
+            <a href="https://github.com/isjerryxiao/kmsvnc/" target="_blank" rel="external nofollow noreferrer noopener">kmsvnc</a>
+            <ul>
+              <li>ReFrame supports NVIDIA driver by decoding frames with EGL and OpenGL ES, kmsvnc uses VA-API and it cannot decode frames of NVIDIA driver correctly.</li>
+              <li>ReFrame gets frame buffer on each frame, so it works correctly if your compositor uses double-buffers.</li>
+              <li>ReFrame splits into privilieged DRM/uinput part and unprivilieged VNC server part, kmsvnc runs as a whole privilieged process.</li>
+              <li>ReFrame supports resizing client window.</li>
+            </ul>
+          </li>
+          <li>
+            <a href="https://github.com/rustdesk/rustdesk/" target="_blank" rel="external nofollow noreferrer noopener">RustDesk</a>
+            <ul>
+              <li>ReFrame supports Remote Login on Wayland, <a href="https://rustdesk.com/docs/en/client/linux/#login-screen" target="_blank" rel="external nofollow noreferrer noopener">RustDesk does not support it</a>.</li>
+            </ul>
+          </li>
+          <li>
+            <a href="https://gitlab.gnome.org/GNOME/gnome-remote-desktop/" target="_blank" rel="external nofollow noreferrer noopener">GNOME Remote Desktop</a>
+            <ul>
+              <li>ReFrame supports non-GNOME desktop environments.</li>
+              <li>ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decide to write my own solution).</li>
+            </ul>
+          </li>
+          <li>
+            <a href="https://github.com/any1/wayvnc/" target="_blank" rel="external nofollow noreferrer noopener">wayvnc</a>
+            <ul>
+              <li>ReFrame supports non-wlroots desktop environments.</li>
+            </ul>
+          </li>
+          <li>
+            <a href="https://tigervnc.org/" target="_blank" rel="external nofollow noreferrer noopener">x0vncserver</a>
+            <ul>
+              <li>ReFrame supports Wayland.</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p><a href="https://github.com/AlynxZhou/reframe/">GitHub Repo</a></p>
+    </footer>
+  </body>
+</html>
