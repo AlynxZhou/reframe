@@ -628,20 +628,6 @@ static int _setup_gl(RfConverter *this)
 		0.0f, 0.0f
 	};
 	// clang-format on
-	// Rotating texture to match the direction of model is easier than
-	// rotate the model with matrix.
-	for (unsigned int r = this->rotation; r > 0; r -= 90) {
-		float u = coordinates[0];
-		float v = coordinates[1];
-		coordinates[0] = coordinates[2];
-		coordinates[1] = coordinates[3];
-		coordinates[2] = coordinates[4];
-		coordinates[3] = coordinates[5];
-		coordinates[4] = coordinates[6];
-		coordinates[5] = coordinates[7];
-		coordinates[6] = u;
-		coordinates[7] = v;
-	}
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
 	glBufferData(
 		GL_ARRAY_BUFFER, sizeof(coordinates), coordinates, GL_STATIC_DRAW
@@ -990,12 +976,24 @@ static void _draw_rect(
 	);
 	mat4 projection =
 		m4ortho(0.0f, frame_width, frame_height, 0.0f, 0.1f, 100.0f);
-	mat4 model = m4multiply(
-		// Position.
-		m4translate(v3s(tx, ty, tz)),
-		// Size.
-		m4scale(v3s(tw, th, 1.0f))
+	// Normally the sequence is size/orientation/position. However, because
+	// width and height are swapped after rotating, we rotate it first.
+	//
+	// Orientation.
+	//
+	// Model starts from (0, 0, 0), we need to move it to center first.
+	mat4 model = m4translate(v3s(-0.5f, -0.5f, 0.0f));
+	// Rotate it.
+	model = m4multiply(
+		m4rotate(v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)),
+		model
 	);
+	// Move it back.
+	model = m4multiply(m4translate(v3s(0.5f, 0.5f, 0.0f)), model);
+	// Size.
+	model = m4multiply(m4scale(v3s(tw, th, 1.0f)), model);
+	// Position.
+	model = m4multiply(m4translate(v3s(tx, ty, tz)), model);
 	mat4 mvp = m4multiply(projection, m4multiply(view, model));
 
 	glUseProgram(this->program);
