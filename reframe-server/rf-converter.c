@@ -28,7 +28,7 @@ G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
 // Begin mvmath.
 #include <math.h>
 
-#define PI 3.141593f
+#define PI 3.1415926f
 
 #define MARRAY(M) ((M).m)
 
@@ -900,11 +900,11 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 static void _draw_rect(
 	RfConverter *this,
 	EGLImage image,
-	int64_t sx,
-	int64_t sy,
-	uint32_t sw,
-	uint32_t sh,
-	uint32_t sz,
+	int64_t x,
+	int64_t y,
+	uint32_t w,
+	uint32_t h,
+	uint32_t z,
 	uint32_t frame_width,
 	uint32_t frame_height
 )
@@ -932,69 +932,23 @@ static void _draw_rect(
 	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 	// g_debug("glEGLImageTargetTexture2DOES: %#x", glGetError());
 
-	// This would be the easiest way if I can use full OpenGL. However,
-	// libGL will pulls libGLX, I don't want that. With OpenGL ES we don't
-	// have `glGetTexImage()`, so we have to use framebuffers.
-	// glGetTexImage(GL_TEXTURE_EXTERNAL_OES, 0, GL_BGRA, GL_UNSIGNED_BYTE, this->buf->data);
-
-	// Convert physical (CRTC) coordinate to logical coordinate.
-	int tx = sx;
-	int ty = sy;
-	int tw = sw;
-	int th = sh;
-	int tz = sz;
-	switch (this->rotation / 90) {
-	case 1:
-		tx = frame_height - (sy + sh);
-		ty = sx;
-		break;
-	case 2:
-		tx = frame_width - (sx + sw);
-		ty = frame_height - (sy + sh);
-		break;
-	case 3:
-		tx = sy;
-		ty = frame_width - (sx + sw);
-		break;
-	default:
-		break;
-	}
-	if (this->rotation % 180 != 0) {
-		uint32_t temp = frame_width;
-		frame_width = frame_height;
-		frame_height = temp;
-		tw = sh;
-		th = sw;
-	}
+	mat4 model =
+		m4multiply(m4translate(v3s(x, y, z)), m4scale(v3s(w, h, 1.0f)));
 	mat4 view = m4camera(
-		// My position.
 		v3s(0.0f, 0.0f, 0.0f),
-		// My direction.
-		v3add(v3s(0.0f, 0.0f, 0.0f), v3s(0.0f, 0.0f, 1.0f)),
-		// My up.
+		v3s(0.0f, 0.0f, 1.0f),
 		v3s(0.0f, 1.0f, 0.0f)
 	);
 	mat4 projection =
 		m4ortho(0.0f, frame_width, frame_height, 0.0f, 0.1f, 100.0f);
-	// Normally the sequence is size/orientation/position. However, because
-	// width and height are swapped after rotating, we rotate it first.
-	//
-	// Orientation.
-	//
-	// Model starts from (0, 0, 0), we need to move it to center first.
-	mat4 model = m4translate(v3s(-0.5f, -0.5f, 0.0f));
-	// Rotate it.
-	model = m4multiply(
-		m4rotate(v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)),
-		model
-	);
-	// Move it back.
-	model = m4multiply(m4translate(v3s(0.5f, 0.5f, 0.0f)), model);
-	// Size.
-	model = m4multiply(m4scale(v3s(tw, th, 1.0f)), model);
-	// Position.
-	model = m4multiply(m4translate(v3s(tx, ty, tz)), model);
 	mat4 mvp = m4multiply(projection, m4multiply(view, model));
+	// Rotating monitor is just the same as rotating the whole world.
+	mvp = m4multiply(
+		m4rotate(
+			v3s(0.0f, 0.0f, 1.0f), sradians(-1.0f * this->rotation)
+		),
+		mvp
+	);
 
 	glUseProgram(this->program);
 	if (this->gles_major >= 3)
@@ -1029,7 +983,6 @@ static void _draw_buffer(
 		g_warning("EGL: Failed to create image: %d.", eglGetError());
 		return;
 	}
-
 	_draw_rect(
 		this,
 		image,
