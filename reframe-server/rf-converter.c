@@ -944,10 +944,7 @@ static void _draw_rect(
 	mat4 mvp = m4multiply(projection, m4multiply(view, model));
 	// Rotating monitor is just the same as rotating the whole world.
 	mvp = m4multiply(
-		m4rotate(
-			v3s(0.0f, 0.0f, 1.0f), sradians(-1.0f * this->rotation)
-		),
-		mvp
+		m4rotate(v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)), mvp
 	);
 
 	glUseProgram(this->program);
