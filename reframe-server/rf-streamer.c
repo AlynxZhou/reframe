@@ -8,6 +8,9 @@
 #include "rf-buffer.h"
 #include "rf-streamer.h"
 
+#define KEYBOARD_MAX_EVENTS 2
+#define POINTER_MAX_EVENTS 7
+
 struct _RfStreamer {
 	GObject parent_instance;
 	RfConfig *config;
@@ -461,9 +464,8 @@ void rf_streamer_send_keyboard_event(
 	if (!this->running)
 		return;
 
-#define KEYBOARD_EVENT_LENGTH 2
-	struct input_event ies[KEYBOARD_EVENT_LENGTH];
-	memset(ies, 0, KEYBOARD_EVENT_LENGTH * sizeof(*ies));
+	struct input_event ies[KEYBOARD_MAX_EVENTS];
+	memset(ies, 0, KEYBOARD_MAX_EVENTS * sizeof(*ies));
 
 	ies[0].type = EV_KEY;
 	ies[0].code = keycode;
@@ -473,7 +475,7 @@ void rf_streamer_send_keyboard_event(
 	ies[1].code = SYN_REPORT;
 	ies[1].value = 0;
 
-	_send_input_msg(this, ies, KEYBOARD_EVENT_LENGTH);
+	_send_input_msg(this, ies, KEYBOARD_MAX_EVENTS);
 }
 
 void rf_streamer_send_pointer_event(
@@ -508,8 +510,10 @@ void rf_streamer_send_pointer_event(
 		(this->monitor_y + ry * this->frame_height) / desktop_height;
 	g_debug("Input: Calculated global position x %f and y %f.", x, y);
 
-	size_t length = (wup || wdown) ? 7 : 6;
-	g_autofree struct input_event *ies = g_malloc0_n(length, sizeof(*ies));
+	size_t length = (wup || wdown) ? POINTER_MAX_EVENTS :
+					 POINTER_MAX_EVENTS - 1;
+	struct input_event ies[POINTER_MAX_EVENTS];
+	memset(ies, 0, POINTER_MAX_EVENTS * sizeof(*ies));
 
 	ies[0].type = EV_ABS;
 	ies[0].code = ABS_X;
