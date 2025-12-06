@@ -6,6 +6,7 @@
 
 G_BEGIN_DECLS
 
+#define RF_MAX_BUFS 2
 #define RF_MAX_FDS 4
 
 struct rf_buffer_metadata {

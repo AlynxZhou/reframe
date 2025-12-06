@@ -168,8 +168,12 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
 	if (ret <= 0)
 		goto out;
+	if (length <= 0 || length >= 3) {
+		g_warning("Frame: Got invalid buffers length %ld.", length);
+		goto out;
+	}
 
-	g_autofree RfBuffer *bufs = g_malloc0(length * sizeof(*bufs));
+	RfBuffer bufs[RF_MAX_BUFS];
 	for (size_t i = 0; i < length; ++i) {
 		ret = _on_buffer(this->connection, &bufs[i]);
 		if (ret <= 0)

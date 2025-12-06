@@ -272,7 +272,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 	if (ret <= 0)
 		goto out;
 
-	RfBuffer bufs[2];
+	RfBuffer bufs[RF_MAX_BUFS];
 	length = 0;
 	ret = _make_buffer(
 		this->cfd,
