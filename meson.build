@@ -1,7 +1,7 @@
 project(
   'reframe',
   'c',
-  version: '1.4.1',
+  version: '1.4.2',
   license: 'Apache-2.0',
 )
 
