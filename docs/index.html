@@ -53,10 +53,10 @@
         <p>A GPU that:</p>
         <ul>
           <li>supports DRM/KMS.</li>
-          <li>has proper EGL/OpenGL ES implementation.</li>
+          <li>has a proper EGL/OpenGL ES implementation.</li>
           <li>is able to output to monitors.</li>
         </ul>
-        <p>If you can run a modern Linux desktop environment, it is likely you already meet those requirements.</p>
+        <p>If you can run a modern Linux desktop environment, it is likely you already meet these requirements.</p>
       </section>
 
       <section id="install">
@@ -66,7 +66,7 @@
 
       <section id="usage">
         <h2>Usage</h2>
-        <p><strong>Security Suggestion:</strong> VNC data streams are not encrypted even with password authenciation, so <strong>NEVER</strong> expose this to public network directly! Connecting to it via VPN is recommended.</p>
+        <p><strong>Security Suggestion:</strong> VNC data streams are not encrypted even with password authentication, so <strong>NEVER</strong> expose this to public network directly! Connecting to it via VPN is recommended.</p>
         <ol>
           <li>Disable automatic screen blank for both user session and display manager session.</li>
           <li>Run <code>systemctl start reframe-server@example.service</code> and try connecting to it via port <code>5933</code>.</li>
@@ -82,7 +82,7 @@
             <ul>
               <li>ReFrame supports NVIDIA driver by decoding frames with EGL and OpenGL ES, kmsvnc uses VA-API and it cannot decode frames of NVIDIA driver correctly.</li>
               <li>ReFrame gets frame buffer on each frame, so it works correctly if your compositor uses double-buffers.</li>
-              <li>ReFrame splits into privilieged DRM/uinput part and unprivilieged VNC server part, kmsvnc runs as a whole privilieged process.</li>
+              <li>ReFrame contains privilieged DRM/uinput process and unprivilieged VNC server process, kmsvnc runs as a whole privilieged process.</li>
               <li>ReFrame supports resizing client window.</li>
             </ul>
           </li>
@@ -96,7 +96,7 @@
             <a href="https://gitlab.gnome.org/GNOME/gnome-remote-desktop/" target="_blank" rel="external nofollow noreferrer noopener">GNOME Remote Desktop</a>
             <ul>
               <li>ReFrame supports non-GNOME desktop environments.</li>
-              <li>ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decide to write my own solution).</li>
+              <li>ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decided to write my own solution).</li>
             </ul>
           </li>
           <li>
