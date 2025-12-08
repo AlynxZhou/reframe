@@ -22,7 +22,6 @@ struct rf_buffer_metadata {
 	uint32_t offsets[RF_MAX_FDS];
 	uint32_t pitches[RF_MAX_FDS];
 };
-
 struct rf_buffer {
 	int fds[RF_MAX_FDS];
 	struct rf_buffer_metadata md;

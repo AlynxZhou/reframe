@@ -273,6 +273,7 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 {
 	if (card_path == NULL)
 		return EGL_NO_DISPLAY;
+
 	int max_devices = 0;
 	int num_devices = 0;
 	EGLDeviceEXT device = EGL_NO_DEVICE_EXT;
@@ -282,12 +283,14 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 		);
 		return EGL_NO_DISPLAY;
 	}
+
 	g_autofree EGLDeviceEXT *devices =
 		g_malloc0_n(max_devices, sizeof(*devices));
 	if (!eglQueryDevicesEXT(max_devices, devices, &num_devices)) {
 		g_warning("EGL: Failed to query devices: %d.", eglGetError());
 		return EGL_NO_DISPLAY;
 	}
+
 	for (size_t i = 0; i < num_devices; ++i) {
 		const char *f = eglQueryDeviceStringEXT(
 			devices[i], EGL_DRM_DEVICE_FILE_EXT
@@ -299,6 +302,7 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 	}
 	if (device == EGL_NO_DEVICE_EXT)
 		return EGL_NO_DISPLAY;
+
 	g_message("EGL: Got device for %s.", card_path);
 	return eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, device, NULL);
 }
@@ -880,7 +884,6 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 	}
 	EGLAttrib key = EGL_NONE;
 	g_array_append_val(image_attribs, key);
-
 	// EGL_NO_CONTEXT must be used here according to the docs.
 	//
 	// See <https://registry.khronos.org/EGL/extensions/EXT/EGL_EXT_image_dma_buf_import.txt>.
@@ -891,9 +894,7 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 		(EGLClientBuffer)NULL,
 		(EGLAttrib *)image_attribs->data
 	);
-
 	g_array_free(image_attribs, true);
-
 	return image;
 }
 

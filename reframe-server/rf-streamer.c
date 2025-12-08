@@ -401,6 +401,7 @@ int rf_streamer_start(RfStreamer *this)
 	g_message("Frame: Got screen rotation %u.", this->rotation);
 	this->frame_width = 0;
 	this->frame_height = 0;
+
 	this->connection = g_socket_client_connect(
 		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, NULL
 	);

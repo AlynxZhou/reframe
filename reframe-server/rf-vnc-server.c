@@ -427,20 +427,8 @@ void rf_vnc_server_start(RfVNCServer *this)
 	if (this->running)
 		return;
 
-	g_autoptr(GError) error = NULL;
-	unsigned int port = rf_config_get_port(this->config);
-	g_message("VNC: Listening on port %u.", port);
-	g_socket_listener_add_inet_port(
-		G_SOCKET_LISTENER(this), port, NULL, &error
-	);
-	if (error != NULL)
-		g_error("Failed to listen on port %u: %s.",
-			port,
-			error->message);
-
 	this->passwords[0] = rf_config_get_password(this->config);
 	this->connector = rf_config_get_connector(this->config);
-
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
 	if (this->width == 0 || this->height == 0) {
@@ -458,6 +446,17 @@ void rf_vnc_server_start(RfVNCServer *this)
 		);
 	}
 
+	g_autoptr(GError) error = NULL;
+	unsigned int port = rf_config_get_port(this->config);
+	g_message("VNC: Listening on port %u.", port);
+	g_socket_listener_add_inet_port(
+		G_SOCKET_LISTENER(this), port, NULL, &error
+	);
+	if (error != NULL)
+		g_error("Failed to listen on port %u: %s.",
+			port,
+			error->message);
+
 	this->running = true;
 }
 
@@ -471,10 +470,10 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	this->running = false;
 
 	rf_vnc_server_flush(this);
+	g_socket_listener_close(G_SOCKET_LISTENER(this));
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->connector, g_free);
 	g_clear_pointer(&this->passwords[0], g_free);
-	g_socket_listener_close(G_SOCKET_LISTENER(this));
 }
 
 void rf_vnc_server_update(

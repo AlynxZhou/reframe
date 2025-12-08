@@ -73,13 +73,11 @@ static uint64_t _get_plane_prop(
 )
 {
 	uint64_t value = default_value;
-
 	drmModeObjectProperties *props = drmModeObjectGetProperties(
 		cfd, plane_id, DRM_MODE_OBJECT_PLANE
 	);
 	if (props == NULL)
 		return -1;
-
 	for (size_t i = 0; i < props->count_props; ++i) {
 		drmModePropertyRes *prop =
 			drmModeGetProperty(cfd, props->props[i]);
@@ -89,9 +87,7 @@ static uint64_t _get_plane_prop(
 			value = props->prop_values[i];
 		drmModeFreeProperty(prop);
 	}
-
 	drmModeFreeObjectProperties(props);
-
 	return value;
 }
 
@@ -99,17 +95,14 @@ static uint64_t _get_plane_prop(
 static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 {
 	uint32_t plane_id = 0;
-
 	drmModePlaneRes *pres = drmModeGetPlaneResources(cfd);
 	if (pres == NULL) {
 		g_warning("DRM: Failed to get plane resources.");
 		return 0;
 	}
-
 	g_debug("DRM: Finding plane of type %s and CRTC ID %u.",
 		rf_plane_type(type),
 		crtc_id);
-
 	for (size_t i = 0; i < pres->count_planes; ++i) {
 		if (_get_plane_prop(
 			    cfd, pres->planes[i], "type", DRM_PLANE_TYPE_OVERLAY
@@ -129,7 +122,6 @@ static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 		if (plane_id != 0)
 			break;
 	}
-
 	drmModeFreePlaneResources(pres);
 	return plane_id;
 }
@@ -250,7 +242,6 @@ _send_frame_msg(struct _this *this, size_t length, RfBuffer *bufs)
 	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, length);
 	if (ret <= 0)
 		return ret;
-
 	for (size_t i = 0; i < length; ++i) {
 		ret = _send_buffer(this->connection, &bufs[i]);
 		if (ret <= 0)
@@ -367,17 +358,14 @@ static inline char *_get_connector_name(drmModeConnector *connector)
 static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 {
 	drmModeConnector *connector = NULL;
-
 	drmModeRes *res = drmModeGetResources(cfd);
 	if (res == NULL) {
 		g_warning("DRM: Failed to get resources.");
 		return NULL;
 	}
-
 	if (connector_name != NULL)
 		g_debug("DRM: Finding connector for connector %s.",
 			connector_name);
-
 	for (int i = 0; i < res->count_connectors; ++i) {
 		connector = drmModeGetConnector(cfd, res->connectors[i]);
 		if (connector == NULL)
@@ -394,7 +382,6 @@ static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 			break;
 		drmModeFreeConnector(connector);
 	}
-
 	drmModeFreeResources(res);
 	return connector;
 }
@@ -405,7 +392,6 @@ _get_connected_card_and_connector(struct _this *this, const char *connector_name
 	g_autoptr(GDir) dir = g_dir_open("/dev/dri", 0, NULL);
 	if (dir == NULL)
 		return NULL;
-
 	const char *name = NULL;
 	while ((name = g_dir_read_name(dir)) != NULL) {
 		if (!g_str_has_prefix(name, "card"))
@@ -438,7 +424,6 @@ _get_card_and_connector(struct _this *this, const char *connector_name)
 {
 	if (this->card_path == NULL)
 		return _get_connected_card_and_connector(this, connector_name);
-
 	this->cfd = open(this->card_path, O_RDONLY | O_CLOEXEC);
 	if (this->cfd < 0) {
 		g_warning(
@@ -449,7 +434,6 @@ _get_card_and_connector(struct _this *this, const char *connector_name)
 		return NULL;
 	}
 	g_message("DRM: Opened card %s.", this->card_path);
-
 	return _get_connector(this->cfd, connector_name);
 }
 
@@ -457,25 +441,20 @@ static drmModeCrtc *_get_crtc(int cfd, drmModeConnector *connector)
 {
 	drmModeEncoder *encoder = NULL;
 	drmModeCrtc *crtc = NULL;
-
 	encoder = drmModeGetEncoder(cfd, connector->encoder_id);
 	if (encoder == NULL)
 		return NULL;
-
 	crtc = drmModeGetCrtc(cfd, encoder->crtc_id);
-
 	drmModeFreeEncoder(encoder);
-
 	return crtc;
 }
 
 static void _setup_drm(struct _this *this)
 {
+	this->crtc_id = 0;
 	this->primary_id = 0;
 	this->cursor_id = 0;
 	this->cursor = true;
-
-	this->crtc_id = 0;
 
 	this->card_path = rf_config_get_card_path(this->config);
 	g_autofree char *connector_name = rf_config_get_connector(this->config);
@@ -497,7 +476,6 @@ static void _setup_drm(struct _this *this)
 	// This is needed to get primary and cursor planes.
 	if (drmSetClientCap(this->cfd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) < 0)
 		g_warning("DRM: Failed to set universal planes capability.");
-
 	// This is needed to get `CRTC_X/Y` properties of planes.
 	if (drmSetClientCap(this->cfd, DRM_CLIENT_CAP_ATOMIC, 1) < 0)
 		g_warning("DRM: Failed to set atomic capability.");
@@ -506,7 +484,6 @@ static void _setup_drm(struct _this *this)
 		_get_plane_id(this->cfd, this->crtc_id, DRM_PLANE_TYPE_PRIMARY);
 	if (this->primary_id == 0)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
-
 	this->cursor = rf_config_get_cursor(this->config);
 	g_message(
 		"DRM: Cursor plane is %s.",

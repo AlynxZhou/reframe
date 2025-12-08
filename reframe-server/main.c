@@ -28,6 +28,7 @@ _on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
 static void _on_card_path(RfStreamer *s, const char *card_path, gpointer data)
 {
 	struct _this *this = data;
+
 	rf_converter_set_card_path(this->converter, card_path);
 	if (rf_converter_start(this->converter) < 0)
 		rf_vnc_server_flush(this->vnc);
