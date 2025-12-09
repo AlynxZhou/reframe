@@ -640,7 +640,7 @@ static int _setup_gl(RfConverter *this)
 
 	// clang-format off
 	// Counter-clockwise is front!
-	const unsigned int indices[] = {
+	const unsigned char indices[] = {
 		0, 3, 1,
 		2, 1, 3
 	};
@@ -963,7 +963,7 @@ static void _draw_rect(
 	glUniformMatrix4fv(
 		glGetUniformLocation(this->program, "mvp"), 1, false, MARRAY(mvp)
 	);
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
 	// g_debug("glDrawElements: %#x", glGetError());
 
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
