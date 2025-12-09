@@ -1015,7 +1015,7 @@ GByteArray *rf_converter_convert(
 )
 {
 	g_return_val_if_fail(RF_IS_CONVERTER(this), NULL);
-	g_return_val_if_fail(length > 0 && length < 3, NULL);
+	g_return_val_if_fail(length >= 1 && length <= RF_MAX_BUFS, NULL);
 	g_return_val_if_fail(bufs != NULL, NULL);
 	g_return_val_if_fail(width > 0 && height > 0, NULL);
 
@@ -1054,9 +1054,8 @@ GByteArray *rf_converter_convert(
 
 	_draw_begin(this);
 
-	_draw_buffer(this, &bufs[0], 3, frame_width, frame_height);
-	if (length == 2)
-		_draw_buffer(this, &bufs[1], 2, frame_width, frame_height);
+	for (size_t i = 0; i < length; ++i)
+		_draw_buffer(this, &bufs[i], length - i, frame_width, frame_height);
 
 	_draw_end(this);
 

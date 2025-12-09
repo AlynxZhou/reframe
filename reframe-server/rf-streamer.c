@@ -171,7 +171,7 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
 	if (ret <= 0)
 		goto out;
-	if (length <= 0 || length >= 3) {
+	if (length < 1 || length > RF_MAX_BUFS) {
 		g_warning("Frame: Got invalid buffers length %ld.", length);
 		goto out;
 	}
