@@ -898,6 +898,18 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 	return image;
 }
 
+static void _draw_begin(RfConverter *this)
+{
+	glViewport(0, 0, this->width, this->height);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glUseProgram(this->program);
+	if (this->gles_major >= 3)
+		glBindVertexArray(this->vertex_array);
+	else
+		_bind_buffers(this);
+}
+
 static void _draw_rect(
 	RfConverter *this,
 	EGLImage image,
@@ -948,21 +960,11 @@ static void _draw_rect(
 		m4rotate(v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)), mvp
 	);
 
-	glUseProgram(this->program);
-	if (this->gles_major >= 3)
-		glBindVertexArray(this->vertex_array);
-	else
-		_bind_buffers(this);
 	glUniformMatrix4fv(
 		glGetUniformLocation(this->program, "mvp"), 1, false, MARRAY(mvp)
 	);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	// g_debug("glDrawElements: %#x", glGetError());
-	if (this->gles_major >= 3)
-		glBindVertexArray(0);
-	else
-		_unbind_buffers(this);
-	glUseProgram(0);
 
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 	glDeleteTextures(1, &texture);
@@ -993,6 +995,15 @@ static void _draw_buffer(
 		frame_height
 	);
 	eglDestroyImage(this->display, image);
+}
+
+static void _draw_end(RfConverter *this)
+{
+	if (this->gles_major >= 3)
+		glBindVertexArray(0);
+	else
+		_unbind_buffers(this);
+	glUseProgram(0);
 }
 
 GByteArray *rf_converter_convert(
@@ -1041,12 +1052,13 @@ GByteArray *rf_converter_convert(
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 
-	glViewport(0, 0, this->width, this->height);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	_draw_begin(this);
 
 	_draw_buffer(this, &bufs[0], 3, frame_width, frame_height);
 	if (length == 2)
 		_draw_buffer(this, &bufs[1], 2, frame_width, frame_height);
+
+	_draw_end(this);
 
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
