@@ -96,7 +96,7 @@ static void _schedule_frame_msg(RfStreamer *this)
 		);
 	} else {
 		if (this->last_frame_time != -1)
-			g_warning("Frame: Converting frame too slow.");
+			g_warning("Frame: Converted frame too slow, expected %ldms, used %ldms.", this->max_interval / 1000, delta / 1000);
 		this->timer_id = g_timeout_add(1, _send_frame_msg, this);
 	}
 }
