@@ -22,14 +22,14 @@ libvncserver = dependency('libvncserver', required: true)
 xkbcommon = dependency('xkbcommon', required: true)
 dependencies += [m, glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
 
-dependencies += [reframe_common_dep]
+dependencies += [mvmath_dep, reframe_common_dep]
 
 include_directories = []
 # For `config.h`.
 include_directories += include_directories('..')
 
 executable(
-  'reframe-server',
+  meson.project_name() + '-server',
   sources: sources,
   c_args: c_args,
   dependencies: dependencies,

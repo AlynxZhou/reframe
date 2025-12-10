@@ -1,0 +1,3 @@
+[submodule "deps/mvmath"]
+	path = deps/mvmath
+	url = https://github.com/AlynxZhou/mvmath.git

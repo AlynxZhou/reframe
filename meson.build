@@ -52,6 +52,7 @@ configure_file(
   configuration: conf_data
 )
 
+subdir('deps')
 subdir('dists')
 subdir('reframe-common')
 subdir('reframe-streamer')

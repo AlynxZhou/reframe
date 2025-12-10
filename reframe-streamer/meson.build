@@ -19,7 +19,7 @@ include_directories = []
 include_directories += include_directories('..')
 
 executable(
-  'reframe-streamer',
+  meson.project_name() + '-streamer',
   sources: sources,
   c_args: c_args,
   dependencies: dependencies,
