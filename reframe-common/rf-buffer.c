@@ -14,6 +14,7 @@ void rf_buffer_debug(RfBuffer *this)
 {
 	g_debug("Frame: Got buffer metadata: length %u, type %s, "
 		"crtc_x %d, crtc_y %d, crtc_w %u, crtc_h %u, "
+		"src_x %u, src_y %u, src_w %u, src_h %u, "
 		"width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
 		this->md.length,
 		rf_plane_type(this->md.type),
@@ -21,6 +22,10 @@ void rf_buffer_debug(RfBuffer *this)
 		this->md.crtc_y,
 		this->md.crtc_w,
 		this->md.crtc_h,
+		this->md.src_x,
+		this->md.src_y,
+		this->md.src_w,
+		this->md.src_h,
 		this->md.width,
 		this->md.height,
 		(this->md.fourcc >> 0) & 0xff,

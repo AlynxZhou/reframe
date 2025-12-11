@@ -320,11 +320,13 @@ static int _setup_gl(RfConverter *this)
 			"#extension GL_OES_EGL_image_external : require\n"
 			"#endif\n"
 			"precision mediump float;\n"
+			"uniform mat4 crop;\n"
 			"uniform samplerExternalOES image;\n"
 			"in vec2 pass_coordinate;\n"
 			"out vec4 out_color;\n"
 			"void main() {\n"
-			"	out_color = texture(image, pass_coordinate);\n"
+			"       vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0f, 1.0f);\n"
+			"	out_color = texture(image, out_coordinate.xy);\n"
 			"}\n";
 		this->program = _make_program(vs, fs);
 	} else {
@@ -342,10 +344,12 @@ static int _setup_gl(RfConverter *this)
 			"#version 100\n"
 			"#extension GL_OES_EGL_image_external : require\n"
 			"precision mediump float;\n"
+			"uniform mat4 crop;\n"
 			"uniform samplerExternalOES image;\n"
 			"varying vec2 pass_coordinate;\n"
 			"void main() {\n"
-			"	gl_FragColor = texture2D(image, pass_coordinate);\n"
+			"       vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0, 1.0);\n"
+			"	gl_FragColor = texture2D(image, out_coordinate.xy);\n"
 			"}\n";
 		this->program = _make_program(vs, fs);
 	}
@@ -666,8 +670,9 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 
 static void _draw_begin(RfConverter *this)
 {
-	glViewport(0, 0, this->width, this->height);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// Because we are expected to draw the whole frame, it should be OK that
+	// we don't clear those buffers to improve performance.
+	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glUseProgram(this->program);
 	if (this->gles_major >= 3)
@@ -679,6 +684,14 @@ static void _draw_begin(RfConverter *this)
 static void _draw_rect(
 	RfConverter *this,
 	EGLImage image,
+	// Texture coordinates.
+	uint32_t sx,
+	uint32_t sy,
+	uint32_t sw,
+	uint32_t sh,
+	uint32_t width,
+	uint32_t height,
+	// Vertex coordinates.
 	int32_t x,
 	int32_t y,
 	uint32_t w,
@@ -722,12 +735,31 @@ static void _draw_rect(
 		m4ortho(0.0f, frame_width, frame_height, 0.0f, 0.1f, 100.0f);
 	mat4 mvp = m4multiply(projection, m4multiply(view, model));
 	// Rotating monitor is just the same as rotating the whole world.
-	mvp = m4multiply(
-		m4rotate(v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)), mvp
-	);
+	if (this->rotation % 360 != 0)
+		mvp = m4multiply(
+			m4rotate(
+				v3s(0.0f, 0.0f, -1.0f), sradians(this->rotation)
+			),
+			mvp
+		);
+
+	mat4 crop = m4identity();
+	if (sx != 0 || sy != 0 || sw != width || sh != height)
+		crop = m4multiply(
+			m4translate(
+				v3s((float)sx / width, (float)sy / height, 0.0f)
+			),
+			m4scale(v3s((float)sw / width, (float)sh / height, 1.0f))
+		);
 
 	glUniformMatrix4fv(
 		glGetUniformLocation(this->program, "mvp"), 1, false, MARRAY(mvp)
+	);
+	glUniformMatrix4fv(
+		glGetUniformLocation(this->program, "crop"),
+		1,
+		false,
+		MARRAY(crop)
 	);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
 	// g_debug("glDrawElements: %#x", glGetError());
@@ -752,6 +784,12 @@ static void _draw_buffer(
 	_draw_rect(
 		this,
 		image,
+		b->md.src_x,
+		b->md.src_y,
+		b->md.src_w,
+		b->md.src_h,
+		b->md.width,
+		b->md.height,
 		b->md.crtc_x,
 		b->md.crtc_y,
 		b->md.crtc_w,
@@ -803,6 +841,7 @@ GByteArray *rf_converter_convert(
 	if (this->width != width || this->height != height) {
 		this->width = width;
 		this->height = height;
+		glViewport(0, 0, this->width, this->height);
 		_gen_texture(this);
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_sized_new(

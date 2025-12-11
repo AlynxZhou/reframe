@@ -188,6 +188,15 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 	b->md.crtc_y = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
 	b->md.crtc_w = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_W", 0);
 	b->md.crtc_h = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_H", 0);
+	// These are in 16.16 fixed point, we only need integer.
+	b->md.src_x =
+		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_X", 0) >> 16);
+	b->md.src_y =
+		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_Y", 0) >> 16);
+	b->md.src_w =
+		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_W", 0) >> 16);
+	b->md.src_h =
+		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_H", 0) >> 16);
 	drmModeFreePlane(plane);
 	if (fb_id == 0)
 		return 0;

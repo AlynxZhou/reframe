@@ -13,10 +13,15 @@ struct rf_buffer_metadata {
 	unsigned int length;
 	// DRM plane type.
 	uint32_t type;
+	// See <https://events.static.linuxfound.org/sites/events/files/slides/brezillon-drm-kms.pdf>.
 	int32_t crtc_x;
 	int32_t crtc_y;
 	uint32_t crtc_w;
 	uint32_t crtc_h;
+	uint32_t src_x;
+	uint32_t src_y;
+	uint32_t src_w;
+	uint32_t src_h;
 	uint32_t width;
 	uint32_t height;
 	uint32_t fourcc;
