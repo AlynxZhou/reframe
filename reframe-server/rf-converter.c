@@ -325,7 +325,7 @@ static int _setup_gl(RfConverter *this)
 			"in vec2 pass_coordinate;\n"
 			"out vec4 out_color;\n"
 			"void main() {\n"
-			"       vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0f, 1.0f);\n"
+			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0f, 1.0f);\n"
 			"	out_color = texture(image, out_coordinate.xy);\n"
 			"}\n";
 		this->program = _make_program(vs, fs);
@@ -348,7 +348,7 @@ static int _setup_gl(RfConverter *this)
 			"uniform samplerExternalOES image;\n"
 			"varying vec2 pass_coordinate;\n"
 			"void main() {\n"
-			"       vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0, 1.0);\n"
+			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0, 1.0);\n"
 			"	gl_FragColor = texture2D(image, out_coordinate.xy);\n"
 			"}\n";
 		this->program = _make_program(vs, fs);
