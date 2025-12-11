@@ -814,7 +814,9 @@ GByteArray *rf_converter_convert(
 	_draw_begin(this);
 
 	for (size_t i = 0; i < length; ++i)
-		_draw_buffer(this, &bufs[i], length - i, frame_width, frame_height);
+		_draw_buffer(
+			this, &bufs[i], length - i, frame_width, frame_height
+		);
 
 	_draw_end(this);
 

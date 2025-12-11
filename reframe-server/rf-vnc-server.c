@@ -17,7 +17,7 @@ struct _RfVNCServer {
 	struct xkb_keymap *xkb_keymap;
 	rfbScreenInfo *screen;
 	char *passwords[2];
-	char *connector;
+	char *desktop_name;
 	unsigned int width;
 	unsigned int height;
 	bool running;
@@ -250,8 +250,8 @@ static gboolean _incoming(
 		this->screen->port = 0;
 		this->screen->ipv6port = 0;
 		this->screen->frameBuffer = NULL;
-		if (this->connector != NULL)
-			this->screen->desktopName = this->connector;
+		if (this->desktop_name != NULL)
+			this->screen->desktopName = this->desktop_name;
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
@@ -329,7 +329,7 @@ static void rf_vnc_server_init(RfVNCServer *this)
 	this->screen = NULL;
 	this->passwords[0] = NULL;
 	this->passwords[1] = NULL;
-	this->connector = NULL;
+	this->desktop_name = NULL;
 	this->width = 0;
 	this->height = 0;
 	this->running = false;
@@ -428,7 +428,7 @@ void rf_vnc_server_start(RfVNCServer *this)
 		return;
 
 	this->passwords[0] = rf_config_get_password(this->config);
-	this->connector = rf_config_get_connector(this->config);
+	this->desktop_name = rf_config_get_connector(this->config);
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
 	if (this->width == 0 || this->height == 0) {
@@ -472,8 +472,22 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	rf_vnc_server_flush(this);
 	g_socket_listener_close(G_SOCKET_LISTENER(this));
 	g_clear_pointer(&this->buf, g_byte_array_unref);
-	g_clear_pointer(&this->connector, g_free);
+	g_clear_pointer(&this->desktop_name, g_free);
 	g_clear_pointer(&this->passwords[0], g_free);
+}
+
+void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+	g_return_if_fail(desktop_name != NULL);
+
+	g_clear_pointer(&this->desktop_name, g_free);
+	this->desktop_name = g_strdup(desktop_name);
+	if (this->screen != NULL) {
+		this->screen->desktopName = this->desktop_name;
+		if (this->running && rfbIsActive(this->screen))
+			rfbProcessEvents(this->screen, 0);
+	}
 }
 
 void rf_vnc_server_update(

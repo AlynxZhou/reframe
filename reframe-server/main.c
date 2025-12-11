@@ -35,6 +35,14 @@ static void _on_card_path(RfStreamer *s, const char *card_path, gpointer data)
 }
 
 static void
+_on_connector_name(RfStreamer *s, const char *connector_name, gpointer data)
+{
+	struct _this *this = data;
+
+	rf_vnc_server_set_desktop_name(this->vnc, connector_name);
+}
+
+static void
 _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 {
 	struct _this *this = data;
@@ -159,6 +167,12 @@ int main(int argc, char *argv[])
 	);
 	g_signal_connect(
 		this->streamer, "card-path", G_CALLBACK(_on_card_path), this
+	);
+	g_signal_connect(
+		this->streamer,
+		"connector-name",
+		G_CALLBACK(_on_connector_name),
+		this
 	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
 	g_signal_connect(

@@ -34,7 +34,14 @@ struct _RfStreamer {
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
 
-enum { SIG_START, SIG_STOP, SIG_FRAME, SIG_CARD_PATH, N_SIGS };
+enum {
+	SIG_START,
+	SIG_STOP,
+	SIG_FRAME,
+	SIG_CARD_PATH,
+	SIG_CONNECTOR_NAME,
+	N_SIGS
+};
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
@@ -96,7 +103,11 @@ static void _schedule_frame_msg(RfStreamer *this)
 		);
 	} else {
 		if (this->last_frame_time != -1)
-			g_warning("Frame: Converted frame too slow, expected %ldms, used %ldms.", this->max_interval / 1000, delta / 1000);
+			g_warning(
+				"Frame: Converted frame too slow, expected %ldms, used %ldms.",
+				this->max_interval / 1000,
+				delta / 1000
+			);
 		this->timer_id = g_timeout_add(1, _send_frame_msg, this);
 	}
 }
@@ -218,10 +229,8 @@ out:
 
 static ssize_t _on_card_path_msg(RfStreamer *this)
 {
-	g_debug("DRM: Received card path message.");
-
 	size_t length = 0;
-	g_autofree char *card_path = NULL;
+	g_autofree char *msg = NULL;
 	ssize_t ret = 0;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
@@ -230,18 +239,45 @@ static ssize_t _on_card_path_msg(RfStreamer *this)
 	if (ret <= 0)
 		goto out;
 
-	card_path = g_malloc0(length);
-	ret = g_input_stream_read(is, card_path, length, NULL, NULL);
+	msg = g_malloc0(length);
+	ret = g_input_stream_read(is, msg, length, NULL, NULL);
 	if (ret <= 0)
 		goto out;
 
-	g_signal_emit(this, sigs[SIG_CARD_PATH], 0, card_path);
+	g_signal_emit(this, sigs[SIG_CARD_PATH], 0, msg);
 
 out:
 	if (ret <= 0)
 		g_warning("DRM: Failed to receive card path: %ld.", ret);
 	else
-		g_debug("DRM: Received card path: %s.", card_path);
+		g_debug("DRM: Received card path: %s.", msg);
+	return ret;
+}
+
+static ssize_t _on_connector_name_msg(RfStreamer *this)
+{
+	size_t length = 0;
+	g_autofree char *msg = NULL;
+	ssize_t ret = 0;
+	GInputStream *is =
+		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
+
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
+	if (ret <= 0)
+		goto out;
+
+	msg = g_malloc0(length);
+	ret = g_input_stream_read(is, msg, length, NULL, NULL);
+	if (ret <= 0)
+		goto out;
+
+	g_signal_emit(this, sigs[SIG_CONNECTOR_NAME], 0, msg);
+
+out:
+	if (ret <= 0)
+		g_warning("DRM: Failed to receive connector name: %ld.", ret);
+	else
+		g_debug("DRM: Received connector name: %s.", msg);
 	return ret;
 }
 
@@ -270,6 +306,9 @@ _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 		break;
 	case RF_MSG_TYPE_CARD_PATH:
 		ret = _on_card_path_msg(this);
+		break;
+	case RF_MSG_TYPE_CONNECTOR_NAME:
+		ret = _on_connector_name_msg(this);
 		break;
 	default:
 		break;
@@ -342,6 +381,18 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 	);
 	sigs[SIG_CARD_PATH] = g_signal_new(
 		"card-path",
+		RF_TYPE_STREAMER,
+		0,
+		0,
+		NULL,
+		NULL,
+		NULL,
+		G_TYPE_NONE,
+		1,
+		G_TYPE_STRING
+	);
+	sigs[SIG_CONNECTOR_NAME] = g_signal_new(
+		"connector-name",
 		RF_TYPE_STREAMER,
 		0,
 		0,

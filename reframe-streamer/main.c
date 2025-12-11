@@ -56,6 +56,7 @@ struct _this {
 	RfConfig *config;
 	GSocketConnection *connection;
 	char *card_path;
+	char *connector_name;
 	int cfd;
 	uint32_t crtc_id;
 	uint32_t primary_id;
@@ -334,7 +335,6 @@ out:
 
 static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
 {
-	// Send the `\0` so we could easily use it in receiver.
 	size_t length = strlen(card_path) + 1;
 	ssize_t ret = 0;
 	GOutputStream *os =
@@ -343,6 +343,19 @@ static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
 	if (ret <= 0)
 		return ret;
 	ret = g_output_stream_write(os, card_path, length, NULL, NULL);
+	return ret;
+}
+
+static ssize_t _send_connector_name_msg(struct _this *this, const char *connector_name)
+{
+	size_t length = strlen(connector_name) + 1;
+	ssize_t ret = 0;
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_CONNECTOR_NAME, length);
+	if (ret <= 0)
+		return ret;
+	ret = g_output_stream_write(os, connector_name, length, NULL, NULL);
 	return ret;
 }
 
@@ -457,14 +470,14 @@ static void _setup_drm(struct _this *this)
 	this->cursor = true;
 
 	this->card_path = rf_config_get_card_path(this->config);
-	g_autofree char *connector_name = rf_config_get_connector(this->config);
+	this->connector_name = rf_config_get_connector(this->config);
 	drmModeConnector *connector =
-		_get_card_and_connector(this, connector_name);
+		_get_card_and_connector(this, this->connector_name);
 	if (connector == NULL)
 		g_error("DRM: Failed to find a connected connector.");
-	if (connector_name == NULL)
-		connector_name = _get_connector_name(connector);
-	g_message("DRM: Found connected connector %s.", connector_name);
+	if (this->connector_name == NULL)
+		this->connector_name = _get_connector_name(connector);
+	g_message("DRM: Found connected connector %s.", this->connector_name);
 
 	drmModeCrtc *crtc = _get_crtc(this->cfd, connector);
 	drmModeFreeConnector(connector);
@@ -498,6 +511,7 @@ static void _clean_drm(struct _this *this)
 		this->cfd = -1;
 	}
 	g_clear_pointer(&this->card_path, g_free);
+	g_clear_pointer(&this->connector_name, g_free);
 }
 
 static void _setup_uinput(struct _this *this)
@@ -672,6 +686,7 @@ int main(int argc, char *argv[])
 		_setup_uinput(this);
 
 		_send_card_path_msg(this, this->card_path);
+		_send_connector_name_msg(this, this->connector_name);
 
 		while (true) {
 			ssize_t ret = 0;
