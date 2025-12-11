@@ -460,6 +460,13 @@ void rf_vnc_server_start(RfVNCServer *this)
 	this->running = true;
 }
 
+bool rf_vnc_server_is_running(RfVNCServer *this)
+{
+	g_return_val_if_fail(RF_IS_VNC_SERVER(this), false);
+
+	return this->running;
+}
+
 void rf_vnc_server_stop(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
@@ -483,11 +490,14 @@ void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
 
 	g_clear_pointer(&this->desktop_name, g_free);
 	this->desktop_name = g_strdup(desktop_name);
-	if (this->screen != NULL) {
-		this->screen->desktopName = this->desktop_name;
-		if (this->running && rfbIsActive(this->screen))
-			rfbProcessEvents(this->screen, 0);
-	}
+	// Well this does not work because VNC does not update desktop name to
+	// client after it is inited. Clients will get the previous desktop name
+	// which may not be correct.
+	// if (this->screen != NULL) {
+	// 	this->screen->desktopName = this->desktop_name;
+	// 	if (this->running && rfbIsActive(this->screen))
+	// 		rfbProcessEvents(this->screen, 0);
+	// }
 }
 
 void rf_vnc_server_update(

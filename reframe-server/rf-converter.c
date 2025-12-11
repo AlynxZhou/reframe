@@ -537,6 +537,13 @@ out:
 	return ret;
 }
 
+bool rf_converter_is_running(RfConverter *this)
+{
+	g_return_val_if_fail(RF_IS_CONVERTER(this), false);
+
+	return this->running;
+}
+
 void rf_converter_stop(RfConverter *this)
 {
 	g_return_if_fail(RF_IS_CONVERTER(this));

@@ -13,6 +13,7 @@ G_DECLARE_FINAL_TYPE(RfStreamer, rf_streamer, RF, STREAMER, GObject)
 RfStreamer *rf_streamer_new(RfConfig *config);
 void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path);
 int rf_streamer_start(RfStreamer *this);
+bool rf_streamer_is_running(RfStreamer *this);
 void rf_streamer_stop(RfStreamer *this);
 void rf_streamer_send_keyboard_event(
 	RfStreamer *this,

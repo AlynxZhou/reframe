@@ -25,23 +25,6 @@ _on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
 	this->height = height;
 }
 
-static void _on_card_path(RfStreamer *s, const char *card_path, gpointer data)
-{
-	struct _this *this = data;
-
-	rf_converter_set_card_path(this->converter, card_path);
-	if (rf_converter_start(this->converter) < 0)
-		rf_vnc_server_flush(this->vnc);
-}
-
-static void
-_on_connector_name(RfStreamer *s, const char *connector_name, gpointer data)
-{
-	struct _this *this = data;
-
-	rf_vnc_server_set_desktop_name(this->vnc, connector_name);
-}
-
 static void
 _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 {
@@ -57,6 +40,10 @@ _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 			this->height = primary->md.width;
 		}
 	}
+
+	if (!rf_converter_is_running(this->converter))
+		if (rf_converter_start(this->converter) < 0)
+			rf_vnc_server_flush(this->vnc);
 
 	g_autoptr(GByteArray) buf = rf_converter_convert(
 		this->converter, length, bufs, this->width, this->height
@@ -165,14 +152,17 @@ int main(int argc, char *argv[])
 		G_CALLBACK(rf_vnc_server_flush),
 		this->vnc
 	);
-	g_signal_connect(
-		this->streamer, "card-path", G_CALLBACK(_on_card_path), this
+	g_signal_connect_swapped(
+		this->streamer,
+		"card-path",
+		G_CALLBACK(rf_converter_set_card_path),
+		this->converter
 	);
-	g_signal_connect(
+	g_signal_connect_swapped(
 		this->streamer,
 		"connector-name",
-		G_CALLBACK(_on_connector_name),
-		this
+		G_CALLBACK(rf_vnc_server_set_desktop_name),
+		this->vnc
 	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
 	g_signal_connect(

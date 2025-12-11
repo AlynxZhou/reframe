@@ -250,7 +250,7 @@ out:
 	if (ret <= 0)
 		g_warning("DRM: Failed to receive card path: %ld.", ret);
 	else
-		g_debug("DRM: Received card path: %s.", msg);
+		g_debug("DRM: Received card path %s.", msg);
 	return ret;
 }
 
@@ -277,7 +277,7 @@ out:
 	if (ret <= 0)
 		g_warning("DRM: Failed to receive connector name: %ld.", ret);
 	else
-		g_debug("DRM: Received connector name: %s.", msg);
+		g_debug("DRM: Received connector name %s.", msg);
 	return ret;
 }
 
@@ -472,6 +472,13 @@ int rf_streamer_start(RfStreamer *this)
 	g_debug("Emitting ReFrame Streamer start signal.");
 	g_signal_emit(this, sigs[SIG_START], 0);
 	return 0;
+}
+
+bool rf_streamer_is_running(RfStreamer *this)
+{
+	g_return_val_if_fail(RF_IS_STREAMER(this), false);
+
+	return this->running;
 }
 
 void rf_streamer_stop(RfStreamer *this)
