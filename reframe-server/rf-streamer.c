@@ -195,13 +195,13 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	}
 
 	RfBuffer *primary = &bufs[0];
-	// Currently we assume primary size is always the same as monitor
-	// size. However, maybe we should use CRTC size actually?
-	uint32_t frame_width = primary->md.width;
-	uint32_t frame_height = primary->md.height;
+	// Monitor size should be CRTC size, and primary plane is used to store
+	// CRTC's framebuffer, so primary plane size should be CRTC size.
+	uint32_t frame_width = primary->md.crtc_w;
+	uint32_t frame_height = primary->md.crtc_h;
 	if (this->rotation % 180 != 0) {
-		frame_width = primary->md.height;
-		frame_height = primary->md.width;
+		frame_width = primary->md.crtc_h;
+		frame_height = primary->md.crtc_w;
 	}
 	if (this->frame_width != frame_width ||
 	    this->frame_height != frame_height) {
@@ -554,11 +554,11 @@ void rf_streamer_send_pointer_event(
 		return;
 
 	// Assuming user only have 1 monitor when they set desktop size to 0x0.
-	const int desktop_width = this->desktop_width > 0 ?
-					  this->desktop_width :
+	const uint32_t desktop_width =
+		this->desktop_width > 0 ? this->desktop_width :
 					  this->monitor_x + this->frame_width;
-	const int desktop_height = this->desktop_height > 0 ?
-					   this->desktop_height :
+	const uint32_t desktop_height =
+		this->desktop_height > 0 ? this->desktop_height :
 					   this->monitor_y + this->frame_height;
 	// Typically desktop environment will map uinput `EV_ABS` max size to
 	// the whole virtual desktop, so we need to convert the position to

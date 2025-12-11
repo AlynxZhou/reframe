@@ -679,11 +679,11 @@ static void _draw_begin(RfConverter *this)
 static void _draw_rect(
 	RfConverter *this,
 	EGLImage image,
-	int64_t x,
-	int64_t y,
+	int32_t x,
+	int32_t y,
 	uint32_t w,
 	uint32_t h,
-	uint32_t z,
+	int32_t z,
 	uint32_t frame_width,
 	uint32_t frame_height
 )
@@ -739,7 +739,7 @@ static void _draw_rect(
 static void _draw_buffer(
 	RfConverter *this,
 	const RfBuffer *b,
-	uint32_t z,
+	int32_t z,
 	uint32_t frame_width,
 	uint32_t frame_height
 )
@@ -754,8 +754,8 @@ static void _draw_buffer(
 		image,
 		b->md.crtc_x,
 		b->md.crtc_y,
-		b->md.width,
-		b->md.height,
+		b->md.crtc_w,
+		b->md.crtc_h,
 		z,
 		frame_width,
 		frame_height
@@ -811,10 +811,10 @@ GByteArray *rf_converter_convert(
 	}
 
 	const RfBuffer *primary = &bufs[0];
-	// Currently we assume primary size is always the same as monitor
-	// size. However, maybe we should use CRTC size actually?
-	uint32_t frame_width = primary->md.width;
-	uint32_t frame_height = primary->md.height;
+	// Monitor size should be CRTC size, and primary plane is used to store
+	// CRTC's framebuffer, so primary plane size should be CRTC size.
+	uint32_t frame_width = primary->md.crtc_w;
+	uint32_t frame_height = primary->md.crtc_h;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 

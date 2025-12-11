@@ -184,8 +184,10 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 		return 0;
 	uint32_t fb_id = plane->fb_id;
 	b->md.type = type;
-	b->md.crtc_x = (int64_t)_get_plane_prop(cfd, plane_id, "CRTC_X", 0);
-	b->md.crtc_y = (int64_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
+	b->md.crtc_x = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_X", 0);
+	b->md.crtc_y = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
+	b->md.crtc_w = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_W", 0);
+	b->md.crtc_h = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_H", 0);
 	drmModeFreePlane(plane);
 	if (fb_id == 0)
 		return 0;
@@ -346,13 +348,16 @@ static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
 	return ret;
 }
 
-static ssize_t _send_connector_name_msg(struct _this *this, const char *connector_name)
+static ssize_t
+_send_connector_name_msg(struct _this *this, const char *connector_name)
 {
 	size_t length = strlen(connector_name) + 1;
 	ssize_t ret = 0;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_CONNECTOR_NAME, length);
+	ret = rf_send_header(
+		this->connection, RF_MSG_TYPE_CONNECTOR_NAME, length
+	);
 	if (ret <= 0)
 		return ret;
 	ret = g_output_stream_write(os, connector_name, length, NULL, NULL);

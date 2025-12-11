@@ -33,11 +33,11 @@ _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 	const RfBuffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
 		if (this->rotation % 180 == 0) {
-			this->width = primary->md.width;
-			this->height = primary->md.height;
+			this->width = primary->md.crtc_w;
+			this->height = primary->md.crtc_h;
 		} else {
-			this->width = primary->md.height;
-			this->height = primary->md.width;
+			this->width = primary->md.crtc_h;
+			this->height = primary->md.crtc_w;
 		}
 	}
 
