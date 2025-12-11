@@ -823,6 +823,10 @@ GByteArray *rf_converter_convert(
 	g_return_val_if_fail(bufs != NULL, NULL);
 	g_return_val_if_fail(width > 0 && height > 0, NULL);
 
+#ifdef __DEBUG__
+	int64_t begin = g_get_monotonic_time();
+#endif
+
 	if (!this->running)
 		return NULL;
 
@@ -883,6 +887,11 @@ GByteArray *rf_converter_convert(
 		res = g_byte_array_ref(this->buf);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+#ifdef __DEBUG__
+	int64_t end = g_get_monotonic_time();
+	g_debug("GL: Converted frame in %ldms.", (end - begin) / 1000);
+#endif
 
 	return res;
 }
