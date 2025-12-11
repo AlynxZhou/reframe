@@ -252,6 +252,8 @@ static gboolean _incoming(
 		this->screen->frameBuffer = NULL;
 		if (this->desktop_name != NULL)
 			this->screen->desktopName = this->desktop_name;
+		else
+			this->screen->desktopName = "ReFrame";
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
