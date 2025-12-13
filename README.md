@@ -89,7 +89,7 @@ Leap users please replace URL for Tumbleweed with URL for your Leap version.
 ### Build
 
 ```
-$ git clone https://github.com/AlynxZhou/reframe.git
+$ git clone --recurse-submodules https://github.com/AlynxZhou/reframe.git
 $ cd reframe
 $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 # meson install
