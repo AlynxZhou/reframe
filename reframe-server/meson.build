@@ -2,13 +2,15 @@ sources = files(
   'main.c',
   'rf-streamer.c',
   'rf-converter.c',
-  'rf-vnc-server.c'
+  'rf-vnc-server.c',
+  'rf-lvnc-server.c'
 )
 
 headers = files(
   'rf-streamer.h',
   'rf-converter.h',
-  'rf-vnc-server.h'
+  'rf-vnc-server.h',
+  'rf-lvnc-server.h'
 )
 
 dependencies = []

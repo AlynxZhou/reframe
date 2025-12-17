@@ -4,6 +4,7 @@
 #include "rf-streamer.h"
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
+#include "rf-lvnc-server.h"
 
 struct _this {
 	GMainLoop *main_loop;
@@ -145,7 +146,7 @@ int main(int argc, char *argv[])
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
 	this->converter = rf_converter_new(this->config);
-	this->vnc = rf_vnc_server_new(this->config);
+	this->vnc = rf_lvnc_server_new(this->config);
 	g_signal_connect_swapped(
 		this->streamer,
 		"stop",

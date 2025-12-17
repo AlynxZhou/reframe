@@ -30,6 +30,8 @@ G_BEGIN_DECLS
 #define RF_KEYBOARD_MAX 256
 #define RF_POINTER_MAX INT16_MAX
 
+#define RF_KEY_CODE_XKB_TO_EV(key_code) ((key_code) - 8)
+
 ssize_t rf_send_header(GSocketConnection *connection, char type, size_t length);
 const char *rf_plane_type(uint32_t type);
 
