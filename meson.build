@@ -12,8 +12,13 @@ if get_option('debug') == true
 endif
 c_args += ['-std=gnu11', '-DG_LOG_DOMAIN="ReFrame"']
 
-systemd = dependency('systemd', required: get_option('systemd'))
-libsystemd = dependency('libsystemd', required: get_option('systemd'))
+if get_option('systemd')
+  systemd = dependency('systemd', required: false)
+  libsystemd = dependency('libsystemd', required: false)
+endif
+if get_option('neatvnc')
+  neatvnc = dependency('neatvnc', required: false)
+endif
 
 prefix = get_option('prefix')
 bindir = prefix / get_option('bindir')
@@ -26,7 +31,7 @@ username = get_option('username')
 
 systemunitdir = get_option('systemunitdir')
 sysusersdir = get_option('sysusersdir')
-if systemd.found()
+if get_option('systemd') and systemd.found()
   if systemunitdir == ''
     systemunitdir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
   endif
@@ -44,7 +49,8 @@ endif
 
 conf_data = configuration_data()
 conf_data.set_quoted('PROJECT_VERSION', meson.project_version())
-conf_data.set('HAVE_LIBSYSTEMD', libsystemd.found())
+conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
+conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
 
 configure_file(
   input: 'reframe-common' / 'config.h.in',

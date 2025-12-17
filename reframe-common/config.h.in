@@ -3,5 +3,6 @@
 
 #mesondefine PROJECT_VERSION
 #mesondefine HAVE_LIBSYSTEMD
+#mesondefine HAVE_NEATVNC
 
 #endif

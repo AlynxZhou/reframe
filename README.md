@@ -86,6 +86,14 @@ Leap users please replace URL for Tumbleweed with URL for your Leap version.
 - ninja
 - gcc
 
+If you want to build the experimental neatvnc implementation (`-Dneatvnc=true`), you will also need the following dependencies that neatvnc requires:
+
+- neatvnc
+- aml
+- pixman
+- zlib
+- ffmpeg
+
 ### Build
 
 ```

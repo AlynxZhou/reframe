@@ -229,7 +229,7 @@ char *rf_config_get_vnc_password(RfConfig *this)
 		this->f, RF_CONFIG_GROUP_VNC, "password", &error
 	);
 	// Backward compatibility.
-	if (error != NULL || password == NULL || password[0] == '\0') {
+	if (error != NULL) {
 		g_clear_pointer(&error, g_error_free);
 		g_clear_pointer(&password, g_free);
 		g_warning(
@@ -242,4 +242,17 @@ char *rf_config_get_vnc_password(RfConfig *this)
 	if (error != NULL || password == NULL || password[0] == '\0')
 		return NULL;
 	return password;
+}
+
+char *rf_config_get_vnc_type(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *type = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_VNC, "type", &error
+	);
+	if (error != NULL || type == NULL || type[0] == '\0')
+		return NULL;
+	return type;
 }

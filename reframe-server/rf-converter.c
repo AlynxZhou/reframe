@@ -465,6 +465,13 @@ static void _finalize(GObject *o)
 	G_OBJECT_CLASS(rf_converter_parent_class)->finalize(o);
 }
 
+static void rf_converter_class_init(RfConverterClass *klass)
+{
+	GObjectClass *o_class = G_OBJECT_CLASS(klass);
+
+	o_class->finalize = _finalize;
+}
+
 static void rf_converter_init(RfConverter *this)
 {
 	this->config = NULL;
@@ -484,13 +491,6 @@ static void rf_converter_init(RfConverter *this)
 	this->height = 0;
 	this->rotation = 0;
 	this->running = false;
-}
-
-static void rf_converter_class_init(RfConverterClass *klass)
-{
-	GObjectClass *o_class = G_OBJECT_CLASS(klass);
-
-	o_class->finalize = _finalize;
 }
 
 RfConverter *rf_converter_new(RfConfig *config)

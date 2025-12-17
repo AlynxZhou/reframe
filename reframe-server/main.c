@@ -5,6 +5,9 @@
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
 #include "rf-lvnc-server.h"
+#ifdef HAVE_NEATVNC
+#	include "rf-nvnc-server.h"
+#endif
 
 struct _this {
 	GMainLoop *main_loop;
@@ -146,7 +149,14 @@ int main(int argc, char *argv[])
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
 	this->converter = rf_converter_new(this->config);
-	this->vnc = rf_lvnc_server_new(this->config);
+#ifdef HAVE_NEATVNC
+	g_autofree char *type = rf_config_get_vnc_type(this->config);
+	g_debug("VNC: Implementation type is %s.", type);
+	if (g_strcmp0(type, "neatvnc") == 0)
+		this->vnc = rf_nvnc_server_new(this->config);
+	else
+#endif
+		this->vnc = rf_lvnc_server_new(this->config);
 	g_signal_connect_swapped(
 		this->streamer,
 		"stop",

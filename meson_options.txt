@@ -32,3 +32,10 @@ option(
   value: '',
   description: 'systemd sysusers dir.'
 )
+
+option(
+  'neatvnc',
+  type: 'boolean',
+  value: false,
+  description: 'Enable experimental neatvnc implementation.'
+)

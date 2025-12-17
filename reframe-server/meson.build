@@ -24,6 +24,15 @@ libvncserver = dependency('libvncserver', required: true)
 xkbcommon = dependency('xkbcommon', required: true)
 dependencies += [m, glib, gio, gio_unix, epoxy, libvncserver, xkbcommon]
 
+if get_option('neatvnc') and neatvnc.found()
+  sources += files('rf-nvnc-server.c')
+  headers += files('rf-nvnc-server.h')
+  libdrm = dependency('libdrm', required: true)
+  aml = dependency('aml', required: true)
+  pixman = dependency('pixman-1', required: true)
+  dependencies += [libdrm, aml, pixman, neatvnc]
+endif
+
 dependencies += [mvmath_dep, reframe_common_dep]
 
 include_directories = []

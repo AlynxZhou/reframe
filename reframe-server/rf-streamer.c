@@ -95,11 +95,14 @@ static void _schedule_frame_msg(RfStreamer *this)
 
 	int64_t current = g_get_monotonic_time();
 	int64_t delta = current - this->last_frame_time;
+	// Give this highest priority to prevent lag.
 	if (delta < this->max_interval) {
-		this->timer_id = g_timeout_add(
+		this->timer_id = g_timeout_add_full(
+			G_PRIORITY_HIGH,
 			(this->max_interval - delta) / 1000,
 			_send_frame_msg,
-			this
+			this,
+			NULL
 		);
 	} else {
 		if (this->last_frame_time != -1)
@@ -108,7 +111,9 @@ static void _schedule_frame_msg(RfStreamer *this)
 				this->max_interval / 1000,
 				delta / 1000
 			);
-		this->timer_id = g_timeout_add(1, _send_frame_msg, this);
+		this->timer_id = g_timeout_add_full(
+			G_PRIORITY_HIGH, 1, _send_frame_msg, this, NULL
+		);
 	}
 }
 
@@ -333,27 +338,6 @@ static void _dispose(GObject *o)
 	G_OBJECT_CLASS(rf_streamer_parent_class)->dispose(o);
 }
 
-static void rf_streamer_init(RfStreamer *this)
-{
-	this->config = NULL;
-	this->client = NULL;
-	this->address = NULL;
-	this->connection = NULL;
-	this->io_flags = G_IO_IN | G_IO_PRI;
-	this->source = NULL;
-	this->timer_id = 0;
-	this->last_frame_time = -1;
-	this->max_interval = 1000000 / 30;
-	this->desktop_width = 0;
-	this->desktop_height = 0;
-	this->monitor_x = 0;
-	this->monitor_y = 0;
-	this->rotation = 0;
-	this->frame_width = 0;
-	this->frame_height = 0;
-	this->running = false;
-}
-
 static void rf_streamer_class_init(RfStreamerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
@@ -403,6 +387,27 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 		1,
 		G_TYPE_STRING
 	);
+}
+
+static void rf_streamer_init(RfStreamer *this)
+{
+	this->config = NULL;
+	this->client = NULL;
+	this->address = NULL;
+	this->connection = NULL;
+	this->io_flags = G_IO_IN | G_IO_PRI;
+	this->source = NULL;
+	this->timer_id = 0;
+	this->last_frame_time = -1;
+	this->max_interval = 1000000 / 30;
+	this->desktop_width = 0;
+	this->desktop_height = 0;
+	this->monitor_x = 0;
+	this->monitor_y = 0;
+	this->rotation = 0;
+	this->frame_width = 0;
+	this->frame_height = 0;
+	this->running = false;
 }
 
 RfStreamer *rf_streamer_new(RfConfig *config)

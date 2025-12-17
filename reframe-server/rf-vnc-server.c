@@ -31,21 +31,6 @@ static void _finalize(GObject *o)
 	G_OBJECT_CLASS(rf_vnc_server_parent_class)->finalize(o);
 }
 
-static void rf_vnc_server_init(RfVNCServer *this)
-{
-	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
-
-	priv->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	if (priv->xkb_context == NULL)
-		g_error("Failed to create XKB context.");
-	struct xkb_rule_names names = { NULL, NULL, NULL, NULL, NULL };
-	priv->xkb_keymap = xkb_keymap_new_from_names(
-		priv->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS
-	);
-	if (priv->xkb_keymap == NULL)
-		g_error("Failed to create XKB context.");
-}
-
 static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
@@ -125,6 +110,21 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 		G_TYPE_BOOLEAN,
 		G_TYPE_BOOLEAN
 	);
+}
+
+static void rf_vnc_server_init(RfVNCServer *this)
+{
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	priv->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	if (priv->xkb_context == NULL)
+		g_error("Failed to create XKB context.");
+	struct xkb_rule_names names = { NULL, NULL, NULL, NULL, NULL };
+	priv->xkb_keymap = xkb_keymap_new_from_names(
+		priv->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS
+	);
+	if (priv->xkb_keymap == NULL)
+		g_error("Failed to create XKB context.");
 }
 
 void rf_vnc_server_start(RfVNCServer *this)
@@ -223,7 +223,7 @@ static void _iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 	}
 }
 
-void rf_vnc_server_handle_keyboard_event(
+void rf_vnc_server_handle_keysym_event(
 	RfVNCServer *this,
 	uint32_t keysym,
 	bool down
@@ -248,6 +248,20 @@ void rf_vnc_server_handle_keyboard_event(
 	g_debug("Input: Received key %s for keysym %04x and keycode %u.",
 		down ? "down" : "up",
 		keysym,
+		keycode);
+	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
+}
+
+void rf_vnc_server_handle_keycode_event(
+	RfVNCServer *this,
+	uint32_t keycode,
+	bool down
+)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	g_debug("Input: Received key %s for keycode %u.",
+		down ? "down" : "up",
 		keycode);
 	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
 }
@@ -313,36 +327,30 @@ void rf_vnc_server_handle_resize_event(
 // events, it is not OK to release resources while still processing events so we
 // have to delay them until events are done.
 
-static gboolean _emit_first_client(gpointer data)
+static void _emit_first_client(gpointer data)
 {
 	RfVNCServer *this = data;
-
 	g_debug("VNC: Emitting first client signal.");
 	g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
-
-	return G_SOURCE_REMOVE;
-}
-
-static gboolean _emit_last_client(gpointer data)
-{
-	RfVNCServer *this = data;
-
-	g_debug("VNC: Emitting last client signal.");
-	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
-
-	return G_SOURCE_REMOVE;
 }
 
 void rf_vnc_server_handle_first_client(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	g_idle_add(_emit_first_client, this);
+	g_idle_add_once(_emit_first_client, this);
+}
+
+static void _emit_last_client(gpointer data)
+{
+	RfVNCServer *this = data;
+	g_debug("VNC: Emitting last client signal.");
+	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
 }
 
 void rf_vnc_server_handle_last_client(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	g_idle_add(_emit_last_client, this);
+	g_idle_add_once(_emit_last_client, this);
 }

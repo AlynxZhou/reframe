@@ -95,11 +95,11 @@ static int _on_set_desktop_size(
 }
 
 static void
-_on_keyboard_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
+_on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
 	bool down = direction != 0;
-	rf_vnc_server_handle_keyboard_event(RF_VNC_SERVER(this), keysym, down);
+	rf_vnc_server_handle_keysym_event(RF_VNC_SERVER(this), keysym, down);
 }
 
 static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
@@ -142,9 +142,9 @@ static gboolean _on_incoming(
 		this->screen->setDesktopSizeHook = _on_set_desktop_size;
 		// TODO: Clipboard event.
 		this->screen->ptrAddEvent = _on_pointer_event;
-		this->screen->kbdAddEvent = _on_keyboard_event;
+		this->screen->kbdAddEvent = _on_keysym_event;
 		if (this->passwords[0] != NULL &&
-		    strlen(this->passwords[0]) != 0) {
+		    this->passwords[0][0] != '\0') {
 			this->screen->authPasswdData = this->passwords;
 			this->screen->passwordCheck = rfbCheckPasswordByList;
 		}

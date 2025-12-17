@@ -1,4 +1,4 @@
-if systemd.found()
+if get_option('systemd') and systemd.found()
   configure_file(
     input: 'reframe-server@.service.in',
     output: 'reframe-server@.service',

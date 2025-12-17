@@ -1,6 +1,7 @@
 #ifndef __RF_VNC_SERVER_H__
 #define __RF_VNC_SERVER_H__
 
+#include <stdint.h>
 #include <stdbool.h>
 #include <gio/gio.h>
 
@@ -38,9 +39,14 @@ void rf_vnc_server_update(
 	unsigned int height
 );
 void rf_vnc_server_flush(RfVNCServer *this);
-void rf_vnc_server_handle_keyboard_event(
+void rf_vnc_server_handle_keysym_event(
 	RfVNCServer *this,
 	uint32_t keysym,
+	bool down
+);
+void rf_vnc_server_handle_keycode_event(
+	RfVNCServer *this,
+	uint32_t keycode,
 	bool down
 );
 void rf_vnc_server_handle_pointer_event(
