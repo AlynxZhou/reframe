@@ -425,7 +425,6 @@ static int _setup_gl(RfConverter *this)
 	glGenFramebuffers(1, &this->framebuffer);
 
 	glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	return 0;
 }
@@ -602,6 +601,7 @@ static void _gen_texture(RfConverter *this)
 	);
 	GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
 	glDrawBuffers(1, &draw_buffer);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
