@@ -1,6 +1,6 @@
-#include "rf-common.h"
 #include <glib.h>
 
+#include "rf-common.h"
 #include "rf-buffer.h"
 
 G_DEFINE_BOXED_TYPE(RfBuffer, rf_buffer, rf_buffer_copy, rf_buffer_free)

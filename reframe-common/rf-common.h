@@ -32,7 +32,12 @@ G_BEGIN_DECLS
 
 #define RF_KEY_CODE_XKB_TO_EV(key_code) ((key_code) - 8)
 
-ssize_t rf_send_header(GSocketConnection *connection, char type, size_t length);
+ssize_t rf_send_header(
+	GSocketConnection *connection,
+	char type,
+	size_t length,
+	GError **error
+);
 const char *rf_plane_type(uint32_t type);
 
 G_END_DECLS

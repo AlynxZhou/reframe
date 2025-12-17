@@ -218,15 +218,14 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 	ret = _export_fb2(cfd, b, fb_id);
 	if (ret <= 0)
 		ret = _export_fb(cfd, b, fb_id);
-	if (ret <= 0) {
-		g_warning("Frame: Failed to get frame.");
+	if (ret <= 0)
 		return ret;
-	}
 	rf_buffer_debug(b);
 	return ret;
 }
 
-static ssize_t _send_buffer(GSocketConnection *connection, RfBuffer *b)
+static ssize_t
+_send_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 {
 	ssize_t ret = 0;
 	GOutputVector iov = { &b->md, sizeof(b->md) };
@@ -240,7 +239,7 @@ static ssize_t _send_buffer(GSocketConnection *connection, RfBuffer *b)
 	GSocketControlMessage *msg = g_unix_fd_message_new_with_fd_list(fds);
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	ret = g_socket_send_message(
-		socket, NULL, &iov, 1, &msg, 1, G_SOCKET_MSG_NONE, NULL, NULL
+		socket, NULL, &iov, 1, &msg, 1, G_SOCKET_MSG_NONE, NULL, error
 	);
 	g_object_unref(fds);
 	g_object_unref(msg);
@@ -251,14 +250,22 @@ static ssize_t
 _send_frame_msg(struct _this *this, size_t length, RfBuffer *bufs)
 {
 	ssize_t ret = 0;
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, length);
+	g_autoptr(GError) error = NULL;
+
+	ret = rf_send_header(
+		this->connection, RF_MSG_TYPE_FRAME, length, &error
+	);
 	if (ret <= 0)
-		return ret;
+		goto out;
 	for (size_t i = 0; i < length; ++i) {
-		ret = _send_buffer(this->connection, &bufs[i]);
+		ret = _send_buffer(this->connection, &bufs[i], &error);
 		if (ret <= 0)
 			break;
 	}
+
+out:
+	if (ret < 0)
+		g_warning("Frame: Failed to send frame: %s.", error->message);
 	return ret;
 }
 
@@ -266,16 +273,23 @@ static ssize_t _on_frame_msg(struct _this *this)
 {
 	g_debug("Frame: Received frame message.");
 
+	RfBuffer bufs[RF_MAX_BUFS];
 	size_t length = 0;
 	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
 
-	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
-	if (ret <= 0)
-		goto out;
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
+	if (ret <= 0) {
+		if (ret < 0)
+			g_warning(
+				"Frame: Failed to receive frame message: %s.",
+				error->message
+			);
+		return ret;
+	}
 
-	RfBuffer bufs[RF_MAX_BUFS];
 	length = 0;
 	ret = _make_buffer(
 		this->cfd,
@@ -283,8 +297,10 @@ static ssize_t _on_frame_msg(struct _this *this)
 		this->primary_id,
 		DRM_PLANE_TYPE_PRIMARY
 	);
-	if (ret <= 0)
+	if (ret <= 0) {
+		g_warning("Frame: Failed to make buffer for primary plane.");
 		return ret;
+	}
 
 	if (this->cursor && this->cursor_id == 0)
 		this->cursor_id = _get_plane_id(
@@ -307,10 +323,6 @@ static ssize_t _on_frame_msg(struct _this *this)
 	for (size_t i = 0; i < length; ++i)
 		for (int j = 0; j < bufs[i].md.length; ++j)
 			close(bufs[i].fds[j]);
-
-out:
-	if (ret <= 0)
-		g_warning("Frame: Failed to send/receive frame: %ld.", ret);
 	return ret;
 }
 
@@ -321,23 +333,27 @@ static ssize_t _on_input_msg(struct _this *this)
 	g_autofree struct input_event *ies = NULL;
 	size_t length = 0;
 	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
 
-	ret = g_input_stream_read(is, &length, sizeof(length), NULL, NULL);
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
 	if (ret <= 0)
 		goto out;
 	ies = g_malloc_n(length, sizeof(*ies));
-	ret = g_input_stream_read(is, ies, length * sizeof(*ies), NULL, NULL);
+	ret = g_input_stream_read(is, ies, length * sizeof(*ies), NULL, &error);
 	if (ret <= 0)
 		goto out;
 
 	_write_may(this->ufd, ies, length * sizeof(*ies));
 
 out:
-	if (ret <= 0)
-		g_warning("Input: Failed to receive input events: %ld.", ret);
-	else
+	if (ret < 0)
+		g_warning(
+			"Input: Failed to receive input events: %s.",
+			error->message
+		);
+	else if (ret > 0)
 		g_debug("Input: Received %lu * %ld bytes input events.",
 			length,
 			sizeof(*ies));
@@ -348,12 +364,20 @@ static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
 {
 	size_t length = strlen(card_path) + 1;
 	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_CARD_PATH, length);
+
+	ret = rf_send_header(
+		this->connection, RF_MSG_TYPE_CARD_PATH, length, &error
+	);
 	if (ret <= 0)
-		return ret;
-	ret = g_output_stream_write(os, card_path, length, NULL, NULL);
+		goto out;
+	ret = g_output_stream_write(os, card_path, length, NULL, &error);
+
+out:
+	if (ret < 0)
+		g_warning("DRM: Failed to send card path: %s.", error->message);
 	return ret;
 }
 
@@ -362,14 +386,22 @@ _send_connector_name_msg(struct _this *this, const char *connector_name)
 {
 	size_t length = strlen(connector_name) + 1;
 	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+
 	ret = rf_send_header(
-		this->connection, RF_MSG_TYPE_CONNECTOR_NAME, length
+		this->connection, RF_MSG_TYPE_CONNECTOR_NAME, length, &error
 	);
 	if (ret <= 0)
-		return ret;
-	ret = g_output_stream_write(os, connector_name, length, NULL, NULL);
+		goto out;
+	ret = g_output_stream_write(os, connector_name, length, NULL, &error);
+out:
+	if (ret < 0)
+		g_warning(
+			"DRM: Failed to send connector name: %s.",
+			error->message
+		);
 	return ret;
 }
 
@@ -709,10 +741,16 @@ int main(int argc, char *argv[])
 			);
 			char type;
 			ret = g_input_stream_read(
-				is, &type, sizeof(type), NULL, NULL
+				is, &type, sizeof(type), NULL, &error
 			);
-			if (ret <= 0)
+			if (ret <= 0) {
+				if (ret < 0)
+					g_warning(
+						"Failed to read message type: %s.",
+						error->message
+					);
 				break;
+			}
 
 			switch (type) {
 			case RF_MSG_TYPE_FRAME:
