@@ -21,8 +21,8 @@ unsigned int rf_config_get_default_width(RfConfig *this);
 unsigned int rf_config_get_default_height(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
-unsigned int rf_config_get_port(RfConfig *this);
-char *rf_config_get_password(RfConfig *this);
+unsigned int rf_config_get_vnc_port(RfConfig *this);
+char *rf_config_get_vnc_password(RfConfig *this);
 
 G_END_DECLS
 

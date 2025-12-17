@@ -1,3 +1,4 @@
+#include "glib.h"
 #include "rf-common.h"
 #include "rf-config.h"
 
@@ -7,7 +8,8 @@ struct _RfConfig {
 };
 G_DEFINE_TYPE(RfConfig, rf_config, G_TYPE_OBJECT)
 
-#define RF_CONFIG_GROUP "reframe"
+#define RF_CONFIG_GROUP_REFRAME "reframe"
+#define RF_CONFIG_GROUP_VNC "vnc"
 
 static void _finalize(GObject *o)
 {
@@ -48,8 +50,9 @@ char *rf_config_get_card_path(RfConfig *this)
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
-	char *card =
-		g_key_file_get_string(this->f, RF_CONFIG_GROUP, "card", &error);
+	char *card = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_REFRAME, "card", &error
+	);
 	if (error != NULL || card == NULL || card[0] == '\0')
 		return NULL;
 	char *card_path = g_strdup_printf("/dev/dri/%s", card);
@@ -63,7 +66,7 @@ char *rf_config_get_connector(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	char *connector = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP, "connector", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "connector", &error
 	);
 	if (error != NULL || connector == NULL || connector[0] == '\0')
 		return NULL;
@@ -76,7 +79,7 @@ unsigned int rf_config_get_rotation(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int rotation = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "rotation", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "rotation", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -96,7 +99,7 @@ unsigned int rf_config_get_desktop_width(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int desktop_width = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "desktop-width", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "desktop-width", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -109,7 +112,7 @@ unsigned int rf_config_get_desktop_height(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int desktop_height = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "desktop-height", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "desktop-height", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -122,7 +125,7 @@ int rf_config_get_monitor_x(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	int monitor_x = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "monitor-x", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "monitor-x", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -135,7 +138,7 @@ int rf_config_get_monitor_y(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	int monitor_y = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "monitor-y", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "monitor-y", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -148,7 +151,7 @@ unsigned int rf_config_get_default_width(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int default_width = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "default-width", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "default-width", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -161,7 +164,7 @@ unsigned int rf_config_get_default_height(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	unsigned int default_height = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "default-height", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "default-height", &error
 	);
 	if (error != NULL)
 		return 0;
@@ -174,7 +177,7 @@ bool rf_config_get_cursor(RfConfig *this)
 
 	g_autoptr(GError) error = NULL;
 	gboolean cursor = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP, "cursor", &error
+		this->f, RF_CONFIG_GROUP_REFRAME, "cursor", &error
 	);
 	if (error != NULL)
 		return true;
@@ -186,34 +189,56 @@ unsigned int rf_config_get_fps(RfConfig *this)
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);
 
 	g_autoptr(GError) error = NULL;
-	unsigned int fps =
-		g_key_file_get_integer(this->f, RF_CONFIG_GROUP, "fps", &error);
+	unsigned int fps = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_REFRAME, "fps", &error
+	);
 	if (error != NULL)
 		return 30;
 	return fps;
 }
 
-unsigned int rf_config_get_port(RfConfig *this)
+unsigned int rf_config_get_vnc_port(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 5933);
 
 	g_autoptr(GError) error = NULL;
 	unsigned int port = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP, "port", &error
+		this->f, RF_CONFIG_GROUP_VNC, "port", &error
 	);
+	// Backward compatibility.
+	if (error != NULL) {
+		g_clear_pointer(&error, g_error_free);
+		g_warning(
+			"Please move port to the new [vnc] group to adapt to the updated configuration format."
+		);
+		port = g_key_file_get_integer(
+			this->f, RF_CONFIG_GROUP_REFRAME, "port", &error
+		);
+	}
 	if (error != NULL)
 		return 5933;
 	return port;
 }
 
-char *rf_config_get_password(RfConfig *this)
+char *rf_config_get_vnc_password(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
 	char *password = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP, "password", &error
+		this->f, RF_CONFIG_GROUP_VNC, "password", &error
 	);
+	// Backward compatibility.
+	if (error != NULL || password == NULL || password[0] == '\0') {
+		g_clear_pointer(&error, g_error_free);
+		g_clear_pointer(&password, g_free);
+		g_warning(
+			"Please move password to the new [vnc] group to adapt to the updated configuration format."
+		);
+		password = g_key_file_get_string(
+			this->f, RF_CONFIG_GROUP_REFRAME, "password", &error
+		);
+	}
 	if (error != NULL || password == NULL || password[0] == '\0')
 		return NULL;
 	return password;

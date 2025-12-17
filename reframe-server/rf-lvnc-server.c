@@ -194,7 +194,7 @@ static void _start(RfVNCServer *super)
 	if (this->running)
 		return;
 
-	this->passwords[0] = rf_config_get_password(this->config);
+	this->passwords[0] = rf_config_get_vnc_password(this->config);
 	this->desktop_name = rf_config_get_connector(this->config);
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
@@ -214,7 +214,7 @@ static void _start(RfVNCServer *super)
 	}
 
 	g_autoptr(GError) error = NULL;
-	unsigned int port = rf_config_get_port(this->config);
+	unsigned int port = rf_config_get_vnc_port(this->config);
 	g_message("VNC: Listening on port %u.", port);
 	this->service = g_socket_service_new();
 	g_socket_listener_add_inet_port(
