@@ -36,9 +36,9 @@ if get_option('systemd') and systemd.found()
     },
     install_dir: sysusersdir
   )
-
-  install_data(
-    'example.conf',
-    install_dir: confdir
-  )
 endif
+
+install_data(
+  'example.conf',
+  install_dir: confdir
+)
