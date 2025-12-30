@@ -440,6 +440,7 @@ static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 		     g_strcmp0(full_name, connector_name) == 0))
 			break;
 		drmModeFreeConnector(connector);
+		connector = NULL;
 	}
 	drmModeFreeResources(res);
 	return connector;
