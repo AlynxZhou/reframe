@@ -493,7 +493,6 @@ _get_card_and_connector(struct _this *this, const char *connector_name)
 		);
 		return NULL;
 	}
-	drmDropMaster(this->cfd);
 	g_message("DRM: Opened card %s.", this->card_path);
 	return _get_connector(this->cfd, connector_name);
 }
@@ -523,6 +522,11 @@ static void _setup_drm(struct _this *this)
 		_get_card_and_connector(this, this->connector_name);
 	if (connector == NULL)
 		g_error("DRM: Failed to find a connected connector.");
+
+	// We may become DRM master if we are the first process that opens DRM
+	// card, then drop DRM master so we could start compositor after ReFrame.
+	drmDropMaster(this->cfd);
+
 	if (this->connector_name == NULL)
 		this->connector_name = _get_connector_name(connector);
 	g_message("DRM: Found connected connector %s.", this->connector_name);
