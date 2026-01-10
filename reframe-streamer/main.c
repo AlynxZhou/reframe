@@ -492,6 +492,7 @@ _get_card_and_connector(struct _this *this, const char *connector_name)
 		);
 		return NULL;
 	}
+	drmDropMaster(this->cfd);
 	g_message("DRM: Opened card %s.", this->card_path);
 	return _get_connector(this->cfd, connector_name);
 }
