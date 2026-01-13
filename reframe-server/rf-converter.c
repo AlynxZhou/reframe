@@ -537,6 +537,7 @@ out:
 	if (ret < 0) {
 		_clean_gl(this);
 		_clean_egl(this);
+		g_clear_pointer(&this->card_path, g_free);
 	}
 	return ret;
 }

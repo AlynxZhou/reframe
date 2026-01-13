@@ -45,9 +45,12 @@ _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 		}
 	}
 
-	if (!rf_converter_is_running(this->converter))
-		if (rf_converter_start(this->converter) < 0)
+	if (!rf_converter_is_running(this->converter)) {
+		if (rf_converter_start(this->converter) < 0) {
 			rf_vnc_server_flush(this->vnc);
+			return;
+		}
+	}
 
 	g_autoptr(GByteArray) buf = rf_converter_convert(
 		this->converter, length, bufs, this->width, this->height
