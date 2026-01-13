@@ -223,9 +223,13 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 		length = 0;
 		goto out;
 	}
-	if (length < 1 || length > RF_MAX_BUFS) {
+	// Empty buffer, maybe locked screen and turned monitor off, skip it.
+	if (length == 0) {
+		g_debug("Frame: Got empty buffer for primary plane.");
+		goto out;
+	} else if (length > RF_MAX_BUFS) {
 		g_warning("Frame: Got invalid buffers length %ld.", length);
-		return ret;
+		goto out;
 	}
 
 	for (size_t i = 0; i < length; ++i) {

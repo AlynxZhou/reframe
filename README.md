@@ -107,10 +107,10 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 
 > **Security Suggestion**: VNC data streams are not encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
 
-1. Disable automatic screen blank for **both user session and display manager session**: Otherwise the connector might be set to disconnected and we cannot get frames for it.
-2. Run `systemctl start reframe-server@example.service` and try connecting to it via port `5933`.
+1. Run `systemctl start reframe-server@example.service`.
+2. Try connecting to it with a VNC client via port `5933`.
 
-If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. If it cannot find your monitor, you need to manually select monitor via DRM card and connector.
+If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. If it cannot find your monitor, you need to manually select monitor via DRM card and connector. If you can see screen content, but cannot control it, you need to manually load `uinput` kernel module (`modprobe uinput`).
 
 ## Select Monitor via DRM Card and Connector
 

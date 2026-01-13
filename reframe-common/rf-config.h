@@ -20,6 +20,7 @@ int rf_config_get_monitor_y(RfConfig *this);
 unsigned int rf_config_get_default_width(RfConfig *this);
 unsigned int rf_config_get_default_height(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
+bool rf_config_get_wakeup(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);

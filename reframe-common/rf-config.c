@@ -184,6 +184,19 @@ bool rf_config_get_cursor(RfConfig *this)
 	return cursor ? true : false;
 }
 
+bool rf_config_get_wakeup(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), true);
+
+	g_autoptr(GError) error = NULL;
+	gboolean wakeup = g_key_file_get_boolean(
+		this->f, RF_CONFIG_GROUP_REFRAME, "wakeup", &error
+	);
+	if (error != NULL)
+		return true;
+	return wakeup ? true : false;
+}
+
 unsigned int rf_config_get_fps(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);

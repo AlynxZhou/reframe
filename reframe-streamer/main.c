@@ -63,6 +63,7 @@ struct _this {
 	bool cursor;
 	uint32_t cursor_id;
 	int ufd;
+	bool wakeup;
 };
 
 // You need to explicitly cast the type of returned value.
@@ -131,7 +132,7 @@ static int _export_fb2(int cfd, RfBuffer *b, uint32_t fb_id)
 {
 	drmModeFB2 *fb = drmModeGetFB2(cfd, fb_id);
 	if (fb == NULL)
-		return -1;
+		return 0;
 	g_debug("Frame: Got FB2 framebuffer ID %u.", fb->fb_id);
 	for (int i = 0; i < RF_MAX_FDS; ++i) {
 		if (fb->handles[i] == 0)
@@ -159,7 +160,7 @@ static int _export_fb(int cfd, RfBuffer *b, uint32_t fb_id)
 {
 	drmModeFB *fb = drmModeGetFB(cfd, fb_id);
 	if (fb == NULL)
-		return -1;
+		return 0;
 	g_debug("Frame: Got FB framebuffer ID %u.", fb->fb_id);
 	if (fb->handle == 0)
 		return 0;
@@ -183,6 +184,12 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 	if (plane == NULL)
 		return 0;
 	uint32_t fb_id = plane->fb_id;
+	drmModeFreePlane(plane);
+	if (fb_id == 0)
+		return 0;
+	g_debug("Frame: Got %s plane framebuffer ID %u.",
+		rf_plane_type(type),
+		fb_id);
 	b->md.type = type;
 	b->md.crtc_x = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_X", 0);
 	b->md.crtc_y = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
@@ -197,12 +204,6 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_W", 0) >> 16);
 	b->md.src_h =
 		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_H", 0) >> 16);
-	drmModeFreePlane(plane);
-	if (fb_id == 0)
-		return 0;
-	g_debug("Frame: Got %s plane framebuffer ID %u.",
-		rf_plane_type(type),
-		fb_id);
 
 	int ret = 0;
 	// GUnixFDList refuses to send invalid fds like -1, so we need
@@ -297,8 +298,10 @@ static ssize_t _on_frame_msg(struct _this *this)
 		this->primary_id,
 		DRM_PLANE_TYPE_PRIMARY
 	);
+	// Empty buffer, maybe locked screen and turned monitor off, skip it.
 	if (ret <= 0) {
-		g_warning("Frame: Failed to make buffer for primary plane.");
+		g_debug("Frame: Got empty buffer for primary plane.");
+		ret = _send_frame_msg(this, 0, NULL);
 		return ret;
 	}
 
@@ -554,6 +557,9 @@ static void _setup_drm(struct _this *this)
 		"DRM: Cursor plane is %s.",
 		this->cursor ? "enabled" : "disabled"
 	);
+
+	_send_card_path_msg(this, this->card_path);
+	_send_connector_name_msg(this, this->connector_name);
 }
 
 static void _clean_drm(struct _this *this)
@@ -566,9 +572,36 @@ static void _clean_drm(struct _this *this)
 	g_clear_pointer(&this->connector_name, g_free);
 }
 
+#define WAKEUP_MAX_EVENTS 4
+static void _wakeup_uinput(struct _this *this)
+{
+	struct input_event ies[WAKEUP_MAX_EVENTS];
+	memset(ies, 0, WAKEUP_MAX_EVENTS * sizeof(*ies));
+
+	ies[0].type = EV_REL;
+	ies[0].code = REL_X;
+	ies[0].value = 1;
+
+	ies[1].type = EV_SYN;
+	ies[1].code = SYN_REPORT;
+	ies[1].value = 0;
+
+	ies[2].type = EV_REL;
+	ies[2].code = REL_Y;
+	ies[2].value = 1;
+
+	ies[3].type = EV_SYN;
+	ies[3].code = SYN_REPORT;
+	ies[3].value = 0;
+
+	_write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+}
+
 static void _setup_uinput(struct _this *this)
 {
 	this->ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+	if (this->ufd < 0)
+		this->ufd = open("/dev/input/uinput", O_WRONLY | O_NONBLOCK);
 	if (this->ufd < 0)
 		g_error("Input: Failed to open uinput: %s.", strerror(errno));
 
@@ -607,6 +640,20 @@ static void _setup_uinput(struct _this *this)
 	strcpy(dev.name, "reframe");
 	_ioctl_must(this->ufd, UI_DEV_SETUP, &dev);
 	_ioctl_must(this->ufd, UI_DEV_CREATE);
+
+	// If screen is turned off, we cannot get CRTC, so we have to wake it up.
+	this->wakeup = rf_config_get_wakeup(this->config);
+	if (this->wakeup) {
+		g_message(
+			"Input: Waiting for 1 second to let userspace detect the uinput device before wakeup."
+		);
+		g_usleep(G_USEC_PER_SEC);
+		_wakeup_uinput(this);
+		g_message(
+			"Input: Waiting for 1 second to let userspace process wakeup."
+		);
+		g_usleep(G_USEC_PER_SEC);
+	}
 }
 
 static void _clean_uinput(struct _this *this)
@@ -734,11 +781,8 @@ int main(int argc, char *argv[])
 
 		g_message("ReFrame Server connected.");
 
-		_setup_drm(this);
 		_setup_uinput(this);
-
-		_send_card_path_msg(this, this->card_path);
-		_send_connector_name_msg(this, this->connector_name);
+		_setup_drm(this);
 
 		while (true) {
 			ssize_t ret = 0;
@@ -774,8 +818,8 @@ int main(int argc, char *argv[])
 
 		g_message("ReFrame Server disconnected.");
 
-		_clean_uinput(this);
 		_clean_drm(this);
+		_clean_uinput(this);
 
 		g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
 		if (error != NULL)
