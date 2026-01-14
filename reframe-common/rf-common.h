@@ -18,9 +18,9 @@ G_BEGIN_DECLS
  * Some messages does not have payload, then length should be 0 and cannot be
  * omitted. If payload is a string, it should contain the `\0`.
  *
- * For frame type, the payload length is the number of planes, 0 is always the
- * primary plane, follows with an optional cursor plane. For other types, the
- * payload length is the number of bytes.
+ * The payload length is the number of elements. For frame type, 0 is always the
+ * primary plane, follows with an optional cursor plane. The payload length could
+ * be 0 for frame type, which means the monitor is currently empty.
  */
 #define RF_MSG_TYPE_FRAME 'F'
 #define RF_MSG_TYPE_INPUT 'I'

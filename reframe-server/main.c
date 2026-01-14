@@ -154,7 +154,7 @@ int main(int argc, char *argv[])
 	this->converter = rf_converter_new(this->config);
 #ifdef HAVE_NEATVNC
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
-	g_debug("VNC: Implementation type is %s.", type);
+	g_message("VNC: Implementation type is %s.", type);
 	if (g_strcmp0(type, "neatvnc") == 0)
 		this->vnc = rf_nvnc_server_new(this->config);
 	else

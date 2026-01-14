@@ -9,7 +9,7 @@
 #include "rf-streamer.h"
 
 #define KEYBOARD_MAX_EVENTS 2
-#define POINTER_MAX_EVENTS 7
+#define POINTER_MAX_EVENTS 10
 
 struct _RfStreamer {
 	GObject parent_instance;
@@ -601,8 +601,12 @@ void rf_streamer_send_pointer_event(
 	bool left,
 	bool middle,
 	bool right,
+	bool back,
+	bool forward,
 	bool wup,
-	bool wdown
+	bool wdown,
+	bool wleft,
+	bool wright
 )
 {
 	g_return_if_fail(RF_IS_STREAMER(this));
@@ -626,40 +630,65 @@ void rf_streamer_send_pointer_event(
 		(this->monitor_y + ry * this->frame_height) / desktop_height;
 	g_debug("Input: Calculated global position x %f and y %f.", x, y);
 
-	size_t length = (wup || wdown) ? POINTER_MAX_EVENTS :
-					 POINTER_MAX_EVENTS - 1;
+	size_t length = 0;
 	struct input_event ies[POINTER_MAX_EVENTS];
 	memset(ies, 0, POINTER_MAX_EVENTS * sizeof(*ies));
 
-	ies[0].type = EV_ABS;
-	ies[0].code = ABS_X;
-	ies[0].value = RF_POINTER_MAX * x;
+	ies[length].type = EV_ABS;
+	ies[length].code = ABS_X;
+	ies[length].value = RF_POINTER_MAX * x;
+	++length;
 
-	ies[1].type = EV_ABS;
-	ies[1].code = ABS_Y;
-	ies[1].value = RF_POINTER_MAX * y;
+	ies[length].type = EV_ABS;
+	ies[length].code = ABS_Y;
+	ies[length].value = RF_POINTER_MAX * y;
+	++length;
 
-	ies[2].type = EV_KEY;
-	ies[2].code = BTN_LEFT;
-	ies[2].value = left;
+	ies[length].type = EV_KEY;
+	ies[length].code = BTN_LEFT;
+	ies[length].value = left;
+	++length;
 
-	ies[3].type = EV_KEY;
-	ies[3].code = BTN_MIDDLE;
-	ies[3].value = middle;
+	ies[length].type = EV_KEY;
+	ies[length].code = BTN_MIDDLE;
+	ies[length].value = middle;
+	++length;
 
-	ies[4].type = EV_KEY;
-	ies[4].code = BTN_RIGHT;
-	ies[4].value = right;
+	ies[length].type = EV_KEY;
+	ies[length].code = BTN_RIGHT;
+	ies[length].value = right;
+	++length;
+
+	// FIXME: BTN_BACK/FORWARD or BTN_4/5?
+	ies[length].type = EV_KEY;
+	ies[length].code = BTN_BACK;
+	ies[length].value = back;
+	++length;
+
+	ies[length].type = EV_KEY;
+	ies[length].code = BTN_FORWARD;
+	ies[length].value = forward;
+	++length;
 
 	if (wup || wdown) {
-		ies[5].type = EV_REL;
-		ies[5].code = REL_WHEEL;
-		ies[5].value = wup ? 1 : -1;
+		ies[length].type = EV_REL;
+		ies[length].code = REL_WHEEL;
+		ies[length].value = wup ? 1 : -1;
+		++length;
 	}
 
-	ies[length - 1].type = EV_SYN;
-	ies[length - 1].code = SYN_REPORT;
-	ies[length - 1].value = 0;
+	if (wleft || wright) {
+		ies[length].type = EV_REL;
+		ies[length].code = REL_HWHEEL;
+		// FIXME: Which one is positive? Left or right?
+		ies[length].value = wleft ? 1 : -1;
+		++length;
+	}
+
+	ies[length].type = EV_SYN;
+	ies[length].code = SYN_REPORT;
+	ies[length].value = 0;
+	++length;
 
 	_send_input_msg(this, ies, length);
 }

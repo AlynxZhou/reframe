@@ -101,9 +101,13 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 		NULL,
 		NULL,
 		G_TYPE_NONE,
-		7,
+		11,
 		G_TYPE_DOUBLE,
 		G_TYPE_DOUBLE,
+		G_TYPE_BOOLEAN,
+		G_TYPE_BOOLEAN,
+		G_TYPE_BOOLEAN,
+		G_TYPE_BOOLEAN,
 		G_TYPE_BOOLEAN,
 		G_TYPE_BOOLEAN,
 		G_TYPE_BOOLEAN,
@@ -285,16 +289,26 @@ void rf_vnc_server_handle_pointer_event(
 	bool right = mask & (1 << 2);
 	bool wup = mask & (1 << 3);
 	bool wdown = mask & (1 << 4);
+	bool wleft = mask & (1 << 5);
+	bool wright = mask & (1 << 6);
+	// Generally the 7th bit is reserved.
+	bool back = mask & (1 << 8);
+	bool forward = mask & (1 << 9);
 	g_debug("Input: Received pointer at x %f and y %f, raw button %#x, "
-		"left %s, middle %s, right %s, wheel up %s, wheel down %s.",
+		"left %s, middle %s, right %s, back %s, forward %s, "
+		"wheel up %s, wheel down %s, wheel left %s, wheel right %s.",
 		rx,
 		ry,
 		mask,
 		_true_or_false(left),
 		_true_or_false(middle),
 		_true_or_false(right),
+		_true_or_false(back),
+		_true_or_false(forward),
 		_true_or_false(wup),
-		_true_or_false(wdown));
+		_true_or_false(wdown),
+		_true_or_false(wleft),
+		_true_or_false(wright));
 	g_signal_emit(
 		this,
 		sigs[SIG_POINTER_EVENT],
@@ -304,8 +318,12 @@ void rf_vnc_server_handle_pointer_event(
 		left,
 		middle,
 		right,
+		back,
+		forward,
 		wup,
-		wdown
+		wdown,
+		wleft,
+		wright
 	);
 }
 

@@ -125,7 +125,8 @@ static void _on_pointer_event(
 	e->vnc = RF_VNC_SERVER(g_object_ref(this));
 	e->rx = (double)x / this->width;
 	e->ry = (double)y / this->height;
-	e->mask = buttons;
+	// neatvnc does not follow RFB's ExtendedMouseButtons bits, correct it.
+	e->mask = (buttons & 0x7f) | ((buttons >> 7) << 8);
 	g_idle_add_once(_handle_pointer_event, e);
 }
 

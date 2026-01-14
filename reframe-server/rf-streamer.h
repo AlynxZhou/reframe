@@ -1,6 +1,7 @@
 #ifndef __RF_STREAMER_H__
 #define __RF_STREAMER_H__
 
+#include <stdint.h>
 #include <stdbool.h>
 
 #include "rf-config.h"
@@ -27,8 +28,12 @@ void rf_streamer_send_pointer_event(
 	bool left,
 	bool middle,
 	bool right,
+	bool back,
+	bool forward,
 	bool wup,
-	bool wdown
+	bool wdown,
+	bool wleft,
+	bool wright
 );
 
 G_END_DECLS

@@ -18,6 +18,8 @@
 #	include <systemd/sd-daemon.h>
 #endif
 
+#define WAKEUP_MAX_EVENTS 4
+
 // clang-format off
 #define _ioctl_must(...)                                                         \
 	G_STMT_START {                                                           \
@@ -572,7 +574,6 @@ static void _clean_drm(struct _this *this)
 	g_clear_pointer(&this->connector_name, g_free);
 }
 
-#define WAKEUP_MAX_EVENTS 4
 static void _wakeup_uinput(struct _this *this)
 {
 	struct input_event ies[WAKEUP_MAX_EVENTS];
