@@ -140,7 +140,7 @@ static gboolean _on_incoming(
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
 		this->screen->setDesktopSizeHook = _on_set_desktop_size;
-		// TODO: Clipboard event.
+		// We are unable to support clipboard, because it is per-session.
 		this->screen->ptrAddEvent = _on_pointer_event;
 		this->screen->kbdAddEvent = _on_keysym_event;
 		if (this->passwords[0] != NULL &&

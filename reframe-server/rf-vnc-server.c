@@ -285,9 +285,11 @@ void rf_vnc_server_handle_pointer_event(
 	bool right = mask & (1 << 2);
 	bool wup = mask & (1 << 3);
 	bool wdown = mask & (1 << 4);
-	g_debug("Input: Received pointer at x %f and y %f, left %s, middle %s, right %s, wheel up %s, wheel down %s.",
+	g_debug("Input: Received pointer at x %f and y %f, raw button %#x, "
+		"left %s, middle %s, right %s, wheel up %s, wheel down %s.",
 		rx,
 		ry,
+		mask,
 		_true_or_false(left),
 		_true_or_false(middle),
 		_true_or_false(right),
