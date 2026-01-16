@@ -74,7 +74,7 @@ static int _setup_egl(RfConverter *this)
 	EGLint n;
 	EGLint size;
 	EGLConfig config = NULL;
-	EGLConfig *configs;
+	g_autofree EGLConfig *configs = NULL;
 	// clang-format off
 	EGLint config_attribs[] = {
 		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
@@ -154,8 +154,6 @@ static int _setup_egl(RfConverter *this)
 		g_warning("EGL: Failed to create context: %d.", eglGetError());
 		return -3;
 	}
-
-	g_free(configs);
 
 	return 0;
 }

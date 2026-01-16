@@ -52,5 +52,5 @@ void rf_buffer_debug(RfBuffer *this)
 
 void rf_buffer_free(RfBuffer *this)
 {
-	return g_free(this);
+	g_free(this);
 }

@@ -136,7 +136,7 @@ _on_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 	ssize_t ret = 0;
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	GInputVector iov = { &b->md, sizeof(b->md) };
-	GSocketControlMessage **msgs = NULL;
+	g_autofree GSocketControlMessage **msgs = NULL;
 	int n_msgs = 0;
 
 	b->md.length = 0;
@@ -202,7 +202,6 @@ _on_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 out:
 	for (int i = 0; i < n_msgs; ++i)
 		g_object_unref(msgs[i]);
-	g_free(msgs);
 
 	return ret;
 }

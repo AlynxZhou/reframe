@@ -53,10 +53,9 @@ struct _keysym_event {
 
 static void _handle_keysym_event(gpointer data)
 {
-	struct _keysym_event *e = data;
+	g_autofree struct _keysym_event *e = data;
 	rf_vnc_server_handle_keysym_event(e->vnc, e->keysym, e->down);
 	g_object_unref(e->vnc);
-	g_free(e);
 }
 
 static void
@@ -79,10 +78,9 @@ struct _keycode_event {
 
 static void _handle_keycode_event(gpointer data)
 {
-	struct _keycode_event *e = data;
+	g_autofree struct _keycode_event *e = data;
 	rf_vnc_server_handle_keycode_event(e->vnc, e->keycode, e->down);
 	g_object_unref(e->vnc);
-	g_free(e);
 }
 
 static void
@@ -106,10 +104,9 @@ struct _pointer_event {
 
 static void _handle_pointer_event(gpointer data)
 {
-	struct _pointer_event *e = data;
+	g_autofree struct _pointer_event *e = data;
 	rf_vnc_server_handle_pointer_event(e->vnc, e->rx, e->ry, e->mask);
 	g_object_unref(e->vnc);
-	g_free(e);
 }
 
 static void _on_pointer_event(
@@ -138,10 +135,9 @@ struct _resize_event {
 
 static void _handle_resize_event(gpointer data)
 {
-	struct _resize_event *e = data;
+	g_autofree struct _resize_event *e = data;
 	rf_vnc_server_handle_resize_event(e->vnc, e->width, e->height);
 	g_object_unref(e->vnc);
-	g_free(e);
 }
 
 static bool _on_resize_event(

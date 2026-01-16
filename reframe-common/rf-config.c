@@ -50,13 +50,12 @@ char *rf_config_get_card_path(RfConfig *this)
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
-	char *card = g_key_file_get_string(
+	g_autofree char *card = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP_REFRAME, "card", &error
 	);
 	if (error != NULL || card == NULL || card[0] == '\0')
 		return NULL;
 	char *card_path = g_strdup_printf("/dev/dri/%s", card);
-	g_free(card);
 	return card_path;
 }
 
