@@ -157,6 +157,10 @@ This program only works with connected monitors, however if you have no monitor 
 
 Then you can reboot your system, and come back to modify the configuration.
 
+## Automatic Wakeup
+
+Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content. This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event. If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
+
 # Comparison with Other Linux Remote Desktop
 
 - [kmsvnc](https://github.com/isjerryxiao/kmsvnc/)
