@@ -86,7 +86,6 @@ int main(int argc, char *argv[])
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	gboolean version = FALSE;
-	g_autofree char **args = g_strdupv(argv);
 	g_autoptr(GError) error = NULL;
 
 	GOptionEntry options[] = { { "version",
@@ -120,7 +119,7 @@ int main(int argc, char *argv[])
 	g_autoptr(GOptionContext)
 		context = g_option_context_new(" - ReFrame Server");
 	g_option_context_add_main_entries(context, options, NULL);
-	if (!g_option_context_parse_strv(context, &args, &error)) {
+	if (!g_option_context_parse(context, &argc, &argv, &error)) {
 		g_warning("Failed to parse options: %s.", error->message);
 		g_clear_pointer(&error, g_error_free);
 	}
