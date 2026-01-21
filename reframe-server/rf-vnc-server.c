@@ -15,6 +15,7 @@ enum {
 	SIG_RESIZE_EVENT,
 	SIG_KEYBOARD_EVENT,
 	SIG_POINTER_EVENT,
+	SIG_CLIPBOARD_TEXT,
 	N_SIGS
 };
 
@@ -41,6 +42,7 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 	klass->is_running = NULL;
 	klass->stop = NULL;
 	klass->set_desktop_name = NULL;
+	klass->send_clipboard_text = NULL;
 	klass->update = NULL;
 	klass->flush = NULL;
 
@@ -114,6 +116,18 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 		G_TYPE_BOOLEAN,
 		G_TYPE_BOOLEAN
 	);
+	sigs[SIG_CLIPBOARD_TEXT] = g_signal_new(
+		"clipboard-text",
+		RF_TYPE_VNC_SERVER,
+		0,
+		0,
+		NULL,
+		NULL,
+		NULL,
+		G_TYPE_NONE,
+		1,
+		G_TYPE_STRING
+	);
 }
 
 static void rf_vnc_server_init(RfVNCServer *this)
@@ -172,6 +186,17 @@ void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
 	klass->set_desktop_name(this, desktop_name);
 }
 
+void rf_vnc_server_send_clipboard_text(RfVNCServer *this, const char *text)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+	g_return_if_fail(text != NULL);
+
+	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+	g_return_if_fail(klass->send_clipboard_text != NULL);
+
+	klass->send_clipboard_text(this, text);
+}
+
 void rf_vnc_server_update(
 	RfVNCServer *this,
 	GByteArray *buf,
@@ -227,6 +252,24 @@ static void _iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 	}
 }
 
+void rf_vnc_server_handle_resize_event(
+	RfVNCServer *this,
+	unsigned int width,
+	unsigned int height
+)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+	g_return_if_fail(width > 0 && height > 0);
+
+	if (!rf_vnc_server_is_running(this))
+		return;
+
+	g_debug("VNC: Received resize event for width %d and height %d.",
+		width,
+		height);
+	g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
+}
+
 void rf_vnc_server_handle_keysym_event(
 	RfVNCServer *this,
 	uint32_t keysym,
@@ -234,6 +277,9 @@ void rf_vnc_server_handle_keysym_event(
 )
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	if (!rf_vnc_server_is_running(this))
+		return;
 
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
 	struct _iterate_data idata = {
@@ -264,6 +310,9 @@ void rf_vnc_server_handle_keycode_event(
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
+	if (!rf_vnc_server_is_running(this))
+		return;
+
 	g_debug("Input: Received key %s for keycode %u.",
 		down ? "down" : "up",
 		keycode);
@@ -283,6 +332,9 @@ void rf_vnc_server_handle_pointer_event(
 )
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	if (!rf_vnc_server_is_running(this))
+		return;
 
 	bool left = mask & 1;
 	bool middle = mask & (1 << 1);
@@ -327,19 +379,16 @@ void rf_vnc_server_handle_pointer_event(
 	);
 }
 
-void rf_vnc_server_handle_resize_event(
-	RfVNCServer *this,
-	unsigned int width,
-	unsigned int height
-)
+void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
-	g_return_if_fail(width > 0 && height > 0);
+	g_return_if_fail(text != NULL);
 
-	g_debug("VNC: Emitting resize signal for width %d and height %d.",
-		width,
-		height);
-	g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
+	if (!rf_vnc_server_is_running(this))
+		return;
+
+	g_debug("VNC: Received clipboard text %s.", text);
+	g_signal_emit(this, sigs[SIG_CLIPBOARD_TEXT], 0, text);
 }
 
 // Those signals must be delayed to next event by using `g_idle_add()`, because
@@ -350,7 +399,7 @@ void rf_vnc_server_handle_resize_event(
 static void _emit_first_client(gpointer data)
 {
 	RfVNCServer *this = data;
-	g_debug("VNC: Emitting first client signal.");
+	g_debug("Signal: Emitting VNC first client signal.");
 	g_signal_emit(this, sigs[SIG_FIRST_CLIENT], 0);
 }
 
@@ -358,19 +407,25 @@ void rf_vnc_server_handle_first_client(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
+	if (!rf_vnc_server_is_running(this))
+		return;
+
 	g_idle_add_once(_emit_first_client, this);
 }
 
 static void _emit_last_client(gpointer data)
 {
 	RfVNCServer *this = data;
-	g_debug("VNC: Emitting last client signal.");
+	g_debug("Signal: Emitting VNC last client signal.");
 	g_signal_emit(this, sigs[SIG_LAST_CLIENT], 0);
 }
 
 void rf_vnc_server_handle_last_client(RfVNCServer *this)
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	if (!rf_vnc_server_is_running(this))
+		return;
 
 	g_idle_add_once(_emit_last_client, this);
 }

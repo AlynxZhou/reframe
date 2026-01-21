@@ -2,6 +2,7 @@
 #define __CONFIG_H__
 
 #mesondefine PROJECT_VERSION
+#mesondefine USERNAME
 #mesondefine HAVE_LIBSYSTEMD
 #mesondefine HAVE_NEATVNC
 

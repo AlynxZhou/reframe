@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=ReFrame Session
+Comment=ReFrame Remote Desktop Session
+Exec=@bindir@/reframe-session --socket-dir=/run/reframe-session
+Terminal=false
+Type=Application
+NoDisplay=true
+# On desktops that won't start XDG autostart by themselves we rely on
+# `systemd-xdg-autostart-generator` to create systemd service for us.
+X-systemd-skip=false

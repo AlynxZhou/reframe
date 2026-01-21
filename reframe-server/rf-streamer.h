@@ -3,13 +3,14 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <gio/gio.h>
 
 #include "rf-config.h"
 
 G_BEGIN_DECLS
 
 #define RF_TYPE_STREAMER rf_streamer_get_type()
-G_DECLARE_FINAL_TYPE(RfStreamer, rf_streamer, RF, STREAMER, GObject)
+G_DECLARE_FINAL_TYPE(RfStreamer, rf_streamer, RF, STREAMER, GSocketClient)
 
 RfStreamer *rf_streamer_new(RfConfig *config);
 void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path);

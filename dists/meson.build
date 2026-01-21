@@ -38,6 +38,15 @@ if get_option('systemd') and systemd.found()
   )
 endif
 
+configure_file(
+  input: 'reframe-session.desktop.in',
+  output: 'reframe-session.desktop',
+  configuration: {
+    'bindir': bindir
+  },
+  install_dir: xdgautostartdir
+)
+
 install_data(
   'example.conf',
   install_dir: confdir

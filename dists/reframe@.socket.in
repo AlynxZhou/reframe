@@ -6,7 +6,9 @@ Accept=no
 Service=reframe-streamer@%i.service
 SocketUser=@username@
 SocketMode=0660
-ListenStream=%t/reframe-%i.sock
+# `DirectoryMode` could not be 0750 because it is owned by systemd as root.
+DirectoryMode=0755
+ListenStream=%t/reframe/%i.sock
 
 [Install]
 WantedBy=sockets.target

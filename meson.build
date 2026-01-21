@@ -28,6 +28,10 @@ if confdir == ''
   confdir = sysconfdir / 'reframe'
 endif
 username = get_option('username')
+xdgautostartdir = get_option('xdgautostartdir')
+if xdgautostartdir == ''
+  xdgautostartdir = sysconfdir / 'xdg' / 'autostart'
+endif
 
 systemunitdir = get_option('systemunitdir')
 sysusersdir = get_option('sysusersdir')
@@ -49,6 +53,7 @@ endif
 
 conf_data = configuration_data()
 conf_data.set_quoted('PROJECT_VERSION', meson.project_version())
+conf_data.set_quoted('USERNAME', get_option('username'))
 conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
 conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
 
@@ -61,6 +66,7 @@ configure_file(
 subdir('deps')
 subdir('dists')
 subdir('reframe-common')
+subdir('reframe-session')
 subdir('reframe-streamer')
 subdir('reframe-server')
 

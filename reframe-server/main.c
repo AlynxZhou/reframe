@@ -1,7 +1,11 @@
+#include <locale.h>
+#include <glib-unix.h>
+
 #include "config.h"
 #include "rf-common.h"
 #include "rf-buffer.h"
 #include "rf-streamer.h"
+#include "rf-session.h"
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
 #include "rf-lvnc-server.h"
@@ -13,6 +17,7 @@ struct _this {
 	GMainLoop *main_loop;
 	RfConfig *config;
 	RfStreamer *streamer;
+	RfSession *session;
 	RfConverter *converter;
 	RfVNCServer *vnc;
 	unsigned int width;
@@ -81,8 +86,11 @@ static void _on_last_client(RfVNCServer *v, gpointer data)
 
 int main(int argc, char *argv[])
 {
+	setlocale(LC_ALL, "");
+
 	g_autofree char *config_path = NULL;
 	g_autofree char *socket_path = NULL;
+	g_autofree char *session_socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	gboolean version = FALSE;
@@ -100,7 +108,14 @@ int main(int argc, char *argv[])
 				     G_OPTION_FLAG_NONE,
 				     G_OPTION_ARG_FILENAME,
 				     &socket_path,
-				     "Socket path to communicate.",
+				     "Streamer socket path to communicate.",
+				     "SOCKET" },
+				   { "session-socket",
+				     'S',
+				     G_OPTION_FLAG_NONE,
+				     G_OPTION_ARG_FILENAME,
+				     &session_socket_path,
+				     "Session socket path to communicate.",
 				     "SOCKET" },
 				   { "config",
 				     'c',
@@ -129,9 +144,15 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	// Use `g_strdup` here to make `g_autofree` happy.
 	if (socket_path == NULL)
-		socket_path = g_strdup("/tmp/reframe.sock");
+		socket_path = g_strdup("/tmp/reframe/reframe.sock");
+	// We ensure the default dir, user ensure the argument dir.
+	if (session_socket_path == NULL) {
+		g_mkdir("/tmp/reframe-session", 0750);
+		rf_set_group("/tmp/reframe-session");
+		session_socket_path =
+			g_strdup("/tmp/reframe-session/reframe-session.sock");
+	}
 
 	const char *XKB_DEFAULT_LAYOUT = getenv("XKB_DEFAULT_LAYOUT");
 	if (XKB_DEFAULT_LAYOUT == 0 || g_strcmp0(XKB_DEFAULT_LAYOUT, "") == 0) {
@@ -150,6 +171,10 @@ int main(int argc, char *argv[])
 	this->streamer = rf_streamer_new(this->config);
 	g_message("Using socket %s.", socket_path);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
+	this->session = rf_session_new();
+	g_message("Using session socket %s.", session_socket_path);
+	rf_session_set_socket_path(this->session, session_socket_path);
+	rf_session_start(this->session);
 	this->converter = rf_converter_new(this->config);
 #ifdef HAVE_NEATVNC
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
@@ -178,6 +203,12 @@ int main(int argc, char *argv[])
 		this->vnc
 	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
+	g_signal_connect_swapped(
+		this->session,
+		"clipboard-text",
+		G_CALLBACK(rf_vnc_server_send_clipboard_text),
+		this->vnc
+	);
 	g_signal_connect(
 		this->vnc, "first-client", G_CALLBACK(_on_first_client), this
 	);
@@ -199,16 +230,25 @@ int main(int argc, char *argv[])
 		G_CALLBACK(rf_streamer_send_pointer_event),
 		this->streamer
 	);
+	g_signal_connect_swapped(
+		this->vnc,
+		"clipboard-text",
+		G_CALLBACK(rf_session_send_clipboard_text_msg),
+		this->session
+	);
 	rf_vnc_server_start(this->vnc);
 
 	this->main_loop = g_main_loop_new(NULL, FALSE);
 	g_main_loop_run(this->main_loop);
+	g_main_loop_unref(this->main_loop);
 
 	rf_vnc_server_stop(this->vnc);
-	g_object_unref(this->vnc);
-	g_object_unref(this->converter);
-	g_object_unref(this->streamer);
-	g_object_unref(this->config);
+	rf_session_stop(this->session);
+	g_clear_object(&this->vnc);
+	g_clear_object(&this->converter);
+	g_clear_object(&this->session);
+	g_clear_object(&this->streamer);
+	g_clear_object(&this->config);
 
 	return 0;
 }

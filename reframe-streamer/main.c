@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <locale.h>
 #include <glib.h>
 #include <glib-unix.h>
 #include <gio/gio.h>
@@ -244,8 +245,8 @@ _send_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 	ret = g_socket_send_message(
 		socket, NULL, &iov, 1, &msg, 1, G_SOCKET_MSG_NONE, NULL, error
 	);
-	g_object_unref(fds);
-	g_object_unref(msg);
+	g_clear_object(&fds);
+	g_clear_object(&msg);
 	return ret;
 }
 
@@ -668,6 +669,8 @@ static void _clean_uinput(struct _this *this)
 
 int main(int argc, char *argv[])
 {
+	setlocale(LC_ALL, "");
+
 	g_autofree char *config_path = NULL;
 	g_autofree char *socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
@@ -720,13 +723,18 @@ int main(int argc, char *argv[])
 		g_warning("Failed to parse options: %s.", error->message);
 		g_clear_pointer(&error, g_error_free);
 	}
+
 	if (version) {
 		g_print(PROJECT_VERSION "\n");
 		return 0;
 	}
-	// Use `g_strdup()` here to make `g_autofree` happy.
-	if (socket_path == NULL)
-		socket_path = g_strdup("/tmp/reframe.sock");
+
+	// We ensure the default dir, user ensure the argument dir.
+	if (socket_path == NULL) {
+		g_mkdir("/tmp/reframe", 0750);
+		rf_set_group("/tmp/reframe");
+		socket_path = g_strdup("/tmp/reframe/reframe.sock");
+	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 	g_message("Using configuration file %s.", config_path);
@@ -762,6 +770,11 @@ int main(int argc, char *argv[])
 			NULL,
 			&error
 		);
+		const char *socket_path = g_unix_socket_address_get_path(
+			G_UNIX_SOCKET_ADDRESS(address)
+		);
+		rf_set_group(socket_path);
+		g_chmod(socket_path, 0660);
 #ifdef HAVE_LIBSYSTEMD
 	}
 #endif
@@ -829,7 +842,7 @@ int main(int argc, char *argv[])
 	} while (keep_listen);
 
 	g_socket_listener_close(listener);
-	g_object_unref(this->config);
+	g_clear_object(&this->config);
 
 	return 0;
 }

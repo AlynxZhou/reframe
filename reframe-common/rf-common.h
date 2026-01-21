@@ -26,6 +26,7 @@ G_BEGIN_DECLS
 #define RF_MSG_TYPE_INPUT 'I'
 #define RF_MSG_TYPE_CARD_PATH 'P'
 #define RF_MSG_TYPE_CONNECTOR_NAME 'N'
+#define RF_MSG_TYPE_CLIPBOARD_TEXT 'T'
 
 #define RF_KEYBOARD_MAX 256
 #define RF_POINTER_MAX INT16_MAX
@@ -39,6 +40,7 @@ ssize_t rf_send_header(
 	GError **error
 );
 const char *rf_plane_type(uint32_t type);
+void rf_set_group(const char *path);
 
 G_END_DECLS
 

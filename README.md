@@ -159,7 +159,23 @@ Then you can reboot your system, and come back to modify the configuration.
 
 ## Automatic Wakeup
 
-Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content. This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event. If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
+Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content.
+
+This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event.
+
+If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
+
+## Clipboard Text Sync
+
+You need to add your user to `reframe` group to use clipboard text sync.
+
+```
+# gpasswd -a USER reframe
+```
+
+If you set other username than `reframe` while building, the group name should be changed accordingly.
+
+This is implemented by putting a desktop file to XDG autostart dir to start `reframe-session` with your session and handle your clipboard. `reframe-session` talks with `reframe-server` via sockets in directory `/run/reframe-session`, if you are not using systemd, or you changed the directory via `reframe-server`'s argument, don't forget to modify the XDG autostart file to change argument for `reframe-session`
 
 # Comparison with Other Linux Remote Desktop
 

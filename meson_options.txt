@@ -13,6 +13,13 @@ option(
 )
 
 option(
+  'xdgautostartdir',
+  type: 'string',
+  value: '',
+  description: 'XDG autostart directory for the session daemon.'
+)
+
+option(
   'systemd',
   type: 'boolean',
   value: true,

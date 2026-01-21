@@ -12,9 +12,8 @@
 #define POINTER_MAX_EVENTS 10
 
 struct _RfStreamer {
-	GObject parent_instance;
+	GSocketClient parent_instance;
 	RfConfig *config;
-	GSocketClient *client;
 	GSocketAddress *address;
 	GSocketConnection *connection;
 	GIOCondition io_flags;
@@ -32,7 +31,7 @@ struct _RfStreamer {
 	uint32_t frame_height;
 	bool running;
 };
-G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_OBJECT)
+G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_SOCKET_CLIENT)
 
 enum {
 	SIG_START,
@@ -201,7 +200,7 @@ _on_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 
 out:
 	for (int i = 0; i < n_msgs; ++i)
-		g_object_unref(msgs[i]);
+		g_clear_object(&msgs[i]);
 
 	return ret;
 }
@@ -380,7 +379,6 @@ static void _dispose(GObject *o)
 
 	rf_streamer_stop(this);
 	g_clear_object(&this->address);
-	g_clear_object(&this->client);
 
 	G_OBJECT_CLASS(rf_streamer_parent_class)->dispose(o);
 }
@@ -439,7 +437,6 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 static void rf_streamer_init(RfStreamer *this)
 {
 	this->config = NULL;
-	this->client = NULL;
 	this->address = NULL;
 	this->connection = NULL;
 	this->io_flags = G_IO_IN | G_IO_PRI;
@@ -470,8 +467,6 @@ void rf_streamer_set_socket_path(RfStreamer *this, const char *socket_path)
 	g_return_if_fail(socket_path != NULL);
 
 	g_clear_object(&this->address);
-	g_clear_object(&this->client);
-	this->client = g_socket_client_new();
 	this->address = g_unix_socket_address_new(socket_path);
 }
 
@@ -507,7 +502,10 @@ int rf_streamer_start(RfStreamer *this)
 
 	g_autoptr(GError) error = NULL;
 	this->connection = g_socket_client_connect(
-		this->client, G_SOCKET_CONNECTABLE(this->address), NULL, &error
+		G_SOCKET_CLIENT(this),
+		G_SOCKET_CONNECTABLE(this->address),
+		NULL,
+		&error
 	);
 	if (this->connection == NULL) {
 		g_warning(
@@ -525,7 +523,7 @@ int rf_streamer_start(RfStreamer *this)
 	_schedule_frame_msg(this);
 
 	this->running = true;
-	g_debug("Emitting ReFrame Streamer start signal.");
+	g_debug("Signal: Emitting ReFrame Streamer start signal.");
 	g_signal_emit(this, sigs[SIG_START], 0);
 	return 0;
 }
@@ -544,27 +542,24 @@ void rf_streamer_stop(RfStreamer *this)
 	if (!this->running)
 		return;
 
-	g_debug("Emitting ReFrame Streamer stop signal.");
+	g_debug("Signal: Emitting ReFrame Streamer stop signal.");
 	g_signal_emit(this, sigs[SIG_STOP], 0);
 	this->running = false;
 
-	if (this->source != NULL) {
+	if (this->source != NULL)
 		g_source_destroy(this->source);
-		g_clear_pointer(&this->source, g_source_unref);
-	}
+	g_clear_pointer(&this->source, g_source_unref);
 	if (this->timer_id != 0) {
 		g_source_remove(this->timer_id);
 		this->timer_id = 0;
 	}
 	g_autoptr(GError) error = NULL;
 	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
-	if (error != NULL) {
+	if (error != NULL)
 		g_warning(
 			"Failed to close ReFrame Streamer connection: %s.",
 			error->message
 		);
-		return;
-	}
 	g_clear_object(&this->connection);
 }
 

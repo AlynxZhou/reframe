@@ -14,7 +14,7 @@ ProtectControlGroups=true
 ProtectKernelTunables=true
 DeviceAllow=char-drm r
 DeviceAllow=/dev/uinput rw
-ExecStart=@bindir@/reframe-streamer --config=@confdir@/%i.conf --socket=%t/reframe-%i.sock
+ExecStart=@bindir@/reframe-streamer --config=@confdir@/%i.conf --socket=%t/reframe/%i.sock
 Restart=on-failure
 
 [Install]

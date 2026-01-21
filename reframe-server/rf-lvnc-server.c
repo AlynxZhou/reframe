@@ -9,9 +9,9 @@ struct _RfLVNCServer {
 	RfConfig *config;
 	GSocketService *service;
 	GByteArray *buf;
-	GHashTable *connections;
 	GIOCondition io_flags;
 	rfbScreenInfo *screen;
+	unsigned int clients;
 	char *passwords[2];
 	char *desktop_name;
 	unsigned int width;
@@ -34,42 +34,14 @@ _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 	return G_SOURCE_CONTINUE;
 }
 
-static void _attach_source(RfLVNCServer *this, GSocketConnection *connection)
-{
-	g_debug("VNC: Attaching source for connection %p.", connection);
-	GSocket *socket = g_socket_connection_get_socket(connection);
-	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
-	g_source_attach(source, NULL);
-	g_hash_table_insert(this->connections, connection, source);
-}
-
-static void _detach_source(RfLVNCServer *this, GSocketConnection *connection)
-{
-	g_debug("VNC: Detaching source for connection %p.", connection);
-	g_autoptr(GError) error = NULL;
-	GSource *source = g_hash_table_lookup(this->connections, connection);
-	if (source != NULL) {
-		g_autoptr(GError) error = NULL;
-		g_source_destroy(source);
-		g_io_stream_close(G_IO_STREAM(connection), NULL, &error);
-		// We can do nothing here.
-		if (error != NULL)
-			g_warning(
-				"VNC: Failed to close client connection: %s.",
-				error->message
-			);
-		g_hash_table_remove(this->connections, connection);
-	}
-}
-
 static void _on_client_gone(rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
-	GSocketConnection *connection = client->clientData;
-	if (g_hash_table_size(this->connections) == 1)
+	GSource *source = client->clientData;
+	g_source_destroy(source);
+	g_source_unref(source);
+	if (this->clients-- == 1)
 		rf_vnc_server_handle_last_client(RF_VNC_SERVER(this));
-	_detach_source(this, connection);
 }
 
 static enum rfbNewClientAction _on_new_client(rfbClientRec *client)
@@ -110,6 +82,12 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	rf_vnc_server_handle_pointer_event(RF_VNC_SERVER(this), rx, ry, mask);
 }
 
+static void _on_clipboard_text(char *text, int length, rfbClientRec *client)
+{
+	RfLVNCServer *this = client->screen->screenData;
+	rf_vnc_server_handle_clipboard_text(RF_VNC_SERVER(this), text);
+}
+
 static gboolean _on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
@@ -140,9 +118,10 @@ static gboolean _on_incoming(
 		this->screen->screenData = this;
 		this->screen->newClientHook = _on_new_client;
 		this->screen->setDesktopSizeHook = _on_set_desktop_size;
-		// We are unable to support clipboard, because it is per-session.
 		this->screen->ptrAddEvent = _on_pointer_event;
 		this->screen->kbdAddEvent = _on_keysym_event;
+		this->screen->setXCutText = _on_clipboard_text;
+		this->screen->setXCutTextUTF8 = _on_clipboard_text;
 		if (this->passwords[0] != NULL &&
 		    this->passwords[0][0] != '\0') {
 			this->screen->authPasswdData = this->passwords;
@@ -151,16 +130,18 @@ static gboolean _on_incoming(
 		rfbInitServer(this->screen);
 	}
 	GSocket *socket = g_socket_connection_get_socket(connection);
-	int fd = g_socket_get_fd(socket);
-	g_debug("VNC: New connection socket fd %d.", fd);
-	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
-	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
-	client->clientData = g_object_ref(connection);
+	g_debug("VNC: Got new connection %p.", socket);
+	if (++this->clients == 1)
+		rf_vnc_server_handle_first_client(RF_VNC_SERVER(this));
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
-	_attach_source(this, connection);
-	if (g_hash_table_size(this->connections) == 1)
-		rf_vnc_server_handle_first_client(RF_VNC_SERVER(this));
+	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
+	g_source_attach(source, NULL);
+	int fd = g_socket_get_fd(socket);
+	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
+	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
+	client->clientData = source;
 	// Just in case client disconnects very soon.
 	if (client->sock == -1)
 		_on_client_gone(client);
@@ -182,7 +163,6 @@ static void _finalize(GObject *o)
 	RfLVNCServer *this = RF_LVNC_SERVER(o);
 
 	g_clear_pointer(&this->screen, rfbScreenCleanup);
-	g_clear_pointer(&this->connections, g_hash_table_unref);
 
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->finalize(o);
 }
@@ -271,6 +251,33 @@ static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// }
 }
 
+static void _send_clipboard_text(RfVNCServer *super, const char *text)
+{
+	RfLVNCServer *this = RF_LVNC_SERVER(super);
+
+	if (!this->running || this->screen == NULL ||
+	    !rfbIsActive(this->screen))
+		return;
+
+	g_autofree char *ustr = g_strdup(text);
+	g_autofree char *fstr = g_str_to_ascii(text, "C");
+	if (fstr == NULL) {
+		g_warning("Failed to convert UTF-8 to Latin 1.");
+		rfbSendServerCutTextUTF8(
+			this->screen, ustr, strlen(ustr) + 1, NULL, 0
+		);
+	} else {
+		rfbSendServerCutTextUTF8(
+			this->screen,
+			ustr,
+			strlen(ustr) + 1,
+			fstr,
+			strlen(fstr) + 1
+		);
+	}
+	rfbProcessEvents(this->screen, 0);
+}
+
 static void
 _update(RfVNCServer *super,
 	GByteArray *buf,
@@ -335,6 +342,7 @@ static void rf_lvnc_server_class_init(RfLVNCServerClass *klass)
 	v_class->is_running = _is_running;
 	v_class->stop = _stop;
 	v_class->set_desktop_name = _set_desktop_name;
+	v_class->send_clipboard_text = _send_clipboard_text;
 	v_class->update = _update;
 	v_class->flush = _flush;
 }
@@ -344,12 +352,6 @@ static void rf_lvnc_server_init(RfLVNCServer *this)
 	this->config = NULL;
 	this->service = NULL;
 	this->buf = NULL;
-	this->connections = g_hash_table_new_full(
-		g_direct_hash,
-		g_direct_equal,
-		g_object_unref,
-		(GDestroyNotify)g_source_unref
-	);
 	this->io_flags = G_IO_IN | G_IO_PRI;
 	this->screen = NULL;
 	this->passwords[0] = NULL;

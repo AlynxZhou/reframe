@@ -1,6 +1,8 @@
 #include <stdbool.h>
 #define AML_UNSTABLE_API 1
 #include <aml.h>
+// XXX: There are several bugs in neatvnc's encoding, JPEG compress will make it
+// crash on start, and tight encoding will make it crash with GNOME overview.
 #include <neatvnc.h>
 #include <pixman.h>
 #include <libdrm/drm_fourcc.h>
@@ -127,6 +129,30 @@ static void _on_pointer_event(
 	g_idle_add_once(_handle_pointer_event, e);
 }
 
+struct _clipboard_text {
+	RfVNCServer *vnc;
+	char *text;
+};
+
+static void _handle_clipboard_text(gpointer data)
+{
+	g_autofree struct _clipboard_text *e = data;
+	rf_vnc_server_handle_clipboard_text(e->vnc, e->text);
+	g_free(e->text);
+	g_object_unref(e->vnc);
+}
+
+static void
+_on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length)
+{
+	struct nvnc *nvnc = nvnc_client_get_server(client);
+	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	struct _clipboard_text *e = g_malloc0(sizeof(*e));
+	e->vnc = RF_VNC_SERVER(g_object_ref(this));
+	e->text = g_strdup(text);
+	g_idle_add_once(_handle_clipboard_text, e);
+}
+
 struct _resize_event {
 	RfVNCServer *vnc;
 	unsigned int width;
@@ -232,6 +258,7 @@ static void _start(RfVNCServer *super)
 	nvnc_set_key_fn(this->nvnc, _on_keysym_event);
 	nvnc_set_key_code_fn(this->nvnc, _on_keycode_event);
 	nvnc_set_pointer_fn(this->nvnc, _on_pointer_event);
+	nvnc_set_cut_text_fn(this->nvnc, _on_clipboard_text);
 	nvnc_set_desktop_layout_fn(this->nvnc, _on_resize_event);
 	nvnc_set_new_client_fn(this->nvnc, _on_new_client);
 	if (this->password != NULL && this->password[0] != '\0')
@@ -296,6 +323,16 @@ static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// client after it is inited. Clients will get the previous desktop name
 	// which may not be correct.
 	// nvnc_set_name(this->nvnc, this->desktop_name);
+}
+
+static void _send_clipboard_text(RfVNCServer *super, const char *text)
+{
+	RfNVNCServer *this = RF_NVNC_SERVER(super);
+
+	if (!this->running)
+		return;
+
+	nvnc_send_cut_text(this->nvnc, text, strlen(text) + 1);
 }
 
 static void
@@ -364,6 +401,7 @@ static void rf_nvnc_server_class_init(RfNVNCServerClass *klass)
 	v_class->is_running = _is_running;
 	v_class->stop = _stop;
 	v_class->set_desktop_name = _set_desktop_name;
+	v_class->send_clipboard_text = _send_clipboard_text;
 	v_class->update = _update;
 	v_class->flush = _flush;
 }

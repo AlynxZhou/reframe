@@ -18,6 +18,7 @@ struct _RfVNCServerClass {
 	bool (*is_running)(RfVNCServer *this);
 	void (*stop)(RfVNCServer *this);
 	void (*set_desktop_name)(RfVNCServer *this, const char *desktop_name);
+	void (*send_clipboard_text)(RfVNCServer *this, const char *text);
 	void (*update)(
 		RfVNCServer *this,
 		GByteArray *buf,
@@ -32,6 +33,7 @@ void rf_vnc_server_start(RfVNCServer *this);
 bool rf_vnc_server_is_running(RfVNCServer *this);
 void rf_vnc_server_stop(RfVNCServer *this);
 void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name);
+void rf_vnc_server_send_clipboard_text(RfVNCServer *this, const char *text);
 void rf_vnc_server_update(
 	RfVNCServer *this,
 	GByteArray *buf,
@@ -39,6 +41,11 @@ void rf_vnc_server_update(
 	unsigned int height
 );
 void rf_vnc_server_flush(RfVNCServer *this);
+void rf_vnc_server_handle_resize_event(
+	RfVNCServer *this,
+	unsigned int width,
+	unsigned int height
+);
 void rf_vnc_server_handle_keysym_event(
 	RfVNCServer *this,
 	uint32_t keysym,
@@ -55,11 +62,7 @@ void rf_vnc_server_handle_pointer_event(
 	double ry,
 	uint32_t mask
 );
-void rf_vnc_server_handle_resize_event(
-	RfVNCServer *this,
-	unsigned int width,
-	unsigned int height
-);
+void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text);
 void rf_vnc_server_handle_first_client(RfVNCServer *this);
 void rf_vnc_server_handle_last_client(RfVNCServer *this);
 
