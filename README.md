@@ -6,6 +6,8 @@ DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/log
 
 # Features
 
+If you are interested in contribution, you may read [HACKING.md](./HACKING.md) first which should be helpful.
+
 ## What ReFrame Currently Supports
 
 - **VNC**
