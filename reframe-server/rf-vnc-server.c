@@ -396,7 +396,7 @@ void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text)
 // events, it is not OK to release resources while still processing events so we
 // have to delay them until events are done.
 
-static void _emit_first_client(gpointer data)
+static void _emit_first_client(void *data)
 {
 	RfVNCServer *this = data;
 	g_debug("Signal: Emitting VNC first client signal.");
@@ -413,7 +413,7 @@ void rf_vnc_server_handle_first_client(RfVNCServer *this)
 	g_idle_add_once(_emit_first_client, this);
 }
 
-static void _emit_last_client(gpointer data)
+static void _emit_last_client(void *data)
 {
 	RfVNCServer *this = data;
 	g_debug("Signal: Emitting VNC last client signal.");

@@ -25,8 +25,7 @@ struct _this {
 	unsigned int rotation;
 };
 
-static void
-_on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
+static void _on_resize_event(RfVNCServer *v, int width, int height, void *data)
 {
 	struct _this *this = data;
 
@@ -35,7 +34,7 @@ _on_resize_event(RfVNCServer *v, int width, int height, gpointer data)
 }
 
 static void
-_on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
+_on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, void *data)
 {
 	struct _this *this = data;
 
@@ -64,7 +63,7 @@ _on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, gpointer data)
 		rf_vnc_server_update(this->vnc, buf, this->width, this->height);
 }
 
-static void _on_first_client(RfVNCServer *v, gpointer data)
+static void _on_first_client(RfVNCServer *v, void *data)
 {
 	struct _this *this = data;
 
@@ -76,7 +75,7 @@ static void _on_first_client(RfVNCServer *v, gpointer data)
 		rf_vnc_server_flush(this->vnc);
 }
 
-static void _on_last_client(RfVNCServer *v, gpointer data)
+static void _on_last_client(RfVNCServer *v, void *data)
 {
 	struct _this *this = data;
 

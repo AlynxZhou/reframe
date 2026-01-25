@@ -53,7 +53,7 @@ struct _keysym_event {
 	bool down;
 };
 
-static void _handle_keysym_event(gpointer data)
+static void _handle_keysym_event(void *data)
 {
 	g_autofree struct _keysym_event *e = data;
 	rf_vnc_server_handle_keysym_event(e->vnc, e->keysym, e->down);
@@ -78,7 +78,7 @@ struct _keycode_event {
 	bool down;
 };
 
-static void _handle_keycode_event(gpointer data)
+static void _handle_keycode_event(void *data)
 {
 	g_autofree struct _keycode_event *e = data;
 	rf_vnc_server_handle_keycode_event(e->vnc, e->keycode, e->down);
@@ -104,7 +104,7 @@ struct _pointer_event {
 	uint32_t mask;
 };
 
-static void _handle_pointer_event(gpointer data)
+static void _handle_pointer_event(void *data)
 {
 	g_autofree struct _pointer_event *e = data;
 	rf_vnc_server_handle_pointer_event(e->vnc, e->rx, e->ry, e->mask);
@@ -134,7 +134,7 @@ struct _clipboard_text {
 	char *text;
 };
 
-static void _handle_clipboard_text(gpointer data)
+static void _handle_clipboard_text(void *data)
 {
 	g_autofree struct _clipboard_text *e = data;
 	rf_vnc_server_handle_clipboard_text(e->vnc, e->text);
@@ -159,7 +159,7 @@ struct _resize_event {
 	unsigned int height;
 };
 
-static void _handle_resize_event(gpointer data)
+static void _handle_resize_event(void *data)
 {
 	g_autofree struct _resize_event *e = data;
 	rf_vnc_server_handle_resize_event(e->vnc, e->width, e->height);

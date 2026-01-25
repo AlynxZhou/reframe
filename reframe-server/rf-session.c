@@ -49,8 +49,7 @@ out:
 	return ret;
 }
 
-static int
-_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
+static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfSession *this = data;
 

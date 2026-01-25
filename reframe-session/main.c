@@ -54,7 +54,7 @@ _send_clipboard_text_msg(struct _this *this, const char *clipboard_text)
 }
 
 static void
-_on_read_text_finish(GObject *source_object, GAsyncResult *res, gpointer data)
+_on_read_text_finish(GObject *source_object, GAsyncResult *res, void *data)
 {
 	struct _this *this = data;
 	GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
@@ -70,7 +70,7 @@ _on_read_text_finish(GObject *source_object, GAsyncResult *res, gpointer data)
 	_send_clipboard_text_msg(this, text);
 }
 
-static void _on_clipboard_changed(GdkClipboard *clipboard, gpointer data)
+static void _on_clipboard_changed(GdkClipboard *clipboard, void *data)
 {
 	struct _this *this = data;
 
@@ -113,8 +113,7 @@ out:
 	return ret;
 }
 
-static int
-_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
+static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	struct _this *this = data;
 
@@ -187,7 +186,7 @@ static void _on_changed(
 	GFile *file,
 	GFile *other_file,
 	GFileMonitorEvent event_type,
-	gpointer data
+	void *data
 )
 {
 	struct _this *this = data;

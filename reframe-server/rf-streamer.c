@@ -78,7 +78,7 @@ out:
 	}
 }
 
-static int _send_frame_msg(gpointer data)
+static int _send_frame_msg(void *data)
 {
 	RfStreamer *this = data;
 	ssize_t ret = 0;
@@ -326,8 +326,7 @@ out:
 	return ret;
 }
 
-static int
-_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
+static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfStreamer *this = data;
 

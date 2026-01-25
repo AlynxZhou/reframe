@@ -74,6 +74,16 @@ Connection to `reframe-session` is handled in `reframe-server/rf-session.c`.
 
 There is a `.clang-format`, so you could run `clang-format -i *.c *.h` in each source directories, it is suggested but not a must, because if you forget it, I'll do it.
 
+While this project uses GLib, I prefer not to use [GLib basic types](https://docs.gtk.org/glib/types.html#gboolean), because most of them are just aliases of C types, and I prefer newer C standard so just use C types. For example, use `size_t`, `unsigned char` and `void *` instead of `gsize`, `guchar` and `gpointer`.
+
+`gboolean` might be hard to deal with, because it is not `bool` from `stdbool.h`. Replacing `gboolean` with `bool` directly leads into type mismatch and memory leak. However, we could always use `int` instead of `gboolean` for the type and use `true` and `false` instead of `TRUE` and `FALSE` for the value. For other conditions that not interacting with GLib, always prefer `bool` from `stdbool.h`.
+
+When passing types as arguments, for example defining a signal, it is OK to use GLib types like `G_TYPE_INT`, we have no choice.
+
+However, always prefer GLib variant of functions, because they add more checks to handle corner-cases than the standard version so we get more benefits. For example, use `g_malloc0`, `g_free` and `g_strcmp0` instead of `malloc`, `free` and `strcmp`.
+
+Use `g_autofree`, `g_autoptr` and `g_auto` whenever is possible, because they reduce the burden of manually memory management.
+
 # TODOs
 
 The idea of clipboard text sync is inspired by qemu's `spice-vdagent` which also uses XDG autostart and GTK to implement it, `reframe-session` sets `GDK_BACKEND=x11` because Wayland does not allow normal clients to read/write clipboard without focus, it is not so good, but usable is the most important. We could add Wayland `data-control` implementation and (maybe) mutter implementation to make it better.

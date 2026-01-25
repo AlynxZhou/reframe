@@ -20,8 +20,7 @@ struct _RfLVNCServer {
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
 
-static int
-_on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
+static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfLVNCServer *this = data;
 
@@ -92,7 +91,7 @@ static int _on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
 	GObject *source_object,
-	gpointer data
+	void *data
 )
 {
 	RfLVNCServer *this = data;
