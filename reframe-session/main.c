@@ -113,7 +113,7 @@ out:
 	return ret;
 }
 
-static gboolean
+static int
 _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	struct _this *this = data;
@@ -218,7 +218,9 @@ int main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 
 	g_autofree char *socket_dir = NULL;
-	gboolean version = FALSE;
+	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
+	// to `GOptionContext` leads into overflow!
+	int version = FALSE;
 	g_autoptr(GError) error = NULL;
 	GOptionEntry options[] = { { "version",
 				     'v',
@@ -270,7 +272,7 @@ int main(int argc, char *argv[])
 	// That's disappointing, we may add Wayland data-control implementation
 	// and mutter specific implementation in future. But currently living
 	// with X11 or Xwayland is enough.
-	g_setenv("GDK_BACKEND", "x11", TRUE);
+	g_setenv("GDK_BACKEND", "x11", true);
 	gtk_init();
 
 	this->display = gdk_display_get_default();
@@ -311,7 +313,7 @@ int main(int argc, char *argv[])
 		g_warning("Failed to monitor socket dir: %s", error->message);
 	g_signal_connect(monitor, "changed", G_CALLBACK(_on_changed), this);
 
-	this->main_loop = g_main_loop_new(NULL, FALSE);
+	this->main_loop = g_main_loop_new(NULL, false);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 

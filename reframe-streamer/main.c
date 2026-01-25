@@ -675,8 +675,8 @@ int main(int argc, char *argv[])
 	g_autofree char *socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
-	gboolean keep_listen = FALSE;
-	gboolean version = FALSE;
+	int keep_listen = false;
+	int version = false;
 	g_autoptr(GError) error = NULL;
 
 	GOptionEntry options[] = {

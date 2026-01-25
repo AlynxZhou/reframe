@@ -20,7 +20,7 @@ struct _RfLVNCServer {
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
 
-static gboolean
+static int
 _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfLVNCServer *this = data;
@@ -88,7 +88,7 @@ static void _on_clipboard_text(char *text, int length, rfbClientRec *client)
 	rf_vnc_server_handle_clipboard_text(RF_VNC_SERVER(this), text);
 }
 
-static gboolean _on_incoming(
+static int _on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
 	GObject *source_object,
@@ -146,7 +146,7 @@ static gboolean _on_incoming(
 	if (client->sock == -1)
 		_on_client_gone(client);
 
-	return FALSE;
+	return false;
 }
 
 static void _dispose(GObject *o)

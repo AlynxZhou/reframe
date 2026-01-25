@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
 	g_autofree char *session_socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
-	gboolean version = FALSE;
+	int version = false;
 	g_autoptr(GError) error = NULL;
 
 	GOptionEntry options[] = { { "version",
@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 		g_message(
 			"XKB_DEFAULT_LAYOUT is empty, using US layout by default."
 		);
-		g_setenv("XKB_DEFAULT_LAYOUT", "us", TRUE);
+		g_setenv("XKB_DEFAULT_LAYOUT", "us", true);
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
@@ -238,7 +238,7 @@ int main(int argc, char *argv[])
 	);
 	rf_vnc_server_start(this->vnc);
 
-	this->main_loop = g_main_loop_new(NULL, FALSE);
+	this->main_loop = g_main_loop_new(NULL, false);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 

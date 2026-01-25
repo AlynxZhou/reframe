@@ -78,7 +78,7 @@ out:
 	}
 }
 
-static gboolean _send_frame_msg(gpointer data)
+static int _send_frame_msg(gpointer data)
 {
 	RfStreamer *this = data;
 	ssize_t ret = 0;
@@ -326,7 +326,7 @@ out:
 	return ret;
 }
 
-static gboolean
+static int
 _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfStreamer *this = data;

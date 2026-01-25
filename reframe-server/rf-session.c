@@ -49,7 +49,7 @@ out:
 	return ret;
 }
 
-static gboolean
+static int
 _on_socket_in(GSocket *socket, GIOCondition condition, gpointer data)
 {
 	RfSession *this = data;
@@ -92,7 +92,7 @@ out:
 	return G_SOURCE_CONTINUE;
 }
 
-static gboolean _incoming(
+static int _incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
 	GObject *source_object

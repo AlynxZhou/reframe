@@ -175,12 +175,12 @@ bool rf_config_get_cursor(RfConfig *this)
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
 	g_autoptr(GError) error = NULL;
-	gboolean cursor = g_key_file_get_boolean(
+	int cursor = g_key_file_get_boolean(
 		this->f, RF_CONFIG_GROUP_REFRAME, "cursor", &error
 	);
 	if (error != NULL)
 		return true;
-	return cursor ? true : false;
+	return cursor;
 }
 
 bool rf_config_get_wakeup(RfConfig *this)
@@ -188,12 +188,12 @@ bool rf_config_get_wakeup(RfConfig *this)
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
 	g_autoptr(GError) error = NULL;
-	gboolean wakeup = g_key_file_get_boolean(
+	int wakeup = g_key_file_get_boolean(
 		this->f, RF_CONFIG_GROUP_REFRAME, "wakeup", &error
 	);
 	if (error != NULL)
 		return true;
-	return wakeup ? true : false;
+	return wakeup;
 }
 
 unsigned int rf_config_get_fps(RfConfig *this)
