@@ -154,12 +154,12 @@ int main(int argc, char *argv[])
 			g_strdup("/tmp/reframe-session/reframe-session.sock");
 	}
 
-	const char *XKB_DEFAULT_LAYOUT = getenv("XKB_DEFAULT_LAYOUT");
-	if (XKB_DEFAULT_LAYOUT == 0 || g_strcmp0(XKB_DEFAULT_LAYOUT, "") == 0) {
+	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
+	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {
 		g_message(
 			"XKB_DEFAULT_LAYOUT is empty, using US layout by default."
 		);
-		setenv("XKB_DEFAULT_LAYOUT", "us", 1);
+		g_setenv("XKB_DEFAULT_LAYOUT", "us", TRUE);
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
