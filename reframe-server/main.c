@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 		socket_path = g_strdup("/tmp/reframe/reframe.sock");
 	// We ensure the default dir, user ensure the argument dir.
 	if (session_socket_path == NULL) {
-		g_mkdir("/tmp/reframe-session", 0750);
+		g_mkdir("/tmp/reframe-session", 0755);
 		rf_set_group("/tmp/reframe-session");
 		session_socket_path =
 			g_strdup("/tmp/reframe-session/reframe-session.sock");
