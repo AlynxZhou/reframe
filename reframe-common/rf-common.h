@@ -2,6 +2,7 @@
 #define __RF_COMMON_H__
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <gio/gio.h>
 
 G_BEGIN_DECLS
@@ -27,11 +28,17 @@ G_BEGIN_DECLS
 #define RF_MSG_TYPE_CARD_PATH 'P'
 #define RF_MSG_TYPE_CONNECTOR_NAME 'N'
 #define RF_MSG_TYPE_CLIPBOARD_TEXT 'T'
+#define RF_MSG_TYPE_AUTH 'A'
 
 #define RF_KEYBOARD_MAX 256
 #define RF_POINTER_MAX INT16_MAX
 
 #define RF_KEY_CODE_XKB_TO_EV(key_code) ((key_code) - 8)
+
+struct rf_auth {
+	pid_t pid;
+	bool ok;
+};
 
 ssize_t rf_send_header(
 	GSocketConnection *connection,
@@ -41,6 +48,7 @@ ssize_t rf_send_header(
 );
 const char *rf_plane_type(uint32_t type);
 void rf_set_group(const char *path);
+pid_t rf_get_socket_pid(GSocket *socket);
 
 G_END_DECLS
 

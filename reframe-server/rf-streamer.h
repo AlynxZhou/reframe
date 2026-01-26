@@ -36,6 +36,7 @@ void rf_streamer_send_pointer_event(
 	bool wleft,
 	bool wright
 );
+void rf_streamer_auth(RfStreamer *this, pid_t pid);
 
 G_END_DECLS
 

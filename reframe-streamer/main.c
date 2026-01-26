@@ -67,7 +67,86 @@ struct _this {
 	uint32_t cursor_id;
 	int ufd;
 	bool wakeup;
+	bool skip_auth;
 };
+
+static int _auth_pid(struct _this *this, pid_t pid, const char *target)
+{
+	if (this->skip_auth)
+		return 0;
+
+	g_autoptr(GError) error = NULL;
+	g_autofree char *proc_exe = g_strdup_printf("/proc/%d/exe", pid);
+	g_autofree char *bin = g_file_read_link(proc_exe, &error);
+	if (bin == NULL) {
+		g_warning(
+			"Auth: Failed to read link of %s: %s.",
+			proc_exe,
+			error->message
+		);
+		return -1;
+	}
+	g_debug("Auth: Authenticating process executable binary %s.", bin);
+	if (g_strcmp0(bin, target) != 0)
+		return -2;
+	return 0;
+}
+
+static ssize_t _send_auth_msg(struct _this *this, pid_t pid, bool ok)
+{
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_AUTH, 1, &error);
+	if (ret <= 0)
+		goto out;
+	struct rf_auth auth;
+	auth.pid = pid;
+	auth.ok = ok;
+	ret = g_output_stream_write(os, &auth, sizeof(auth), NULL, &error);
+
+out:
+	if (ret < 0)
+		g_warning(
+			"Auth: Failed to send auth message: %s.", error->message
+		);
+	else if (ret > 0)
+		g_debug("Auth: Sent auth message for PID %d with result %s.",
+			auth.pid,
+			auth.ok ? "OK" : "not OK");
+	return ret;
+}
+
+static ssize_t _on_auth_msg(struct _this *this)
+{
+	ssize_t ret = 0;
+	size_t length = 0;
+	g_autoptr(GError) error = NULL;
+	GInputStream *is =
+		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
+
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
+	if (ret <= 0 || length != 1)
+		goto out;
+	pid_t pid = -1;
+	ret = g_input_stream_read(is, &pid, sizeof(pid), NULL, &error);
+	if (ret <= 0 || pid < 0)
+		goto out;
+
+	g_debug("Auth: Received auth message for PID %d.", pid);
+	bool ok = _auth_pid(this, pid, BINDIR "/reframe-session") == 0;
+	return _send_auth_msg(this, pid, ok);
+
+out:
+	if (ret < 0)
+		g_warning(
+			"Auth: Failed to receive auth message: %s.",
+			error->message
+		);
+	return ret;
+}
 
 // You need to explicitly cast the type of returned value.
 static uint64_t _get_plane_prop(
@@ -82,7 +161,7 @@ static uint64_t _get_plane_prop(
 		cfd, plane_id, DRM_MODE_OBJECT_PLANE
 	);
 	if (props == NULL)
-		return -1;
+		return value;
 	for (size_t i = 0; i < props->count_props; ++i) {
 		drmModePropertyRes *prop =
 			drmModeGetProperty(cfd, props->props[i]);
@@ -278,8 +357,8 @@ static ssize_t _on_frame_msg(struct _this *this)
 	g_debug("Frame: Received frame message.");
 
 	RfBuffer bufs[RF_MAX_BUFS];
-	size_t length = 0;
 	ssize_t ret = 0;
+	size_t length = 0;
 	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
@@ -337,8 +416,8 @@ static ssize_t _on_input_msg(struct _this *this)
 	g_debug("Input: Received input message.");
 
 	g_autofree struct input_event *ies = NULL;
-	size_t length = 0;
 	ssize_t ret = 0;
+	size_t length = 0;
 	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
@@ -368,8 +447,8 @@ out:
 
 static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
 {
-	size_t length = strlen(card_path) + 1;
 	ssize_t ret = 0;
+	size_t length = strlen(card_path) + 1;
 	g_autoptr(GError) error = NULL;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
@@ -390,8 +469,8 @@ out:
 static ssize_t
 _send_connector_name_msg(struct _this *this, const char *connector_name)
 {
-	size_t length = strlen(connector_name) + 1;
 	ssize_t ret = 0;
+	size_t length = strlen(connector_name) + 1;
 	g_autoptr(GError) error = NULL;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
@@ -676,6 +755,7 @@ int main(int argc, char *argv[])
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	int keep_listen = false;
+	int skip_auth = false;
 	int version = false;
 	g_autoptr(GError) error = NULL;
 
@@ -707,6 +787,13 @@ int main(int argc, char *argv[])
 		  G_OPTION_ARG_NONE,
 		  &keep_listen,
 		  "Keep listening to socket after disconnection (debug purpose).",
+		  NULL },
+		{ "skip-auth",
+		  'A',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_NONE,
+		  &skip_auth,
+		  "Skip socket client authenticating by always OK (debug purpose).",
 		  NULL },
 		{ NULL,
 		  0,
@@ -741,6 +828,7 @@ int main(int argc, char *argv[])
 	this->config = rf_config_new(config_path);
 	this->cfd = -1;
 	this->ufd = -1;
+	this->skip_auth = skip_auth;
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
 	g_message("Using socket %s.", socket_path);
@@ -757,10 +845,10 @@ int main(int argc, char *argv[])
 		g_socket_listener_add_socket(listener, socket, NULL, &error);
 	} else {
 #endif
-		g_remove(socket_path);
 		// Non-systemd socket.
 		g_autoptr(GSocketAddress)
 			address = g_unix_socket_address_new(socket_path);
+		g_remove(socket_path);
 		g_socket_listener_add_address(
 			listener,
 			address,
@@ -769,9 +857,6 @@ int main(int argc, char *argv[])
 			NULL,
 			NULL,
 			&error
-		);
-		const char *socket_path = g_unix_socket_address_get_path(
-			G_UNIX_SOCKET_ADDRESS(address)
 		);
 		rf_set_group(socket_path);
 		g_chmod(socket_path, 0660);
@@ -785,12 +870,24 @@ int main(int argc, char *argv[])
 		"Keep listening mode is %s.",
 		keep_listen ? "enabled" : "disabled"
 	);
+	g_message(
+		"Skip authenticating mode is %s.",
+		skip_auth ? "enabled" : "disabled"
+	);
 	do {
 		this->connection =
 			g_socket_listener_accept(listener, NULL, NULL, &error);
 		if (this->connection == NULL)
 			g_error("Failed to accept connection: %s.",
 				error->message);
+
+		GSocket *socket =
+			g_socket_connection_get_socket(this->connection);
+		pid_t pid = rf_get_socket_pid(socket);
+		if (_auth_pid(this, pid, BINDIR "/reframe-server") != 0) {
+			g_warning("Got disallowed socket client PID %d.", pid);
+			goto close;
+		}
 
 		g_message("ReFrame Server connected.");
 
@@ -822,6 +919,9 @@ int main(int argc, char *argv[])
 			case RF_MSG_TYPE_INPUT:
 				ret = _on_input_msg(this);
 				break;
+			case RF_MSG_TYPE_AUTH:
+				ret = _on_auth_msg(this);
+				break;
 			default:
 				break;
 			}
@@ -834,10 +934,9 @@ int main(int argc, char *argv[])
 		_clean_drm(this);
 		_clean_uinput(this);
 
-		g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
-		if (error != NULL)
-			g_error("Failed to close socket connection: %s.",
-				error->message);
+	close:
+		// Dropping the last reference of it will automatically close IO
+		// streams and socket.
 		g_clear_object(&this->connection);
 	} while (keep_listen);
 

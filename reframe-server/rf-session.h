@@ -7,7 +7,7 @@
 G_BEGIN_DECLS
 
 #define RF_TYPE_SESSION rf_session_get_type()
-G_DECLARE_FINAL_TYPE(RfSession, rf_session, RF, SESSION, GSocketService)
+G_DECLARE_FINAL_TYPE(RfSession, rf_session, RF, SESSION, GObject)
 
 RfSession *rf_session_new(void);
 void rf_session_set_socket_path(RfSession *this, const char *socket_path);
@@ -18,6 +18,7 @@ void rf_session_send_clipboard_text_msg(
 	RfSession *this,
 	const char *clipboard_text
 );
+void rf_session_auth(RfSession *this, pid_t pid, bool ok);
 
 G_END_DECLS
 

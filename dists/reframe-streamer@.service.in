@@ -7,7 +7,10 @@ Requires=reframe@%i.socket
 Type=exec
 # We have to run this as root to get permissions on `/dev/dri/card*` and
 # `/dev/uinput`, then we drop all unused permissions.
-CapabilityBoundingSet=CAP_SYS_ADMIN
+#
+# `CAP_SYS_ADMIN` is used for DRM, `CAP_SYS_PTRACE` is used for
+# `/proc/<pid>/exe`.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE
 ProtectHome=true
 ProtectSystem=strict
 ProtectControlGroups=true

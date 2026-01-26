@@ -70,6 +70,14 @@ We have no way to pair user sessions with VNC connections, so `reframe-session` 
 
 Connection to `reframe-session` is handled in `reframe-server/rf-session.c`.
 
+# Authentication
+
+Because `reframe-session` is running with user session, if we only check whether a process's GID is `reframe`, we cannot prevent other processes under the same user session.
+
+We limit socket client via their executable binary, the kernel allows us to get socket peer PID, and if you have `CAP_SYS_PTRACE`, you could read `/proc/<pid>/exe`, it is a link to the process executable binary.
+
+For `reframe-streamer`, it is easy because it could have `CAP_SYS_PRTACE`, so it will check whether its client is `reframe-server`. For `reframe-server`, it is hard because it does not have the permission. We have to pass client PID to `reframe-streamer`, and let `reframe-streamer` authenticate it by checking whether it is `reframe-session`, then pass result back. This is async IPC, so we will first put the connection into a pending list, and after getting result, we will decide whether drop the connection, or move it into connection list.
+
 # Coding
 
 There is a `.clang-format`, so you could run `clang-format -i *.c *.h` in each source directories, it is suggested but not a must, because if you forget it, I'll do it.

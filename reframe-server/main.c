@@ -173,7 +173,6 @@ int main(int argc, char *argv[])
 	this->session = rf_session_new();
 	g_message("Using session socket %s.", session_socket_path);
 	rf_session_set_socket_path(this->session, session_socket_path);
-	rf_session_start(this->session);
 	this->converter = rf_converter_new(this->config);
 #ifdef HAVE_NEATVNC
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
@@ -235,6 +234,30 @@ int main(int argc, char *argv[])
 		G_CALLBACK(rf_session_send_clipboard_text_msg),
 		this->session
 	);
+	g_signal_connect_swapped(
+		this->streamer,
+		"start",
+		G_CALLBACK(rf_session_start),
+		this->session
+	);
+	g_signal_connect_swapped(
+		this->streamer,
+		"stop",
+		G_CALLBACK(rf_session_stop),
+		this->session
+	);
+	g_signal_connect_swapped(
+		this->session,
+		"auth",
+		G_CALLBACK(rf_streamer_auth),
+		this->streamer
+	);
+	g_signal_connect_swapped(
+		this->streamer,
+		"auth",
+		G_CALLBACK(rf_session_auth),
+		this->session
+	);
 	rf_vnc_server_start(this->vnc);
 
 	this->main_loop = g_main_loop_new(NULL, false);
@@ -242,7 +265,6 @@ int main(int argc, char *argv[])
 	g_main_loop_unref(this->main_loop);
 
 	rf_vnc_server_stop(this->vnc);
-	rf_session_stop(this->session);
 	g_clear_object(&this->vnc);
 	g_clear_object(&this->converter);
 	g_clear_object(&this->session);

@@ -39,10 +39,35 @@ enum {
 	SIG_FRAME,
 	SIG_CARD_PATH,
 	SIG_CONNECTOR_NAME,
+	SIG_AUTH,
 	N_SIGS
 };
 
 static unsigned int sigs[N_SIGS] = { 0 };
+
+static void _send_auth_msg(RfStreamer *this, pid_t pid)
+{
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_AUTH, 1, &error);
+	if (ret <= 0)
+		goto out;
+	ret = g_output_stream_write(os, &pid, sizeof(pid), NULL, &error);
+
+out:
+	if (ret < 0) {
+		g_warning("Auth: Failed to send auth PID: %s.", error->message);
+		rf_streamer_stop(this);
+	} else if (ret == 0) {
+		g_warning("ReFrame Streamer disconnected.");
+		rf_streamer_stop(this);
+	} else {
+		g_debug("Auth: Sent auth message for PID %d.", pid);
+	}
+}
 
 static void
 _send_input_msg(RfStreamer *this, struct input_event *ies, const size_t length)
@@ -210,8 +235,8 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	g_debug("Frame: Received frame message.");
 
 	RfBuffer bufs[RF_MAX_BUFS];
-	size_t length = 0;
 	ssize_t ret = 0;
+	size_t length = 0;
 	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
@@ -268,8 +293,8 @@ out:
 static ssize_t _on_card_path_msg(RfStreamer *this)
 {
 	g_autofree char *msg = NULL;
-	size_t length = 0;
 	ssize_t ret = 0;
+	size_t length = 0;
 	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
@@ -326,6 +351,37 @@ out:
 	return ret;
 }
 
+static ssize_t _on_auth_msg(RfStreamer *this)
+{
+	struct rf_auth auth;
+	size_t length = 0;
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	GInputStream *is =
+		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
+
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
+	if (ret <= 0 || length != 1)
+		goto out;
+
+	ret = g_input_stream_read(is, &auth, sizeof(auth), NULL, &error);
+	if (ret <= 0 || auth.pid < 0)
+		goto out;
+
+	g_debug("Auth: Received auth message for PID %d with result %s.",
+		auth.pid,
+		auth.ok ? "OK" : "not OK");
+	g_signal_emit(this, sigs[SIG_AUTH], 0, auth.pid, auth.ok);
+
+out:
+	if (ret < 0)
+		g_warning(
+			"Auth: Failed to receive auth message: %s.",
+			error->message
+		);
+	return ret;
+}
+
 static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfStreamer *this = data;
@@ -357,6 +413,9 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 		break;
 	case RF_MSG_TYPE_CONNECTOR_NAME:
 		ret = _on_connector_name_msg(this);
+		break;
+	case RF_MSG_TYPE_AUTH:
+		ret = _on_auth_msg(this);
 		break;
 	default:
 		break;
@@ -430,6 +489,19 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 		G_TYPE_NONE,
 		1,
 		G_TYPE_STRING
+	);
+	sigs[SIG_AUTH] = g_signal_new(
+		"auth",
+		RF_TYPE_STREAMER,
+		0,
+		0,
+		NULL,
+		NULL,
+		NULL,
+		G_TYPE_NONE,
+		2,
+		G_TYPE_INT,
+		G_TYPE_BOOLEAN
 	);
 }
 
@@ -552,13 +624,8 @@ void rf_streamer_stop(RfStreamer *this)
 		g_source_remove(this->timer_id);
 		this->timer_id = 0;
 	}
-	g_autoptr(GError) error = NULL;
-	g_io_stream_close(G_IO_STREAM(this->connection), NULL, &error);
-	if (error != NULL)
-		g_warning(
-			"Failed to close ReFrame Streamer connection: %s.",
-			error->message
-		);
+	// Dropping the last reference of it will automatically close IO
+	// streams and socket.
 	g_clear_object(&this->connection);
 }
 
@@ -614,6 +681,9 @@ void rf_streamer_send_pointer_event(
 	const uint32_t desktop_height =
 		this->desktop_height > 0 ? this->desktop_height :
 					   this->monitor_y + this->frame_height;
+	// This may happen if we are still not getting the first frame.
+	if (desktop_width == 0 || desktop_height == 0)
+		return;
 	// Typically desktop environment will map uinput `EV_ABS` max size to
 	// the whole virtual desktop, so we need to convert the position to
 	// global position in the virtual desktop.
@@ -684,4 +754,12 @@ void rf_streamer_send_pointer_event(
 	++length;
 
 	_send_input_msg(this, ies, length);
+}
+
+void rf_streamer_auth(RfStreamer *this, pid_t pid)
+{
+	g_return_if_fail(RF_IS_STREAMER(this));
+	g_return_if_fail(pid >= 0);
+
+	_send_auth_msg(this, pid);
 }

@@ -42,3 +42,23 @@ void rf_set_group(const char *path)
 	if (grp != NULL)
 		chown(path, -1, grp->gr_gid);
 }
+
+pid_t rf_get_socket_pid(GSocket *socket)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GCredentials) cred = g_socket_get_credentials(socket, &error);
+	if (cred == NULL) {
+		g_warning(
+			"Failed to get credentials of socket client: %s.",
+			error->message
+		);
+		return -1;
+	}
+	pid_t pid = g_credentials_get_unix_pid(cred, &error);
+	if (pid < 0)
+		g_warning(
+			"Failed to get PID of socket client: %s.",
+			error->message
+		);
+	return pid;
+}

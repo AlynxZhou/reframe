@@ -6,15 +6,18 @@
 #include "rf-session.h"
 
 struct _RfSession {
-	GSocketService parent_instance;
+	GObject parent_instance;
+	// Don't inherit GSocketService because it cannot be reopen after closed.
+	GSocketService *service;
 	GSocketAddress *address;
+	GHashTable *pids;
 	GHashTable *sockets;
 	GIOCondition io_flags;
 	bool running;
 };
-G_DEFINE_TYPE(RfSession, rf_session, G_TYPE_SOCKET_SERVICE)
+G_DEFINE_TYPE(RfSession, rf_session, G_TYPE_OBJECT)
 
-enum { SIG_START, SIG_STOP, SIG_CLIPBOARD_TEXT, N_SIGS };
+enum { SIG_START, SIG_STOP, SIG_CLIPBOARD_TEXT, SIG_AUTH, N_SIGS };
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
@@ -91,23 +94,28 @@ out:
 	return G_SOURCE_CONTINUE;
 }
 
-static int _incoming(
+static int _on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
-	GObject *source_object
+	GObject *source_object,
+	void *data
 )
 {
-	RfSession *this = RF_SESSION(service);
+	RfSession *this = data;
 
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	g_debug("Socket: Got new ReFrame Session %p.", socket);
-	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
-	g_source_attach(source, NULL);
-	g_hash_table_insert(this->sockets, g_object_ref(socket), source);
+	pid_t pid = rf_get_socket_pid(socket);
+	if (pid < 0) {
+		g_clear_object(&connection);
+		return false;
+	}
+	g_hash_table_insert(
+		this->pids, GINT_TO_POINTER(pid), g_object_ref(socket)
+	);
+	g_signal_emit(this, sigs[SIG_AUTH], 0, pid);
 
-	return G_SOCKET_SERVICE_CLASS(rf_session_parent_class)
-		->incoming(service, connection, source_object);
+	return true;
 }
 
 static void _dispose(GObject *o)
@@ -125,6 +133,7 @@ static void _finalize(GObject *o)
 	RfSession *this = RF_SESSION(o);
 
 	g_clear_pointer(&this->sockets, g_hash_table_unref);
+	g_clear_pointer(&this->pids, g_hash_table_unref);
 
 	G_OBJECT_CLASS(rf_session_parent_class)->finalize(o);
 }
@@ -132,9 +141,6 @@ static void _finalize(GObject *o)
 static void rf_session_class_init(RfSessionClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
-	GSocketServiceClass *s_class = G_SOCKET_SERVICE_CLASS(klass);
-
-	s_class->incoming = _incoming;
 
 	o_class->dispose = _dispose;
 	o_class->finalize = _finalize;
@@ -158,11 +164,25 @@ static void rf_session_class_init(RfSessionClass *klass)
 		1,
 		G_TYPE_STRING
 	);
+	sigs[SIG_AUTH] = g_signal_new(
+		"auth",
+		RF_TYPE_SESSION,
+		0,
+		0,
+		NULL,
+		NULL,
+		NULL,
+		G_TYPE_NONE,
+		1,
+		G_TYPE_INT
+	);
 }
 
 static void rf_session_init(RfSession *this)
 {
 	this->address = NULL;
+	this->service = NULL;
+	this->pids = g_hash_table_new(g_direct_hash, g_direct_equal);
 	this->sockets = g_hash_table_new_full(
 		g_direct_hash,
 		g_direct_equal,
@@ -185,7 +205,6 @@ void rf_session_set_socket_path(RfSession *this, const char *socket_path)
 	g_return_if_fail(socket_path != NULL);
 
 	g_clear_object(&this->address);
-	g_remove(socket_path);
 	this->address = g_unix_socket_address_new(socket_path);
 }
 
@@ -197,17 +216,19 @@ int rf_session_start(RfSession *this)
 		return 0;
 
 	g_autoptr(GError) error = NULL;
+	const char *socket_path = g_unix_socket_address_get_path(
+		G_UNIX_SOCKET_ADDRESS(this->address)
+	);
+	this->service = g_socket_service_new();
+	g_remove(socket_path);
 	g_socket_listener_add_address(
-		G_SOCKET_LISTENER(this),
+		G_SOCKET_LISTENER(this->service),
 		this->address,
 		G_SOCKET_TYPE_STREAM,
 		G_SOCKET_PROTOCOL_DEFAULT,
 		NULL,
 		NULL,
 		&error
-	);
-	const char *socket_path = g_unix_socket_address_get_path(
-		G_UNIX_SOCKET_ADDRESS(this->address)
 	);
 	rf_set_group(socket_path);
 	g_chmod(socket_path, 0660);
@@ -217,6 +238,9 @@ int rf_session_start(RfSession *this)
 		);
 		return -2;
 	}
+	g_signal_connect(
+		this->service, "incoming", G_CALLBACK(_on_incoming), this
+	);
 
 	this->running = true;
 	g_debug("Signal: Emitting ReFrame Session start signal.");
@@ -248,7 +272,16 @@ void rf_session_stop(RfSession *this)
 	while (g_hash_table_iter_next(&it, NULL, &value))
 		g_source_destroy(value);
 	g_hash_table_remove_all(this->sockets);
-	g_socket_listener_close(G_SOCKET_LISTENER(this));
+	g_hash_table_iter_init(&it, this->pids);
+	while (g_hash_table_iter_next(&it, NULL, &value))
+		g_clear_object(&value);
+	g_hash_table_remove_all(this->pids);
+	// This must be called before close the listener.
+	//
+	// See <https://docs.gtk.org/gio/method.SocketService.stop.html#description>.
+	g_socket_service_stop(this->service);
+	g_socket_listener_close(G_SOCKET_LISTENER(this->service));
+	g_clear_object(&this->service);
 }
 
 void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
@@ -289,5 +322,28 @@ void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
 			g_source_destroy(value);
 			g_hash_table_iter_remove(&it);
 		}
+	}
+}
+
+void rf_session_auth(RfSession *this, pid_t pid, bool ok)
+{
+	g_return_if_fail(RF_IS_SESSION(this));
+	g_return_if_fail(pid >= 0);
+
+	GSocket *socket = g_hash_table_lookup(this->pids, GINT_TO_POINTER(pid));
+	if (socket == NULL)
+		return;
+
+	g_hash_table_remove(this->pids, GINT_TO_POINTER(pid));
+	if (ok) {
+		GSource *source =
+			g_socket_create_source(socket, this->io_flags, NULL);
+		g_source_set_callback(
+			source, G_SOURCE_FUNC(_on_socket_in), this, NULL
+		);
+		g_source_attach(source, NULL);
+		g_hash_table_insert(this->sockets, socket, source);
+	} else {
+		g_clear_object(&socket);
 	}
 }

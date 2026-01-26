@@ -27,7 +27,7 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	if (!(condition & this->io_flags))
 		return G_SOURCE_CONTINUE;
 
-	if (rfbIsActive(this->screen))
+	if (rfbIsActive(this->screen) && this->buf != NULL)
 		rfbProcessEvents(this->screen, 0);
 
 	return G_SOURCE_CONTINUE;
@@ -142,10 +142,12 @@ static int _on_incoming(
 	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = source;
 	// Just in case client disconnects very soon.
-	if (client->sock == -1)
+	if (client->sock == -1) {
 		_on_client_gone(client);
+		return false;
+	}
 
-	return false;
+	return true;
 }
 
 static void _dispose(GObject *o)
@@ -227,6 +229,11 @@ static void _stop(RfVNCServer *super)
 	this->running = false;
 
 	rf_vnc_server_flush(super);
+	this->clients = 0;
+	// This must be called before close the listener.
+	//
+	// See <https://docs.gtk.org/gio/method.SocketService.stop.html#description>.
+	g_socket_service_stop(this->service);
 	g_socket_listener_close(G_SOCKET_LISTENER(this->service));
 	g_clear_object(&this->service);
 	g_clear_pointer(&this->buf, g_byte_array_unref);
