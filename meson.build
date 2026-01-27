@@ -35,6 +35,7 @@ endif
 
 systemunitdir = get_option('systemunitdir')
 sysusersdir = get_option('sysusersdir')
+tmpfilesdir = get_option('tmpfilesdir')
 if get_option('systemd') and systemd.found()
   if systemunitdir == ''
     systemunitdir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
@@ -48,6 +49,13 @@ if get_option('systemd') and systemd.found()
   endif
   if sysusersdir == ''
     error('Couldn\'t determine systemd sysusers directory.')
+  endif
+
+  if tmpfilesdir == ''
+    tmpfilesdir = systemd.get_variable(pkgconfig: 'tmpfilesdir')
+  endif
+  if tmpfilesdir == ''
+    error('Couldn\'t determine systemd tmpfiles directory.')
   endif
 endif
 
@@ -81,6 +89,7 @@ if systemd.found()
   summary({
     'systemunitdir': systemunitdir,
     'sysusersdir': sysusersdir,
+    'tmpfilesdir': tmpfilesdir,
     'username': username
   }, section: 'Confiuration')
 endif

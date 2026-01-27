@@ -1,0 +1,3 @@
+# Set owner and permission for configurations to reframe.
+# Type Path Mode User Group Age Argument
+z @confdir@ 0750 @username@ @username@

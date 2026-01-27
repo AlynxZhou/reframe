@@ -41,6 +41,13 @@ option(
 )
 
 option(
+  'tmpfilesdir',
+  type: 'string',
+  value: '',
+  description: 'systemd tmpfiles dir.'
+)
+
+option(
   'neatvnc',
   type: 'boolean',
   value: false,

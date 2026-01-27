@@ -1,1 +1,3 @@
+# Create user and group for reframe.
+# Type Name ID GECOS Home Shell
 u @username@ - "ReFrame Remote Desktop" / -
