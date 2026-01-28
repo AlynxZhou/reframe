@@ -12,7 +12,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 
 - **VNC**
 - **Wayland**/X11/**TTY**
-- Intel/AMD/**NVIDIA**/[Enter more GPUs that can run a general Wayland compositor…]
+- Intel/AMD/**NVIDIA**/[Even **Raspberry Pi**!](https://reframe.alynx.one/#rpi)/[Enter more GPUs that can run a general Wayland compositor…]
 - Pointer/Keyboard
 - **Remote Login**
 - Headless Setup
