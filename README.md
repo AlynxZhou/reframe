@@ -193,6 +193,8 @@ This is implemented by putting a desktop file to XDG autostart dir to start `ref
 	+ ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decides to write my own solution).
 - [wayvnc](https://github.com/any1/wayvnc/)
 	+ ReFrame supports non-wlroots desktop environments.
+- [w0vncserver](https://tigervnc.org/)
+	+ ReFrame supports Remote Login, [w0vncserver uses per-session XDG desktop portal](https://github.com/TigerVNC/tigervnc/pull/1947), which means it cannot support Remote Login.
 - [x0vncserver](https://tigervnc.org/)
 	+ ReFrame supports Wayland.
 
