@@ -1,3 +1,5 @@
-# Set owner and permission for configurations to reframe.
+# Set owner and permission for configuration directory.
+#
+# `reframe-streamer` runs as `root` and `reframe-server` runs as `reframe`.
 # Type Path Mode User Group Age Argument
-z @confdir@ 0750 @username@ @username@
+z @confdir@ 0750 root @username@
