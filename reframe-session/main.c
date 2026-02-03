@@ -1,5 +1,6 @@
 #include <locale.h>
 #include <glib.h>
+#include <glib-unix.h>
 #include <gio/gio.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -212,6 +213,13 @@ static void _on_changed(
 	}
 }
 
+static int _on_sigint(void *data)
+{
+	struct _this *this = data;
+	g_main_loop_quit(this->main_loop);
+	return G_SOURCE_REMOVE;
+}
+
 int main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
@@ -313,6 +321,7 @@ int main(int argc, char *argv[])
 	g_signal_connect(monitor, "changed", G_CALLBACK(_on_changed), this);
 
 	this->main_loop = g_main_loop_new(NULL, false);
+	g_unix_signal_add(SIGINT, _on_sigint, this);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 

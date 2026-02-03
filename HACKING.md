@@ -92,6 +92,10 @@ However, always prefer GLib variant of functions, because they add more checks t
 
 Use `g_autofree`, `g_autoptr` and `g_auto` whenever is possible, because they reduce the burden of manually memory management.
 
+# Profiling
+
+You could build it with `gprof` support by adding `-Dc_args='-pg' -Dc_link_args='-pg'` options to Meson.
+
 # TODOs
 
 The idea of clipboard text sync is inspired by qemu's `spice-vdagent` which also uses XDG autostart and GTK to implement it, `reframe-session` sets `GDK_BACKEND=x11` because Wayland does not allow normal clients to read/write clipboard without focus, it is not so good, but usable is the most important. We could add Wayland `data-control` implementation and (maybe) mutter implementation to make it better.

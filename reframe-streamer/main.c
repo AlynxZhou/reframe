@@ -746,6 +746,12 @@ static void _clean_uinput(struct _this *this)
 	}
 }
 
+static void _on_sigint(int sig)
+{
+	// Non-zero hints that we didn't clean up.
+	exit(2);
+}
+
 int main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
@@ -874,6 +880,7 @@ int main(int argc, char *argv[])
 		"Skip authenticating mode is %s.",
 		skip_auth ? "enabled" : "disabled"
 	);
+	signal(SIGINT, _on_sigint);
 	do {
 		this->connection =
 			g_socket_listener_accept(listener, NULL, NULL, &error);

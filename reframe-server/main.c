@@ -83,6 +83,13 @@ static void _on_last_client(RfVNCServer *v, void *data)
 	rf_converter_stop(this->converter);
 }
 
+static int _on_sigint(void *data)
+{
+	struct _this *this = data;
+	g_main_loop_quit(this->main_loop);
+	return G_SOURCE_REMOVE;
+}
+
 int main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
@@ -261,6 +268,7 @@ int main(int argc, char *argv[])
 	rf_vnc_server_start(this->vnc);
 
 	this->main_loop = g_main_loop_new(NULL, false);
+	g_unix_signal_add(SIGINT, _on_sigint, this);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 
