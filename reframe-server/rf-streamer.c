@@ -5,7 +5,6 @@
 #include <linux/uinput.h>
 
 #include "rf-common.h"
-#include "rf-buffer.h"
 #include "rf-streamer.h"
 
 #define KEYBOARD_MAX_EVENTS 2
@@ -155,7 +154,7 @@ static void _schedule_frame_msg(RfStreamer *this)
 }
 
 static ssize_t
-_on_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
+_on_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
 {
 	ssize_t ret = 0;
 	GSocket *socket = g_socket_connection_get_socket(connection);
@@ -204,7 +203,7 @@ _on_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 	// See <https://docs.gtk.org/gio-unix/type_func.FDMessage.get_fd_list.html>.
 	GUnixFDMessage *msg = G_UNIX_FD_MESSAGE(msgs[n_msgs - 1]);
 	GUnixFDList *fds = g_unix_fd_message_get_fd_list(msg);
-	for (int i = 0; i < b->md.length; ++i) {
+	for (unsigned int i = 0; i < b->md.length; ++i) {
 		b->fds[i] = g_unix_fd_list_get(fds, i, NULL);
 		// Some error happens.
 		if (b->fds[i] == -1) {
@@ -234,7 +233,7 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 {
 	g_debug("Frame: Received frame message.");
 
-	RfBuffer bufs[RF_MAX_BUFS];
+	struct rf_buffer bufs[RF_MAX_BUFS];
 	ssize_t ret = 0;
 	size_t length = 0;
 	g_autoptr(GError) error = NULL;
@@ -261,7 +260,7 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 			goto out;
 	}
 
-	RfBuffer *primary = &bufs[0];
+	struct rf_buffer *primary = &bufs[0];
 	// Monitor size should be CRTC size, and primary plane is used to store
 	// CRTC's framebuffer, so primary plane size should be CRTC size.
 	uint32_t frame_width = primary->md.crtc_w;
@@ -280,7 +279,7 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 
 out:
 	for (size_t i = 0; i < length; ++i)
-		for (int j = 0; j < bufs[i].md.length; ++j)
+		for (unsigned int j = 0; j < bufs[i].md.length; ++j)
 			close(bufs[i].fds[j]);
 
 	if (ret < 0)

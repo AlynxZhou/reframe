@@ -50,7 +50,7 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 		return EGL_NO_DISPLAY;
 	}
 
-	for (size_t i = 0; i < num_devices; ++i) {
+	for (int i = 0; i < num_devices; ++i) {
 		const char *f = eglQueryDeviceStringEXT(
 			devices[i], EGL_DRM_DEVICE_FILE_EXT
 		);
@@ -605,7 +605,7 @@ static void _gen_texture(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
+static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
 {
 	EGLAttrib fd_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					  EGL_DMA_BUF_PLANE1_FD_EXT,
@@ -635,7 +635,7 @@ static EGLImage _make_image(EGLDisplay *display, const RfBuffer *b)
 	_append_attrib(image_attribs, EGL_WIDTH, b->md.width);
 	_append_attrib(image_attribs, EGL_HEIGHT, b->md.height);
 	_append_attrib(image_attribs, EGL_LINUX_DRM_FOURCC_EXT, b->md.fourcc);
-	for (int i = 0; i < b->md.length; ++i) {
+	for (unsigned int i = 0; i < b->md.length; ++i) {
 		_append_attrib(image_attribs, fd_keys[i], b->fds[i]);
 		_append_attrib(image_attribs, offset_keys[i], b->md.offsets[i]);
 		_append_attrib(image_attribs, pitch_keys[i], b->md.pitches[i]);
@@ -770,7 +770,7 @@ static void _draw_rect(
 
 static void _draw_buffer(
 	RfConverter *this,
-	const RfBuffer *b,
+	const struct rf_buffer *b,
 	int32_t z,
 	uint32_t frame_width,
 	uint32_t frame_height
@@ -813,7 +813,7 @@ static void _draw_end(RfConverter *this)
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	size_t length,
-	const RfBuffer *bufs,
+	const struct rf_buffer *bufs,
 	unsigned int width,
 	unsigned int height
 )
@@ -853,7 +853,7 @@ GByteArray *rf_converter_convert(
 		);
 	}
 
-	const RfBuffer *primary = &bufs[0];
+	const struct rf_buffer *primary = &bufs[0];
 	// Monitor size should be CRTC size, and primary plane is used to store
 	// CRTC's framebuffer, so primary plane size should be CRTC size.
 	uint32_t frame_width = primary->md.crtc_w;

@@ -1,12 +1,10 @@
 sources = files(
   'rf-common.c',
-  'rf-buffer.c',
   'rf-config.c'
 )
 
 headers = files(
   'rf-common.h',
-  'rf-buffer.h',
   'rf-config.h'
 )
 

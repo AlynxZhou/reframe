@@ -4,7 +4,7 @@
 #include <glib.h>
 
 #include "rf-config.h"
-#include "rf-buffer.h"
+#include "rf-common.h"
 
 G_BEGIN_DECLS
 
@@ -19,7 +19,7 @@ void rf_converter_stop(RfConverter *this);
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	size_t length,
-	const RfBuffer *b,
+	const struct rf_buffer *b,
 	unsigned int width,
 	unsigned int height
 );

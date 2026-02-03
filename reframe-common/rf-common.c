@@ -5,6 +5,46 @@
 #include "config.h"
 #include "rf-common.h"
 
+void rf_buffer_debug(struct rf_buffer *b)
+{
+	g_debug("Frame: Got buffer metadata: length %u, type %s, "
+		"crtc_x %d, crtc_y %d, crtc_w %u, crtc_h %u, "
+		"src_x %u, src_y %u, src_w %u, src_h %u, "
+		"width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
+		b->md.length,
+		rf_plane_type(b->md.type),
+		b->md.crtc_x,
+		b->md.crtc_y,
+		b->md.crtc_w,
+		b->md.crtc_h,
+		b->md.src_x,
+		b->md.src_y,
+		b->md.src_w,
+		b->md.src_h,
+		b->md.width,
+		b->md.height,
+		(b->md.fourcc >> 0) & 0xff,
+		(b->md.fourcc >> 8) & 0xff,
+		(b->md.fourcc >> 16) & 0xff,
+		(b->md.fourcc >> 24) & 0xff,
+		b->md.modifier);
+	g_debug("Frame: Got buffer fds: %d %d %d %d.",
+		b->fds[0],
+		b->fds[1],
+		b->fds[2],
+		b->fds[3]);
+	g_debug("Frame: Got buffer offsets: %u %u %u %u.",
+		b->md.offsets[0],
+		b->md.offsets[1],
+		b->md.offsets[2],
+		b->md.offsets[3]);
+	g_debug("Frame: Got buffer pitches: %u %u %u %u.",
+		b->md.pitches[0],
+		b->md.pitches[1],
+		b->md.pitches[2],
+		b->md.pitches[3]);
+}
+
 ssize_t rf_send_header(
 	GSocketConnection *connection,
 	char type,

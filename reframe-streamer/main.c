@@ -13,7 +13,6 @@
 #include "config.h"
 #include "rf-common.h"
 #include "rf-config.h"
-#include "rf-buffer.h"
 
 #ifdef HAVE_LIBSYSTEMD
 #	include <systemd/sd-daemon.h>
@@ -43,7 +42,7 @@
 
 #define _write_may(fd, buf, count)                                                                              \
 	G_STMT_START {                                                                                          \
-		ssize_t e = write((fd), (buf), (count));                                                        \
+		size_t e = write((fd), (buf), (count));                                                        \
 		if (e != (count))                                                                               \
 			g_warning(                                                                              \
 				"Input: Failed to write %ld bytes to %d at line %d, actually wrote %ld bytes.", \
@@ -210,7 +209,7 @@ static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 	return plane_id;
 }
 
-static int _export_fb2(int cfd, RfBuffer *b, uint32_t fb_id)
+static int _export_fb2(int cfd, struct rf_buffer *b, uint32_t fb_id)
 {
 	drmModeFB2 *fb = drmModeGetFB2(cfd, fb_id);
 	if (fb == NULL)
@@ -230,7 +229,7 @@ static int _export_fb2(int cfd, RfBuffer *b, uint32_t fb_id)
 	b->md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
 				 fb->modifier :
 				 DRM_FORMAT_MOD_INVALID;
-	for (int i = 0; i < b->md.length; ++i) {
+	for (unsigned int i = 0; i < b->md.length; ++i) {
 		b->md.offsets[i] = fb->offsets[i];
 		b->md.pitches[i] = fb->pitches[i];
 	}
@@ -238,7 +237,7 @@ static int _export_fb2(int cfd, RfBuffer *b, uint32_t fb_id)
 	return b->md.length;
 }
 
-static int _export_fb(int cfd, RfBuffer *b, uint32_t fb_id)
+static int _export_fb(int cfd, struct rf_buffer *b, uint32_t fb_id)
 {
 	drmModeFB *fb = drmModeGetFB(cfd, fb_id);
 	if (fb == NULL)
@@ -260,7 +259,8 @@ static int _export_fb(int cfd, RfBuffer *b, uint32_t fb_id)
 	return b->md.length;
 }
 
-static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
+static int
+_make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 {
 	drmModePlane *plane = drmModeGetPlane(cfd, plane_id);
 	if (plane == NULL)
@@ -308,7 +308,7 @@ static int _make_buffer(int cfd, RfBuffer *b, uint32_t plane_id, uint32_t type)
 }
 
 static ssize_t
-_send_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
+_send_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
 {
 	ssize_t ret = 0;
 	GOutputVector iov = { &b->md, sizeof(b->md) };
@@ -316,7 +316,7 @@ _send_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 	// This won't take the ownership so we need to close fds.
 	//
 	// See <https://docs.gtk.org/gio/method.UnixFDList.append.html>.
-	for (int i = 0; i < b->md.length; ++i)
+	for (unsigned int i = 0; i < b->md.length; ++i)
 		g_unix_fd_list_append(fds, b->fds[i], NULL);
 	// This won't take the ownership so we need to free GUnixFDList.
 	GSocketControlMessage *msg = g_unix_fd_message_new_with_fd_list(fds);
@@ -330,7 +330,7 @@ _send_buffer(GSocketConnection *connection, RfBuffer *b, GError **error)
 }
 
 static ssize_t
-_send_frame_msg(struct _this *this, size_t length, RfBuffer *bufs)
+_send_frame_msg(struct _this *this, size_t length, struct rf_buffer *bufs)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
@@ -356,7 +356,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 {
 	g_debug("Frame: Received frame message.");
 
-	RfBuffer bufs[RF_MAX_BUFS];
+	struct rf_buffer bufs[RF_MAX_BUFS];
 	ssize_t ret = 0;
 	size_t length = 0;
 	g_autoptr(GError) error = NULL;
@@ -406,7 +406,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 	ret = _send_frame_msg(this, length, bufs);
 
 	for (size_t i = 0; i < length; ++i)
-		for (int j = 0; j < bufs[i].md.length; ++j)
+		for (unsigned int j = 0; j < bufs[i].md.length; ++j)
 			close(bufs[i].fds[j]);
 	return ret;
 }

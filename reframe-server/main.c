@@ -3,7 +3,6 @@
 
 #include "config.h"
 #include "rf-common.h"
-#include "rf-buffer.h"
 #include "rf-streamer.h"
 #include "rf-session.h"
 #include "rf-converter.h"
@@ -34,11 +33,11 @@ static void _on_resize_event(RfVNCServer *v, int width, int height, void *data)
 }
 
 static void
-_on_frame(RfStreamer *s, size_t length, const RfBuffer *bufs, void *data)
+_on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 {
 	struct _this *this = data;
 
-	const RfBuffer *primary = &bufs[0];
+	const struct rf_buffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
 		if (this->rotation % 180 == 0) {
 			this->width = primary->md.crtc_w;
