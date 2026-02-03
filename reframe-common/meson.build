@@ -26,7 +26,6 @@ if get_option('buildtype') == 'debug'
   reframe_common = static_library(
     meson.project_name() + '-common',
     sources: sources,
-    c_args: c_args,
     include_directories: include_directories,
     dependencies: dependencies,
     # Do not install static libray, we already linked against it.
@@ -36,7 +35,6 @@ else
   reframe_common = shared_library(
     meson.project_name() + '-common',
     sources: sources,
-    c_args: c_args,
     include_directories: include_directories,
     dependencies: dependencies,
     install: true

@@ -21,7 +21,6 @@ include_directories += include_directories('..')
 executable(
   meson.project_name() + '-streamer',
   sources: sources,
-  c_args: c_args,
   dependencies: dependencies,
   include_directories: include_directories,
   install: true

@@ -3,14 +3,14 @@ project(
   'c',
   version: '1.9.0',
   license: 'Apache-2.0',
+  default_options: ['c_std=gnu11']
 )
 
-c_args = []
 if get_option('debug') == true
   warning_level = 3
-  c_args += ['-D__DEBUG__']
+  add_project_arguments('-D__DEBUG__', language: ['c'])
 endif
-c_args += ['-std=gnu11', '-DG_LOG_DOMAIN="ReFrame"']
+add_project_arguments('-DG_LOG_DOMAIN="ReFrame"', language: ['c'])
 
 if get_option('systemd')
   systemd = dependency('systemd', required: false)
@@ -22,6 +22,7 @@ endif
 
 prefix = get_option('prefix')
 bindir = prefix / get_option('bindir')
+libdir = prefix / get_option('libdir')
 sysconfdir = get_option('sysconfdir')
 confdir = get_option('confdir')
 if confdir == ''
@@ -83,6 +84,7 @@ summary({
   'buildtype': get_option('buildtype'),
   'prefix': prefix,
   'bindir': bindir,
+  'libdir': libdir,
   'confdir': confdir,
 }, section: 'Confiuration')
 if systemd.found()
