@@ -234,7 +234,7 @@ static void _start(RfVNCServer *super)
 		);
 	}
 
-	unsigned int port = rf_config_get_vnc_port(this->config);
+	const unsigned int port = rf_config_get_vnc_port(this->config);
 	g_message("VNC: Listening on port %u.", port);
 
 	this->clients = 0;
@@ -269,10 +269,10 @@ static void _start(RfVNCServer *super)
 	memset(nvnc_fb_get_addr(fb),
 	       0,
 	       this->width * this->height * RF_BYTES_PER_PIXEL);
-	struct pixman_region16 damage;
-	pixman_region_init_rect(&damage, 0, 0, this->width, this->height);
-	nvnc_display_feed_buffer(this->display, fb, &damage);
-	pixman_region_fini(&damage);
+	struct pixman_region16 region;
+	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
+	nvnc_display_feed_buffer(this->display, fb, &region);
+	pixman_region_fini(&region);
 	nvnc_fb_pool_release(this->pool, fb);
 
 	// Well no one really likes your event loop, please do not re-invent the
@@ -339,7 +339,8 @@ static void
 _update(RfVNCServer *super,
 	GByteArray *buf,
 	unsigned int width,
-	unsigned int height)
+	unsigned int height,
+	const struct rf_rect *damage)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -368,10 +369,17 @@ _update(RfVNCServer *super,
 	memcpy(nvnc_fb_get_addr(fb),
 	       this->buf->data,
 	       this->width * this->height * RF_BYTES_PER_PIXEL);
-	struct pixman_region16 damage;
-	pixman_region_init_rect(&damage, 0, 0, this->width, this->height);
-	nvnc_display_feed_buffer(this->display, fb, &damage);
-	pixman_region_fini(&damage);
+	struct pixman_region16 region;
+	if (damage != NULL)
+		pixman_region_init_rect(
+			&region, damage->x, damage->y, damage->w, damage->h
+		);
+	else
+		pixman_region_init_rect(
+			&region, 0, 0, this->width, this->height
+		);
+	nvnc_display_feed_buffer(this->display, fb, &region);
+	pixman_region_fini(&region);
 	nvnc_fb_pool_release(this->pool, fb);
 }
 

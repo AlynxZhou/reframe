@@ -64,6 +64,13 @@ struct rf_buffer {
 	struct rf_buffer_metadata md;
 };
 
+struct rf_rect {
+	int x;
+	int y;
+	unsigned int w;
+	unsigned int h;
+};
+
 struct rf_auth {
 	pid_t pid;
 	bool ok;

@@ -22,6 +22,7 @@ struct _this {
 	unsigned int width;
 	unsigned int height;
 	unsigned int rotation;
+	bool skip_damage;
 };
 
 static void _on_resize_event(RfVNCServer *v, int width, int height, void *data)
@@ -55,11 +56,23 @@ _on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data
 		}
 	}
 
-	g_autoptr(GByteArray) buf = rf_converter_convert(
-		this->converter, length, bufs, this->width, this->height
+	struct rf_rect damage;
+	GByteArray *buf = rf_converter_convert(
+		this->converter,
+		length,
+		bufs,
+		this->width,
+		this->height,
+		this->skip_damage ? NULL : &damage
 	);
 	if (buf != NULL)
-		rf_vnc_server_update(this->vnc, buf, this->width, this->height);
+		rf_vnc_server_update(
+			this->vnc,
+			buf,
+			this->width,
+			this->height,
+			this->skip_damage ? NULL : &damage
+		);
 }
 
 static void _on_first_client(RfVNCServer *v, void *data)
@@ -99,43 +112,53 @@ int main(int argc, char *argv[])
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	int version = false;
+	int skip_damage = false;
 	g_autoptr(GError) error = NULL;
 
-	GOptionEntry options[] = { { "version",
-				     'v',
-				     G_OPTION_FLAG_NONE,
-				     G_OPTION_ARG_NONE,
-				     &version,
-				     "Display version and exit.",
-				     NULL },
-				   { "socket",
-				     's',
-				     G_OPTION_FLAG_NONE,
-				     G_OPTION_ARG_FILENAME,
-				     &socket_path,
-				     "Streamer socket path to communicate.",
-				     "SOCKET" },
-				   { "session-socket",
-				     'S',
-				     G_OPTION_FLAG_NONE,
-				     G_OPTION_ARG_FILENAME,
-				     &session_socket_path,
-				     "Session socket path to communicate.",
-				     "SOCKET" },
-				   { "config",
-				     'c',
-				     G_OPTION_FLAG_NONE,
-				     G_OPTION_ARG_FILENAME,
-				     &config_path,
-				     "Configuration file path.",
-				     "PATH" },
-				   { NULL,
-				     0,
-				     G_OPTION_FLAG_NONE,
-				     G_OPTION_ARG_NONE,
-				     NULL,
-				     NULL,
-				     NULL } };
+	GOptionEntry options[] = {
+		{ "version",
+		  'v',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_NONE,
+		  &version,
+		  "Display version and exit.",
+		  NULL },
+		{ "socket",
+		  's',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_FILENAME,
+		  &socket_path,
+		  "Streamer socket path to communicate.",
+		  "SOCKET" },
+		{ "session-socket",
+		  'S',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_FILENAME,
+		  &session_socket_path,
+		  "Session socket path to communicate.",
+		  "SOCKET" },
+		{ "config",
+		  'c',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_FILENAME,
+		  &config_path,
+		  "Configuration file path.",
+		  "PATH" },
+		{ "skip-damage",
+		  'D',
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_NONE,
+		  &skip_damage,
+		  "Skip damage region tracking and always update the whole frame buffer (debug purpose).",
+		  NULL },
+		{ NULL,
+		  0,
+		  G_OPTION_FLAG_NONE,
+		  G_OPTION_ARG_NONE,
+		  NULL,
+		  NULL,
+		  NULL }
+	};
 	g_autoptr(GOptionContext)
 		context = g_option_context_new(" - ReFrame Server");
 	g_option_context_add_main_entries(context, options, NULL);
@@ -148,6 +171,11 @@ int main(int argc, char *argv[])
 		g_print(PROJECT_VERSION "\n");
 		return 0;
 	}
+
+	g_message(
+		"Skip damage region tracking mode is %s.",
+		skip_damage ? "enabled" : "disabled"
+	);
 
 	if (socket_path == NULL)
 		socket_path = g_strdup("/tmp/reframe/reframe.sock");
@@ -168,6 +196,7 @@ int main(int argc, char *argv[])
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	this->skip_damage = skip_damage;
 	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
 	this->rotation = rf_config_get_rotation(this->config);

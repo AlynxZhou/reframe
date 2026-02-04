@@ -6,6 +6,7 @@
 #include <gio/gio.h>
 
 #include "rf-config.h"
+#include "rf-common.h"
 
 G_BEGIN_DECLS
 
@@ -23,7 +24,8 @@ struct _RfVNCServerClass {
 		RfVNCServer *this,
 		GByteArray *buf,
 		unsigned int width,
-		unsigned int height
+		unsigned int height,
+		const struct rf_rect *damage
 	);
 	void (*flush)(RfVNCServer *this);
 };
@@ -38,7 +40,8 @@ void rf_vnc_server_update(
 	RfVNCServer *this,
 	GByteArray *buf,
 	unsigned int width,
-	unsigned int height
+	unsigned int height,
+	const struct rf_rect *damage
 );
 void rf_vnc_server_flush(RfVNCServer *this);
 void rf_vnc_server_handle_resize_event(

@@ -19,9 +19,10 @@ void rf_converter_stop(RfConverter *this);
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	size_t length,
-	const struct rf_buffer *b,
+	const struct rf_buffer *bufs,
 	unsigned int width,
-	unsigned int height
+	unsigned int height,
+	struct rf_rect *damage
 );
 
 G_END_DECLS

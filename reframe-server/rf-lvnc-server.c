@@ -76,8 +76,8 @@ _on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
 static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
-	double rx = (double)x / this->width;
-	double ry = (double)y / this->height;
+	const double rx = (double)x / this->width;
+	const double ry = (double)y / this->height;
 	rf_vnc_server_handle_pointer_event(RF_VNC_SERVER(this), rx, ry, mask);
 }
 
@@ -137,7 +137,7 @@ static int _on_incoming(
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
-	int fd = g_socket_get_fd(socket);
+	const int fd = g_socket_get_fd(socket);
 	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
 	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = source;
@@ -195,7 +195,7 @@ static void _start(RfVNCServer *super)
 	}
 
 	g_autoptr(GError) error = NULL;
-	unsigned int port = rf_config_get_vnc_port(this->config);
+	const unsigned int port = rf_config_get_vnc_port(this->config);
 	g_message("VNC: Listening on port %u.", port);
 	this->service = g_socket_service_new();
 	g_socket_listener_add_inet_port(
@@ -288,7 +288,8 @@ static void
 _update(RfVNCServer *super,
 	GByteArray *buf,
 	unsigned int width,
-	unsigned int height)
+	unsigned int height,
+	const struct rf_rect *damage)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -316,7 +317,19 @@ _update(RfVNCServer *super,
 			RF_BYTES_PER_PIXEL
 		);
 	}
-	rfbMarkRectAsModified(this->screen, 0, 0, this->width, this->height);
+
+	if (damage != NULL)
+		rfbMarkRectAsModified(
+			this->screen,
+			damage->x,
+			damage->y,
+			damage->x + damage->w,
+			damage->y + damage->h
+		);
+	else
+		rfbMarkRectAsModified(
+			this->screen, 0, 0, this->width, this->height
+		);
 	rfbProcessEvents(this->screen, 0);
 }
 

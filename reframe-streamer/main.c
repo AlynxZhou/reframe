@@ -265,7 +265,7 @@ _make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 	drmModePlane *plane = drmModeGetPlane(cfd, plane_id);
 	if (plane == NULL)
 		return 0;
-	uint32_t fb_id = plane->fb_id;
+	const uint32_t fb_id = plane->fb_id;
 	drmModeFreePlane(plane);
 	if (fb_id == 0)
 		return 0;
@@ -822,6 +822,15 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	g_message(
+		"Keep listening mode is %s.",
+		keep_listen ? "enabled" : "disabled"
+	);
+	g_message(
+		"Skip authenticating mode is %s.",
+		skip_auth ? "enabled" : "disabled"
+	);
+
 	// We ensure the default dir, user ensure the argument dir.
 	if (socket_path == NULL) {
 		g_mkdir("/tmp/reframe", 0755);
@@ -830,11 +839,11 @@ int main(int argc, char *argv[])
 	}
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
-	g_message("Using configuration file %s.", config_path);
-	this->config = rf_config_new(config_path);
 	this->cfd = -1;
 	this->ufd = -1;
 	this->skip_auth = skip_auth;
+	g_message("Using configuration file %s.", config_path);
+	this->config = rf_config_new(config_path);
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
 	g_message("Using socket %s.", socket_path);
@@ -843,7 +852,7 @@ int main(int argc, char *argv[])
 	if (sd_listen_fds(0) != 0) {
 		// systemd socket.
 		// We only handle 1 socket.
-		int sfd = SD_LISTEN_FDS_START;
+		const int sfd = SD_LISTEN_FDS_START;
 		g_autoptr(GSocket) socket = g_socket_new_from_fd(sfd, &error);
 		if (error != NULL)
 			g_error("Failed to create socket from systemd fd: %s.",
@@ -872,14 +881,6 @@ int main(int argc, char *argv[])
 	if (error != NULL)
 		g_error("Failed to listen to socket: %s.", error->message);
 
-	g_message(
-		"Keep listening mode is %s.",
-		keep_listen ? "enabled" : "disabled"
-	);
-	g_message(
-		"Skip authenticating mode is %s.",
-		skip_auth ? "enabled" : "disabled"
-	);
 	signal(SIGINT, _on_sigint);
 	do {
 		this->connection =
@@ -890,7 +891,7 @@ int main(int argc, char *argv[])
 
 		GSocket *socket =
 			g_socket_connection_get_socket(this->connection);
-		pid_t pid = rf_get_socket_pid(socket);
+		const pid_t pid = rf_get_socket_pid(socket);
 		if (_auth_pid(this, pid, BINDIR "/reframe-server") != 0) {
 			g_warning("Got disallowed socket client PID %d.", pid);
 			goto close;

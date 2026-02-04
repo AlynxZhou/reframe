@@ -8,11 +8,18 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
+#define TILE_SIZE 32
+
 struct _RfConverter {
 	GObject parent_instance;
 	RfConfig *config;
 	char *card_path;
 	GByteArray *buf;
+	unsigned int width;
+	unsigned int height;
+	GByteArray *prev;
+	unsigned int prev_width;
+	unsigned int prev_height;
 	unsigned int gles_major;
 	EGLDisplay display;
 	EGLContext context;
@@ -22,8 +29,6 @@ struct _RfConverter {
 	unsigned int framebuffer;
 	unsigned int texture;
 	unsigned int rotation;
-	unsigned int width;
-	unsigned int height;
 	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
@@ -381,7 +386,7 @@ static int _setup_gl(RfConverter *this)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// clang-format off
-	float coordinates[] = {
+	const float coordinates[] = {
 		// u, v
 		// top left
 		0.0f, 1.0f,
@@ -474,6 +479,11 @@ static void rf_converter_init(RfConverter *this)
 	this->config = NULL;
 	this->card_path = NULL;
 	this->buf = NULL;
+	this->width = 0;
+	this->height = 0;
+	this->prev = NULL;
+	this->prev_width = 0;
+	this->prev_height = 0;
 	this->gles_major = 3;
 	this->display = EGL_NO_DISPLAY;
 	this->context = EGL_NO_CONTEXT;
@@ -484,8 +494,6 @@ static void rf_converter_init(RfConverter *this)
 	this->vertex_array = 0;
 	this->framebuffer = 0;
 	this->texture = 0;
-	this->width = 0;
-	this->height = 0;
 	this->rotation = 0;
 	this->running = false;
 }
@@ -521,6 +529,8 @@ int rf_converter_start(RfConverter *this)
 	g_message("GL: Got screen rotation %u.", this->rotation);
 	this->width = 0;
 	this->height = 0;
+	this->prev_width = 0;
+	this->prev_height = 0;
 	int ret = 0;
 	ret = _setup_egl(this);
 	if (ret < 0)
@@ -557,6 +567,7 @@ void rf_converter_stop(RfConverter *this)
 	this->running = false;
 
 	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->prev, g_byte_array_unref);
 	g_clear_pointer(&this->card_path, g_free);
 	_clean_gl(this);
 	_clean_egl(this);
@@ -810,22 +821,80 @@ static void _draw_end(RfConverter *this)
 	glUseProgram(0);
 }
 
+static void _calculate_damage(RfConverter *this, struct rf_rect *damage)
+{
+	if (this->prev == NULL || this->prev_width != this->width ||
+	    this->prev_height != this->height) {
+		damage->x = 0;
+		damage->y = 0;
+		damage->w = this->width;
+		damage->h = this->height;
+		return;
+	}
+
+	// This is a naive damage region tracking but works fairly enough for us.
+	unsigned int x1 = this->width;
+	unsigned int y1 = this->height;
+	unsigned int x2 = 0;
+	unsigned int y2 = 0;
+
+	const uint8_t *new = this->buf->data;
+	const uint8_t *old = this->prev->data;
+	const size_t stride = this->width * RF_BYTES_PER_PIXEL;
+	for (unsigned int y = 0; y < this->height; y += TILE_SIZE) {
+		for (unsigned int x = 0; x < this->width; x += TILE_SIZE) {
+			const unsigned int w = MIN(TILE_SIZE, this->width - x);
+			const unsigned int h = MIN(TILE_SIZE, this->height - y);
+			bool different = false;
+			for (unsigned int row = 0; row < h; ++row) {
+				const uint8_t *new_row = new +
+							 (y + row) * stride +
+							 x * RF_BYTES_PER_PIXEL;
+				const uint8_t *old_row = old +
+							 (y + row) * stride +
+							 x * RF_BYTES_PER_PIXEL;
+				if (memcmp(new_row,
+					   old_row,
+					   w * RF_BYTES_PER_PIXEL) != 0) {
+					different = true;
+					break;
+				}
+			}
+			if (different) {
+				x1 = MIN(x1, x);
+				y1 = MIN(y1, y);
+				x2 = MAX(x2, x + w);
+				y2 = MAX(y2, y + h);
+			}
+		}
+	}
+
+	if (x1 < x2 && y1 < y2) {
+		damage->x = x1;
+		damage->y = y1;
+		damage->w = x2 - x1;
+		damage->h = y2 - y1;
+	} else {
+		damage->x = 0;
+		damage->y = 0;
+		damage->w = 0;
+		damage->h = 0;
+	}
+}
+
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	size_t length,
 	const struct rf_buffer *bufs,
 	unsigned int width,
-	unsigned int height
+	unsigned int height,
+	struct rf_rect *damage
 )
 {
 	g_return_val_if_fail(RF_IS_CONVERTER(this), NULL);
 	g_return_val_if_fail(length >= 1 && length <= RF_MAX_BUFS, NULL);
 	g_return_val_if_fail(bufs != NULL, NULL);
 	g_return_val_if_fail(width > 0 && height > 0, NULL);
-
-#ifdef __DEBUG__
-	int64_t begin = g_get_monotonic_time();
-#endif
 
 	if (!this->running)
 		return NULL;
@@ -840,7 +909,9 @@ GByteArray *rf_converter_convert(
 		return NULL;
 	}
 
-	GByteArray *res = NULL;
+#ifdef __DEBUG__
+	const int64_t begin = g_get_monotonic_time();
+#endif
 
 	if (this->width != width || this->height != height) {
 		this->width = width;
@@ -856,8 +927,8 @@ GByteArray *rf_converter_convert(
 	const struct rf_buffer *primary = &bufs[0];
 	// Monitor size should be CRTC size, and primary plane is used to store
 	// CRTC's framebuffer, so primary plane size should be CRTC size.
-	uint32_t frame_width = primary->md.crtc_w;
-	uint32_t frame_height = primary->md.crtc_h;
+	const uint32_t frame_width = primary->md.crtc_w;
+	const uint32_t frame_height = primary->md.crtc_h;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
 
@@ -883,15 +954,35 @@ GByteArray *rf_converter_convert(
 		this->buf->data
 	);
 	// g_debug("glReadPixels: %#x", glGetError());
-	if (glGetError() == GL_NO_ERROR)
-		res = g_byte_array_ref(this->buf);
+	if (glGetError() == GL_NO_ERROR) {
+		if (damage != NULL) {
+			_calculate_damage(this, damage);
+			g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
+				damage->x,
+				damage->y,
+				damage->w,
+				damage->h);
+		}
+		if (damage == NULL || (damage->w != 0 && damage->h != 0)) {
+			g_clear_pointer(&this->prev, g_byte_array_unref);
+			this->prev_width = this->width;
+			this->prev_height = this->height;
+			// `GByteArray`'s `len` is not size, it is only updated
+			// with its API, we directly access its memory buffer, so
+			// we cannot use it.
+			const unsigned int size =
+				RF_BYTES_PER_PIXEL * this->width * this->height;
+			this->prev = g_byte_array_sized_new(size);
+			memcpy(this->prev->data, this->buf->data, size);
+		}
+	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 #ifdef __DEBUG__
-	int64_t end = g_get_monotonic_time();
+	const int64_t end = g_get_monotonic_time();
 	g_debug("GL: Converted frame in %ldms.", (end - begin) / 1000);
 #endif
 
-	return res;
+	return this->buf;
 }

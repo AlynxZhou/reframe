@@ -129,8 +129,8 @@ static void _schedule_frame_msg(RfStreamer *this)
 	if (this->timer_id != 0)
 		return;
 
-	int64_t current = g_get_monotonic_time();
-	int64_t delta = current - this->last_frame_time;
+	const int64_t current = g_get_monotonic_time();
+	const int64_t delta = current - this->last_frame_time;
 	// Give this highest priority to prevent lag.
 	if (delta < this->max_interval) {
 		this->timer_id = g_timeout_add_full(
@@ -548,7 +548,7 @@ int rf_streamer_start(RfStreamer *this)
 		return 0;
 
 	this->last_frame_time = -1;
-	unsigned int fps = rf_config_get_fps(this->config);
+	const unsigned int fps = rf_config_get_fps(this->config);
 	this->max_interval = 1000000 / fps;
 	g_message("Frame: Got FPS %u.", fps);
 	this->desktop_width = rf_config_get_desktop_width(this->config);

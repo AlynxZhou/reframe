@@ -201,7 +201,8 @@ void rf_vnc_server_update(
 	RfVNCServer *this,
 	GByteArray *buf,
 	unsigned int width,
-	unsigned int height
+	unsigned int height,
+	const struct rf_rect *damage
 )
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
@@ -211,7 +212,7 @@ void rf_vnc_server_update(
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
 	g_return_if_fail(klass->update != NULL);
 
-	klass->update(this, buf, width, height);
+	klass->update(this, buf, width, height, damage);
 }
 
 void rf_vnc_server_flush(RfVNCServer *this)
@@ -240,7 +241,7 @@ static void _iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 		xkb_keymap_num_levels_for_key(map, key, 0);
 	for (xkb_level_index_t i = 0; i < num_levels; ++i) {
 		const xkb_keysym_t *syms;
-		int num_syms =
+		const int num_syms =
 			xkb_keymap_key_get_syms_by_level(map, key, 0, i, &syms);
 		for (int k = 0; k < num_syms; ++k) {
 			if (syms[k] == idata->keysym) {
@@ -294,7 +295,7 @@ void rf_vnc_server_handle_keysym_event(
 		);
 		return;
 	}
-	uint32_t keycode = RF_KEY_CODE_XKB_TO_EV(idata.keycode);
+	const uint32_t keycode = RF_KEY_CODE_XKB_TO_EV(idata.keycode);
 	g_debug("Input: Received key %s for keysym %04x and keycode %u.",
 		down ? "down" : "up",
 		keysym,
@@ -336,16 +337,16 @@ void rf_vnc_server_handle_pointer_event(
 	if (!rf_vnc_server_is_running(this))
 		return;
 
-	bool left = mask & 1;
-	bool middle = mask & (1 << 1);
-	bool right = mask & (1 << 2);
-	bool wup = mask & (1 << 3);
-	bool wdown = mask & (1 << 4);
-	bool wleft = mask & (1 << 5);
-	bool wright = mask & (1 << 6);
+	const bool left = mask & 1;
+	const bool middle = mask & (1 << 1);
+	const bool right = mask & (1 << 2);
+	const bool wup = mask & (1 << 3);
+	const bool wdown = mask & (1 << 4);
+	const bool wleft = mask & (1 << 5);
+	const bool wright = mask & (1 << 6);
 	// Generally the 7th bit is reserved.
-	bool back = mask & (1 << 8);
-	bool forward = mask & (1 << 9);
+	const bool back = mask & (1 << 8);
+	const bool forward = mask & (1 << 9);
 	g_debug("Input: Received pointer at x %f and y %f, raw button %#x, "
 		"left %s, middle %s, right %s, back %s, forward %s, "
 		"wheel up %s, wheel down %s, wheel left %s, wheel right %s.",
