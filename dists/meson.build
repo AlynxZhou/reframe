@@ -37,14 +37,14 @@ if get_option('systemd') and systemd.found()
     install_dir: sysusersdir
   )
   configure_file(
-  input: 'reframe-tmpfiles.conf.in',
-  output: 'reframe-tmpfiles.conf',
-  configuration: {
-    'confdir': confdir,
-    'username': username
-  },
-  install_dir: tmpfilesdir
-)
+    input: 'reframe-tmpfiles.conf.in',
+    output: 'reframe-tmpfiles.conf',
+    configuration: {
+      'confdir': confdir,
+      'username': username
+    },
+    install_dir: tmpfilesdir
+  )
 endif
 
 configure_file(
