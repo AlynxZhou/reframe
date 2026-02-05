@@ -322,7 +322,7 @@ static int _setup_gl(RfConverter *this)
 			"#else\n"
 			"#extension GL_OES_EGL_image_external : require\n"
 			"#endif\n"
-			"precision mediump float;\n"
+			"precision highp float;\n"
 			"uniform mat4 crop;\n"
 			"uniform samplerExternalOES image;\n"
 			"in vec2 pass_coordinate;\n"
@@ -346,7 +346,7 @@ static int _setup_gl(RfConverter *this)
 		const char fs[] =
 			"#version 100\n"
 			"#extension GL_OES_EGL_image_external : require\n"
-			"precision mediump float;\n"
+			"precision highp float;\n"
 			"uniform mat4 crop;\n"
 			"uniform samplerExternalOES image;\n"
 			"varying vec2 pass_coordinate;\n"
