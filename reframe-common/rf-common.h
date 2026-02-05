@@ -84,7 +84,7 @@ ssize_t rf_send_header(
 	GError **error
 );
 const char *rf_plane_type(uint32_t type);
-void rf_set_group(const char *path);
+int rf_set_group(const char *path);
 pid_t rf_get_socket_pid(GSocket *socket);
 
 G_END_DECLS

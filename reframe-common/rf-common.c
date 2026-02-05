@@ -76,11 +76,12 @@ const char *rf_plane_type(uint32_t type)
 	}
 }
 
-void rf_set_group(const char *path)
+int rf_set_group(const char *path)
 {
 	struct group *grp = getgrnam(USERNAME);
-	if (grp != NULL)
-		chown(path, -1, grp->gr_gid);
+	if (grp == NULL)
+		return -2;
+	return chown(path, -1, grp->gr_gid);
 }
 
 pid_t rf_get_socket_pid(GSocket *socket)
