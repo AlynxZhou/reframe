@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <glib-unix.h>
 #define AML_UNSTABLE_API 1
 #include <aml.h>
 // XXX: There are several bugs in neatvnc's encoding, JPEG compress will make it
@@ -14,7 +15,8 @@ struct _RfNVNCServer {
 	RfVNCServer parent_instance;
 	RfConfig *config;
 	GByteArray *buf;
-	unsigned int timer_id;
+	GIOCondition io_flags;
+	unsigned int aml_id;
 	struct aml *aml;
 	struct nvnc *nvnc;
 	struct nvnc_display *display;
@@ -135,9 +137,12 @@ static bool _on_auth(const char *username, const char *password, void *data)
 	return g_strcmp0(password, this->password) == 0;
 }
 
-static int _poll_aml(void *data)
+static int _poll_aml(int fd, GIOCondition condition, void *data)
 {
 	RfNVNCServer *this = data;
+
+	if (!(condition & this->io_flags))
+		return G_SOURCE_CONTINUE;
 
 	aml_poll(this->aml, 0);
 	aml_dispatch(this->aml);
@@ -213,9 +218,9 @@ static void _start(RfVNCServer *super)
 	nvnc_fb_pool_release(this->pool, fb);
 
 	// Intergrate aml into GLib's main loop.
-	//
-	// Don't run this too frequently.
-	this->timer_id = g_timeout_add(10, _poll_aml, this);
+	this->aml_id = g_unix_fd_add(
+		aml_get_fd(this->aml), this->io_flags, _poll_aml, this
+	);
 
 	this->running = true;
 }
@@ -237,9 +242,9 @@ static void _stop(RfVNCServer *super)
 	this->running = false;
 
 	rf_vnc_server_flush(super);
-	if (this->timer_id != 0) {
-		g_source_remove(this->timer_id);
-		this->timer_id = 0;
+	if (this->aml_id != 0) {
+		g_source_remove(this->aml_id);
+		this->aml_id = 0;
 	}
 	g_clear_pointer(&this->display, nvnc_display_unref);
 	g_clear_pointer(&this->nvnc, nvnc_close);
@@ -356,7 +361,8 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 {
 	this->config = NULL;
 	this->buf = NULL;
-	this->timer_id = 0;
+	this->io_flags = G_IO_IN | G_IO_PRI;
+	this->aml_id = 0;
 	this->aml = NULL;
 	this->nvnc = NULL;
 	this->display = NULL;
