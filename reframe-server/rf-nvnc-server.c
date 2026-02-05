@@ -217,7 +217,7 @@ static void _start(RfVNCServer *super)
 	pixman_region_fini(&region);
 	nvnc_fb_pool_release(this->pool, fb);
 
-	// Intergrate aml into GLib's main loop.
+	// Integrate aml into GLib's main loop.
 	this->aml_id = g_unix_fd_add(
 		aml_get_fd(this->aml), this->io_flags, _poll_aml, this
 	);
