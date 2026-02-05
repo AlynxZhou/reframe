@@ -3,6 +3,7 @@
 #include <aml.h>
 // XXX: There are several bugs in neatvnc's encoding, JPEG compress will make it
 // crash on start, and tight encoding will make it crash with GNOME overview.
+#include <glib-unix.h>
 #include <neatvnc.h>
 #include <pixman.h>
 #include <libdrm/drm_fourcc.h>
@@ -14,7 +15,6 @@ struct _RfNVNCServer {
 	RfVNCServer parent_instance;
 	RfConfig *config;
 	GByteArray *buf;
-	GThread *thread;
 	struct aml *aml;
 	struct nvnc *nvnc;
 	struct nvnc_display *display;
@@ -27,6 +27,16 @@ struct _RfNVNCServer {
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
+
+static gboolean aml_glib_cb(gint fd, GIOCondition condition, gpointer user_data)
+{
+	struct aml *aml = (struct aml *) user_data;
+
+	aml_poll(aml, 0);
+	aml_dispatch(aml);
+
+	return G_SOURCE_CONTINUE;
+}
 
 static void _dispose(GObject *o)
 {
@@ -43,9 +53,6 @@ static void _dispose(GObject *o)
 
 // 	G_OBJECT_CLASS(rf_nvnc_server_parent_class)->finalize(o);
 // }
-
-// Because neatvnc runs in its own thread, we need to queue events to main
-// thread, otherwise a event might comes when the previous event is not sent.
 
 struct _keysym_event {
 	RfVNCServer *vnc;
@@ -241,7 +248,7 @@ static void _start(RfVNCServer *super)
 
 	this->aml = aml_new();
 	aml_set_default(this->aml);
-
+	g_unix_fd_add(aml_get_fd(this->aml), G_IO_IN, aml_glib_cb, this->aml);
 	this->nvnc = nvnc_open("0.0.0.0", port);
 	if (this->nvnc == NULL)
 		g_error("Failed to listen on port %u.", port);
@@ -275,12 +282,6 @@ static void _start(RfVNCServer *super)
 	pixman_region_fini(&region);
 	nvnc_fb_pool_release(this->pool, fb);
 
-	// Well no one really likes your event loop, please do not re-invent the
-	// wheel and hard code another library with it next time. It would be
-	// easier if we could integrate neatvnc's events into GLib's event loop.
-	this->thread =
-		g_thread_new("reframe-aml", (GThreadFunc)aml_run, this->aml);
-
 	this->running = true;
 }
 
@@ -302,8 +303,6 @@ static void _stop(RfVNCServer *super)
 
 	rf_vnc_server_flush(super);
 	aml_exit(this->aml);
-	g_thread_join(this->thread);
-	g_clear_pointer(&this->thread, g_thread_unref);
 	g_clear_pointer(&this->display, nvnc_display_unref);
 	g_clear_pointer(&this->nvnc, nvnc_close);
 	aml_set_default(NULL);
@@ -418,7 +417,6 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 {
 	this->config = NULL;
 	this->buf = NULL;
-	this->thread = NULL;
 	this->aml = NULL;
 	this->nvnc = NULL;
 	this->display = NULL;
