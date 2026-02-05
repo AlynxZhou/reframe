@@ -14,7 +14,7 @@ struct _RfNVNCServer {
 	RfVNCServer parent_instance;
 	RfConfig *config;
 	GByteArray *buf;
-	GThread *thread;
+	unsigned int timer_id;
 	struct aml *aml;
 	struct nvnc *nvnc;
 	struct nvnc_display *display;
@@ -44,71 +44,22 @@ static void _dispose(GObject *o)
 // 	G_OBJECT_CLASS(rf_nvnc_server_parent_class)->finalize(o);
 // }
 
-// Because neatvnc runs in its own thread, we need to queue events to main
-// thread, otherwise a event might comes when the previous event is not sent.
-
-struct _keysym_event {
-	RfVNCServer *vnc;
-	uint32_t keysym;
-	bool down;
-};
-
-static void _handle_keysym_event(void *data)
-{
-	g_autofree struct _keysym_event *e = data;
-	rf_vnc_server_handle_keysym_event(e->vnc, e->keysym, e->down);
-	g_object_unref(e->vnc);
-}
-
 static void
 _on_keysym_event(struct nvnc_client *client, uint32_t keysym, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfNVNCServer *this = nvnc_get_userdata(nvnc);
-	struct _keysym_event *e = g_malloc0(sizeof(*e));
-	e->vnc = RF_VNC_SERVER(g_object_ref(this));
-	e->keysym = keysym;
-	e->down = down;
-	g_idle_add_once(_handle_keysym_event, e);
-}
+	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
 
-struct _keycode_event {
-	RfVNCServer *vnc;
-	uint32_t keycode;
-	bool down;
-};
-
-static void _handle_keycode_event(void *data)
-{
-	g_autofree struct _keycode_event *e = data;
-	rf_vnc_server_handle_keycode_event(e->vnc, e->keycode, e->down);
-	g_object_unref(e->vnc);
+	rf_vnc_server_handle_keysym_event(super, keysym, down);
 }
 
 static void
 _on_keycode_event(struct nvnc_client *client, uint32_t keycode, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfNVNCServer *this = nvnc_get_userdata(nvnc);
-	struct _keycode_event *e = g_malloc0(sizeof(*e));
-	e->vnc = RF_VNC_SERVER(g_object_ref(this));
-	e->keycode = keycode;
-	e->down = down;
-	g_idle_add_once(_handle_keycode_event, e);
-}
+	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
 
-struct _pointer_event {
-	RfVNCServer *vnc;
-	double rx;
-	double ry;
-	uint32_t mask;
-};
-
-static void _handle_pointer_event(void *data)
-{
-	g_autofree struct _pointer_event *e = data;
-	rf_vnc_server_handle_pointer_event(e->vnc, e->rx, e->ry, e->mask);
-	g_object_unref(e->vnc);
+	rf_vnc_server_handle_keycode_event(super, keycode, down);
 }
 
 static void _on_pointer_event(
@@ -120,50 +71,22 @@ static void _on_pointer_event(
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
-	struct _pointer_event *e = g_malloc0(sizeof(*e));
-	e->vnc = RF_VNC_SERVER(g_object_ref(this));
-	e->rx = (double)x / this->width;
-	e->ry = (double)y / this->height;
+	RfVNCServer *super = RF_VNC_SERVER(this);
+	double rx = (double)x / this->width;
+	double ry = (double)y / this->height;
 	// neatvnc does not follow RFB's ExtendedMouseButtons bits, correct it.
-	e->mask = (buttons & 0x7f) | ((buttons >> 7) << 8);
-	g_idle_add_once(_handle_pointer_event, e);
-}
+	uint32_t mask = (buttons & 0x7f) | ((buttons >> 7) << 8);
 
-struct _clipboard_text {
-	RfVNCServer *vnc;
-	char *text;
-};
-
-static void _handle_clipboard_text(void *data)
-{
-	g_autofree struct _clipboard_text *e = data;
-	rf_vnc_server_handle_clipboard_text(e->vnc, e->text);
-	g_free(e->text);
-	g_object_unref(e->vnc);
+	rf_vnc_server_handle_pointer_event(super, rx, ry, mask);
 }
 
 static void
 _on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfNVNCServer *this = nvnc_get_userdata(nvnc);
-	struct _clipboard_text *e = g_malloc0(sizeof(*e));
-	e->vnc = RF_VNC_SERVER(g_object_ref(this));
-	e->text = g_strdup(text);
-	g_idle_add_once(_handle_clipboard_text, e);
-}
+	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
 
-struct _resize_event {
-	RfVNCServer *vnc;
-	unsigned int width;
-	unsigned int height;
-};
-
-static void _handle_resize_event(void *data)
-{
-	g_autofree struct _resize_event *e = data;
-	rf_vnc_server_handle_resize_event(e->vnc, e->width, e->height);
-	g_object_unref(e->vnc);
+	rf_vnc_server_handle_clipboard_text(super, text);
 }
 
 static bool _on_resize_event(
@@ -173,15 +96,14 @@ static bool _on_resize_event(
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 	unsigned int width = nvnc_desktop_layout_get_width(layout);
 	unsigned int height = nvnc_desktop_layout_get_height(layout);
+
 	if (width != this->width || height != this->height) {
-		struct _resize_event *e = g_malloc0(sizeof(*e));
-		e->vnc = RF_VNC_SERVER(g_object_ref(this));
-		e->width = width;
-		e->height = height;
-		g_idle_add_once(_handle_resize_event, e);
+		rf_vnc_server_handle_resize_event(super, width, height);
 	}
+
 	return true;
 }
 
@@ -189,23 +111,38 @@ static void _on_client_gone(struct nvnc_client *client)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
+
 	if (this->clients-- == 1)
-		rf_vnc_server_handle_last_client(RF_VNC_SERVER(this));
+		rf_vnc_server_handle_last_client(super);
 }
 
 static void _on_new_client(struct nvnc_client *client)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
+
 	nvnc_set_client_cleanup_fn(client, _on_client_gone);
 	if (++this->clients == 1)
-		rf_vnc_server_handle_first_client(RF_VNC_SERVER(this));
+		rf_vnc_server_handle_first_client(super);
 }
 
 static bool _on_auth(const char *username, const char *password, void *data)
 {
 	RfNVNCServer *this = data;
+
 	return g_strcmp0(password, this->password) == 0;
+}
+
+static int _poll_aml(void *data)
+{
+	RfNVNCServer *this = data;
+
+	aml_poll(this->aml, 0);
+	aml_dispatch(this->aml);
+
+	return G_SOURCE_CONTINUE;
 }
 
 static void _start(RfVNCServer *super)
@@ -275,11 +212,10 @@ static void _start(RfVNCServer *super)
 	pixman_region_fini(&region);
 	nvnc_fb_pool_release(this->pool, fb);
 
-	// Well no one really likes your event loop, please do not re-invent the
-	// wheel and hard code another library with it next time. It would be
-	// easier if we could integrate neatvnc's events into GLib's event loop.
-	this->thread =
-		g_thread_new("reframe-aml", (GThreadFunc)aml_run, this->aml);
+	// Intergrate aml into GLib's main loop.
+	//
+	// Don't run this too frequently.
+	this->timer_id = g_timeout_add(10, _poll_aml, this);
 
 	this->running = true;
 }
@@ -301,9 +237,10 @@ static void _stop(RfVNCServer *super)
 	this->running = false;
 
 	rf_vnc_server_flush(super);
-	aml_exit(this->aml);
-	g_thread_join(this->thread);
-	g_clear_pointer(&this->thread, g_thread_unref);
+	if (this->timer_id != 0) {
+		g_source_remove(this->timer_id);
+		this->timer_id = 0;
+	}
 	g_clear_pointer(&this->display, nvnc_display_unref);
 	g_clear_pointer(&this->nvnc, nvnc_close);
 	aml_set_default(NULL);
@@ -389,6 +326,7 @@ static void _flush(RfVNCServer *super)
 
 	if (!this->running)
 		return;
+
 	struct nvnc_client *client = nvnc_client_first(this->nvnc);
 	while (client != NULL) {
 		struct nvnc_client *next = nvnc_client_next(client);
@@ -418,7 +356,7 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 {
 	this->config = NULL;
 	this->buf = NULL;
-	this->thread = NULL;
+	this->timer_id = 0;
 	this->aml = NULL;
 	this->nvnc = NULL;
 	this->display = NULL;

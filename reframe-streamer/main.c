@@ -822,6 +822,13 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	// We ensure the default dir, user ensure the argument dir.
+	if (socket_path == NULL) {
+		g_mkdir("/tmp/reframe", 0755);
+		rf_set_group("/tmp/reframe");
+		socket_path = g_strdup("/tmp/reframe/reframe.sock");
+	}
+
 	g_message(
 		"Keep listening mode is %s.",
 		keep_listen ? "enabled" : "disabled"
@@ -830,23 +837,16 @@ int main(int argc, char *argv[])
 		"Skip authenticating mode is %s.",
 		skip_auth ? "enabled" : "disabled"
 	);
-
-	// We ensure the default dir, user ensure the argument dir.
-	if (socket_path == NULL) {
-		g_mkdir("/tmp/reframe", 0755);
-		rf_set_group("/tmp/reframe");
-		socket_path = g_strdup("/tmp/reframe/reframe.sock");
-	}
+	g_message("Using configuration file %s.", config_path);
+	g_message("Using socket %s.", socket_path);
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 	this->cfd = -1;
 	this->ufd = -1;
 	this->skip_auth = skip_auth;
-	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
 
 	g_autoptr(GSocketListener) listener = g_socket_listener_new();
-	g_message("Using socket %s.", socket_path);
 
 #ifdef HAVE_LIBSYSTEMD
 	if (sd_listen_fds(0) != 0) {

@@ -91,14 +91,16 @@ static void _on_last_client(RfVNCServer *v, void *data)
 {
 	struct _this *this = data;
 
-	rf_streamer_stop(this->streamer);
 	rf_converter_stop(this->converter);
+	rf_streamer_stop(this->streamer);
 }
 
 static int _on_sigint(void *data)
 {
 	struct _this *this = data;
+
 	g_main_loop_quit(this->main_loop);
+
 	return G_SOURCE_REMOVE;
 }
 
@@ -172,11 +174,6 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
-	g_message(
-		"Skip damage region tracking mode is %s.",
-		skip_damage ? "enabled" : "disabled"
-	);
-
 	if (socket_path == NULL)
 		socket_path = g_strdup("/tmp/reframe/reframe.sock");
 	// We ensure the default dir, user ensure the argument dir.
@@ -186,6 +183,14 @@ int main(int argc, char *argv[])
 		session_socket_path =
 			g_strdup("/tmp/reframe-session/reframe-session.sock");
 	}
+
+	g_message(
+		"Skip damage region tracking mode is %s.",
+		skip_damage ? "enabled" : "disabled"
+	);
+	g_message("Using configuration file %s.", config_path);
+	g_message("Using socket %s.", socket_path);
+	g_message("Using session socket %s.", session_socket_path);
 
 	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
 	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {
@@ -197,18 +202,10 @@ int main(int argc, char *argv[])
 
 	g_autofree struct _this *this = g_malloc0(sizeof(*this));
 	this->skip_damage = skip_damage;
-	g_message("Using configuration file %s.", config_path);
 	this->config = rf_config_new(config_path);
 	this->rotation = rf_config_get_rotation(this->config);
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
-	this->streamer = rf_streamer_new(this->config);
-	g_message("Using socket %s.", socket_path);
-	rf_streamer_set_socket_path(this->streamer, socket_path);
-	this->session = rf_session_new();
-	g_message("Using session socket %s.", session_socket_path);
-	rf_session_set_socket_path(this->session, session_socket_path);
-	this->converter = rf_converter_new(this->config);
 #ifdef HAVE_NEATVNC
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
 	g_message("VNC: Implementation type is %s.", type);
@@ -217,6 +214,11 @@ int main(int argc, char *argv[])
 	else
 #endif
 		this->vnc = rf_lvnc_server_new(this->config);
+	this->converter = rf_converter_new(this->config);
+	this->session = rf_session_new();
+	rf_session_set_socket_path(this->session, session_socket_path);
+	this->streamer = rf_streamer_new(this->config);
+	rf_streamer_set_socket_path(this->streamer, socket_path);
 	g_signal_connect_swapped(
 		this->streamer,
 		"stop",
@@ -301,10 +303,11 @@ int main(int argc, char *argv[])
 	g_main_loop_unref(this->main_loop);
 
 	rf_vnc_server_stop(this->vnc);
-	g_clear_object(&this->vnc);
-	g_clear_object(&this->converter);
-	g_clear_object(&this->session);
+	// Destruction sequence is decided by signal callbacks.
 	g_clear_object(&this->streamer);
+	g_clear_object(&this->session);
+	g_clear_object(&this->converter);
+	g_clear_object(&this->vnc);
 	g_clear_object(&this->config);
 
 	return 0;
