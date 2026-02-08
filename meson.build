@@ -64,6 +64,7 @@ conf_data = configuration_data()
 conf_data.set_quoted('PROJECT_VERSION', meson.project_version())
 conf_data.set_quoted('USERNAME', username)
 conf_data.set_quoted('BINDIR', bindir)
+conf_data.set_quoted('LIBDIR', libdir)
 conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
 conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
 
