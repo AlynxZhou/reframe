@@ -19,7 +19,7 @@ include_directories = []
 # For `config.h`.
 include_directories += include_directories('..')
 
-reframe_common = shared_library(
+reframe_common = library(
   meson.project_name() + '-common',
   sources: sources,
   include_directories: include_directories,
