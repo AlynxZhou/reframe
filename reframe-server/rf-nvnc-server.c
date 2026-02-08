@@ -18,7 +18,6 @@ struct _RfNVNCServer {
 	struct aml *aml;
 	struct nvnc *nvnc;
 	struct nvnc_display *display;
-	struct nvnc_fb_pool *pool;
 	unsigned int clients;
 	char *password;
 	char *desktop_name;
@@ -190,7 +189,7 @@ static void _start(RfVNCServer *super)
 	if (this->display == NULL)
 		g_error("VNC: Failed to create neatvnc display.");
 	nvnc_add_display(this->nvnc, this->display);
-	this->pool = nvnc_fb_pool_new(
+	struct nvnc_fb *fb = nvnc_fb_new(
 		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
 	);
 	if (this->desktop_name != NULL)
@@ -205,15 +204,11 @@ static void _start(RfVNCServer *super)
 		nvnc_enable_auth(
 			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, _on_auth, this
 		);
-	struct nvnc_fb *fb = nvnc_fb_pool_acquire(this->pool);
-	memset(nvnc_fb_get_addr(fb),
-	       0,
-	       this->width * this->height * RF_BYTES_PER_PIXEL);
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 	nvnc_display_feed_buffer(this->display, fb, &region);
 	pixman_region_fini(&region);
-	nvnc_fb_pool_release(this->pool, fb);
+	nvnc_fb_unref(fb);
 
 	// Integrate aml into GLib's main loop.
 	this->aml_id = g_unix_fd_add(
@@ -287,28 +282,16 @@ _update(RfVNCServer *super,
 	if (!this->running)
 		return;
 
-	if (this->buf != buf || this->width != width ||
-	    this->height != height) {
-		if (this->buf != buf) {
-			g_clear_pointer(&this->buf, g_byte_array_unref);
-			this->buf = g_byte_array_ref(buf);
-		}
-		if (this->width != width || this->height != height) {
-			this->width = width;
-			this->height = height;
-			nvnc_fb_pool_resize(
-				this->pool,
-				this->width,
-				this->height,
-				DRM_FORMAT_XBGR8888,
-				this->width
-			);
-		}
+	if (this->buf != buf) {
+		g_clear_pointer(&this->buf, g_byte_array_unref);
+		this->buf = g_byte_array_ref(buf);
 	}
-	struct nvnc_fb *fb = nvnc_fb_pool_acquire(this->pool);
-	memcpy(nvnc_fb_get_addr(fb),
-	       this->buf->data,
-	       this->width * this->height * RF_BYTES_PER_PIXEL);
+
+	this->width = width;
+	this->height = height;
+	struct nvnc_fb *fb = nvnc_fb_from_buffer(
+		this->buf->data, this->width, this->height,
+		DRM_FORMAT_XBGR8888, this->width);
 	struct pixman_region16 region;
 	if (damage != NULL)
 		pixman_region_init_rect(
@@ -320,7 +303,7 @@ _update(RfVNCServer *super,
 		);
 	nvnc_display_feed_buffer(this->display, fb, &region);
 	pixman_region_fini(&region);
-	nvnc_fb_pool_release(this->pool, fb);
+	nvnc_fb_unref(fb);
 }
 
 static void _flush(RfVNCServer *super)
@@ -364,7 +347,6 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 	this->aml = NULL;
 	this->nvnc = NULL;
 	this->display = NULL;
-	this->pool = NULL;
 	this->password = NULL;
 	this->desktop_name = NULL;
 	this->width = 0;
