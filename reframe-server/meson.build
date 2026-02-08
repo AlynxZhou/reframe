@@ -21,11 +21,21 @@ glib = dependency('glib-2.0', required: true)
 gio = dependency('gio-2.0', required: true)
 gio_unix = dependency('gio-unix-2.0', required: true)
 gmodule = dependency('gmodule-2.0', required: true)
+gobject = dependency('gobject-2.0', required: true)
 epoxy = dependency('epoxy', required: true)
 xkbcommon = dependency('xkbcommon', required: true)
-dependencies += [m, glib, gio, gio_unix, gmodule, epoxy, xkbcommon]
-
-dependencies += [mvmath_dep, reframe_common_dep]
+dependencies += [
+  m,
+  glib,
+  gio,
+  gio_unix,
+  gmodule,
+  gobject,
+  epoxy,
+  xkbcommon,
+  mvmath_dep,
+  reframe_common_dep
+]
 
 include_directories = []
 # For `config.h`.
@@ -45,11 +55,18 @@ lvnc_headers = files('rf-lvnc-server.h')
 
 lvnc_dependencies = []
 libvncserver = dependency('libvncserver', required: true)
-lvnc_dependencies += [glib, gio, libvncserver, reframe_common_dep]
+lvnc_dependencies += [
+  glib,
+  gio,
+  gmodule,
+  gobject,
+  libvncserver,
+  reframe_common_dep
+]
 
 shared_module(
   meson.project_name() + '-libvncserver',
-  sources: files('rf-lvnc-server.c'),
+  sources: lvnc_sources,
   dependencies: lvnc_dependencies,
   include_directories: include_directories,
   install: true,
@@ -65,7 +82,17 @@ if get_option('neatvnc') and neatvnc.found()
   libdrm = dependency('libdrm', required: true)
   aml = dependency('aml', required: true)
   pixman = dependency('pixman-1', required: true)
-  nvnc_dependencies += [glib, gio, libdrm, aml, pixman, neatvnc, reframe_common_dep]
+  nvnc_dependencies += [
+    glib,
+    gio,
+    gmodule,
+    gobject,
+    libdrm,
+    neatvnc,
+    aml,
+    pixman,
+    reframe_common_dep
+  ]
 
   shared_module(
     meson.project_name() + '-neatvnc',

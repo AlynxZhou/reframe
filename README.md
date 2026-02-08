@@ -78,17 +78,18 @@ Leap users please replace URL for Tumbleweed with URL for your Leap version.
 
 ### Dependencies
 
-- glib2
+- glib2 (as well as gio, gmodule, gobject)
+- gtk4 (for clipboard support in reframe-session)
+- libdrm
 - libepoxy
 - libvncserver
 - libxkbcommon
-- libdrm
-- systemd (optional & recommended)
+- systemd (optional but recommended)
 - meson
-- ninja
-- gcc
+- ninja (or other building tools that Meson supports)
+- gcc (or clang)
 
-If you want to build the experimental neatvnc implementation (`-D neatvnc=true`), you will also need the following dependencies that neatvnc requires:
+The default VNC implementation is libvncserver, if you want to build the optional neatvnc implementation (`-D neatvnc=true`), you will also need the following dependencies that neatvnc requires:
 
 - neatvnc
 - aml
