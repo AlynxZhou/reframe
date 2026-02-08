@@ -56,6 +56,11 @@ configure_file(
   install_dir: xdgautostartdir
 )
 
+install_emptydir(
+  confdir,
+  install_mode: 'rwxr-x---'
+)
+
 install_data(
   'example.conf',
   install_dir: confdir
