@@ -115,6 +115,7 @@ static int _on_incoming(
 			this->screen->desktopName = "ReFrame";
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
+		this->screen->cursor = NULL;
 		this->screen->newClientHook = _on_new_client;
 		this->screen->setDesktopSizeHook = _on_set_desktop_size;
 		this->screen->ptrAddEvent = _on_pointer_event;
