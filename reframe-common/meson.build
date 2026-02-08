@@ -24,8 +24,7 @@ reframe_common = shared_library(
   sources: sources,
   include_directories: include_directories,
   dependencies: dependencies,
-  install: true,
-  install_dir: moduledir
+  install: true
 )
 reframe_common_dep = declare_dependency(
   link_with: reframe_common,
