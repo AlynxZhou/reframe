@@ -307,7 +307,7 @@ int main(int argc, char *argv[])
 		const char *name = NULL;
 		while ((name = g_dir_read_name(dir)) != NULL) {
 			g_autofree char *socket_path =
-				g_strdup_printf("%s/%s", socket_dir, name);
+				g_build_filename(socket_dir, name, NULL);
 			_connect(this, socket_path);
 		}
 	}

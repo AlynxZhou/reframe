@@ -30,7 +30,8 @@ struct _RfVNCServerClass {
 	void (*flush)(RfVNCServer *this);
 };
 
-RfVNCServer *rf_vnc_server_new(RfConfig *config);
+typedef RfVNCServer *(*RfVNCServerNewFunc)(RfConfig *config);
+
 void rf_vnc_server_start(RfVNCServer *this);
 bool rf_vnc_server_is_running(RfVNCServer *this);
 void rf_vnc_server_stop(RfVNCServer *this);

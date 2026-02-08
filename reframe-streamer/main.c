@@ -75,7 +75,11 @@ static int _auth_pid(struct _this *this, pid_t pid, const char *target)
 		return 0;
 
 	g_autoptr(GError) error = NULL;
-	g_autofree char *proc_exe = g_strdup_printf("/proc/%d/exe", pid);
+	g_autofree char *proc_exe = g_strdup_printf(
+		G_DIR_SEPARATOR_S "proc" G_DIR_SEPARATOR_S
+				  "%d" G_DIR_SEPARATOR_S "exe",
+		pid
+	);
 	g_autofree char *bin = g_file_read_link(proc_exe, &error);
 	if (bin == NULL) {
 		g_warning(
@@ -135,7 +139,9 @@ static ssize_t _on_auth_msg(struct _this *this)
 		goto out;
 
 	g_debug("Auth: Received auth message for PID %d.", pid);
-	bool ok = _auth_pid(this, pid, BINDIR "/reframe-session") == 0;
+	bool ok = _auth_pid(
+			  this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-session"
+		  ) == 0;
 	return _send_auth_msg(this, pid, ok);
 
 out:
@@ -541,8 +547,9 @@ _get_connected_card_and_connector(struct _this *this, const char *connector_name
 	while ((name = g_dir_read_name(dir)) != NULL) {
 		if (!g_str_has_prefix(name, "card"))
 			continue;
-		g_autofree char *card_path =
-			g_strdup_printf("/dev/dri/%s", name);
+		g_autofree char *card_path = g_build_filename(
+			G_DIR_SEPARATOR_S "dev", "dri", name, NULL
+		);
 		int cfd = open(card_path, O_RDONLY | O_CLOEXEC);
 		if (cfd < 0)
 			continue;
@@ -892,7 +899,9 @@ int main(int argc, char *argv[])
 		GSocket *socket =
 			g_socket_connection_get_socket(this->connection);
 		const pid_t pid = rf_get_socket_pid(socket);
-		if (_auth_pid(this, pid, BINDIR "/reframe-server") != 0) {
+		if (_auth_pid(
+			    this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server"
+		    ) != 0) {
 			g_warning("Got disallowed socket client PID %d.", pid);
 			goto close;
 		}

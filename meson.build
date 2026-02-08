@@ -23,10 +23,11 @@ endif
 prefix = get_option('prefix')
 bindir = prefix / get_option('bindir')
 libdir = prefix / get_option('libdir')
+moduledir = libdir / meson.project_name()
 sysconfdir = get_option('sysconfdir')
 confdir = get_option('confdir')
 if confdir == ''
-  confdir = sysconfdir / 'reframe'
+  confdir = sysconfdir / meson.project_name()
 endif
 username = get_option('username')
 xdgautostartdir = get_option('xdgautostartdir')
@@ -61,6 +62,7 @@ if get_option('systemd') and systemd.found()
 endif
 
 conf_data = configuration_data()
+conf_data.set_quoted('PROJECT_NAME', meson.project_name())
 conf_data.set_quoted('PROJECT_VERSION', meson.project_version())
 conf_data.set_quoted('USERNAME', username)
 conf_data.set_quoted('BINDIR', bindir)
@@ -86,6 +88,7 @@ summary({
   'prefix': prefix,
   'bindir': bindir,
   'libdir': libdir,
+  'moduledir': moduledir,
   'confdir': confdir,
 }, section: 'Confiuration')
 if systemd.found()

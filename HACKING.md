@@ -92,6 +92,10 @@ However, always prefer GLib variant of functions, because they add more checks t
 
 Use `g_autofree`, `g_autoptr` and `g_auto` whenever is possible, because they reduce the burden of manually memory management.
 
+# Debug
+
+This program will load/link against libraries under prefix, so you may need to `meson install` them before running it, otherwise it may still load old files.
+
 # Profiling
 
 You could build it with `gprof` support by adding `-Dc_args='-pg' -Dc_link_args='-pg'` options to Meson.

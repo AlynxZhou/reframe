@@ -55,7 +55,8 @@ char *rf_config_get_card_path(RfConfig *this)
 	);
 	if (error != NULL || card == NULL || card[0] == '\0')
 		return NULL;
-	char *card_path = g_strdup_printf("/dev/dri/%s", card);
+	char *card_path =
+		g_build_filename(G_DIR_SEPARATOR_S "dev", "dri", card, NULL);
 	return card_path;
 }
 

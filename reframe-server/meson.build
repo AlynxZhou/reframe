@@ -39,31 +39,40 @@ executable(
   install: true
 )
 
-vnc_plugin_dir = get_option('libdir') / 'reframe' / 'vnc'
+lvnc_sources = files('rf-lvnc-server.c')
+
+lvnc_headers = files('rf-lvnc-server.h')
+
+lvnc_dependencies = []
 libvncserver = dependency('libvncserver', required: true)
+lvnc_dependencies += [glib, gio, libvncserver, reframe_common_dep]
 
 shared_module(
-  'rf-lvnc-server',
+  meson.project_name() + '-libvncserver',
   sources: files('rf-lvnc-server.c'),
-  dependencies: [glib, gio, libvncserver, reframe_common_dep],
+  dependencies: lvnc_dependencies,
   include_directories: include_directories,
-  name_prefix: '',
   install: true,
-  install_dir: vnc_plugin_dir
+  install_dir: moduledir / 'vnc'
 )
 
 if get_option('neatvnc') and neatvnc.found()
+  nvnc_sources = files('rf-nvnc-server.c')
+
+  nvnc_headers = files('rf-nvnc-server.h')
+
+  nvnc_dependencies = []
   libdrm = dependency('libdrm', required: true)
   aml = dependency('aml', required: true)
   pixman = dependency('pixman-1', required: true)
+  nvnc_dependencies += [glib, gio, libdrm, aml, pixman, neatvnc, reframe_common_dep]
 
   shared_module(
-    'rf-nvnc-server',
-    sources: files('rf-nvnc-server.c'),
-    dependencies: [glib, gio, libdrm, aml, pixman, neatvnc, reframe_common_dep],
+    meson.project_name() + '-neatvnc',
+    sources: nvnc_sources,
+    dependencies: nvnc_dependencies,
     include_directories: include_directories,
-    name_prefix: '',
     install: true,
-    install_dir: vnc_plugin_dir
+    install_dir: moduledir / 'vnc'
   )
 endif

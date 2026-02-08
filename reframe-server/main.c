@@ -9,8 +9,6 @@
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
 
-typedef RfVNCServer *(*RfVNCServerNewFunc)(RfConfig *config);
-
 struct _this {
 	GMainLoop *main_loop;
 	RfConfig *config;
@@ -206,39 +204,35 @@ int main(int argc, char *argv[])
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
 
+	const char *module_name = NULL;
+#ifdef HAVE_NEATVNC
+	// Only check VNC type when we have choices.
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
 	g_message("VNC: Implementation type is %s.", type);
-
-	const char *plugin_name = NULL;
 	if (g_strcmp0(type, "neatvnc") == 0)
-		plugin_name = "rf-nvnc-server";
+		module_name = "lib" PROJECT_NAME "-neatvnc." G_MODULE_SUFFIX;
 	else
-		plugin_name = "rf-lvnc-server";
-	g_autofree char *module_filename = g_strconcat(
-		plugin_name, "." G_MODULE_SUFFIX, NULL);
-	g_autofree char *module_name = g_build_filename(LIBDIR, "reframe", "vnc",
-		module_filename, NULL);
-	GModule *module = g_module_open(module_name,
-		G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL);
-	if (!module) {
-		g_warning("Failed to load module %s: %s", module_name,
+#endif
+		module_name = "lib" PROJECT_NAME
+			      "-libvncserver." G_MODULE_SUFFIX;
+	g_autofree char *module_path = g_build_filename(
+		LIBDIR, PROJECT_NAME, "vnc", module_name, NULL
+	);
+	GModule *module = g_module_open(
+		module_path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL
+	);
+	if (module == NULL)
+		g_error("VNC: Failed to load module %s: %s",
+			module_path,
 			g_module_error());
-		return 1;
-	}
 	RfVNCServerNewFunc rf_vnc_server_new;
-	if (!g_module_symbol(module, "rf_vnc_server_new",
-	    (gpointer *)&rf_vnc_server_new)) {
-		g_warning("Failed to find rf_vnc_server_new symbol in module %s: %s",
-			  module_name, g_module_error());
-		g_module_close(module);
-		return 1;
-	}
+	if (!g_module_symbol(
+		    module, "rf_vnc_server_new", (void **)&rf_vnc_server_new
+	    ))
+		g_error("Failed to find rf_vnc_server_new symbol in module %s: %s",
+			module_path,
+			g_module_error());
 	this->vnc = rf_vnc_server_new(this->config);
-	if (!this->vnc) {
-		g_warning("Failed to load VNC server implementation");
-		g_module_close(module);
-		return 1;
-	}
 
 	this->converter = rf_converter_new(this->config);
 	this->session = rf_session_new();
@@ -334,8 +328,8 @@ int main(int argc, char *argv[])
 	g_clear_object(&this->session);
 	g_clear_object(&this->converter);
 	g_clear_object(&this->vnc);
+	g_clear_pointer(&module, g_module_close);
 	g_clear_object(&this->config);
-	g_module_close(module);
 
 	return 0;
 }
