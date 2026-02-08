@@ -381,7 +381,7 @@ static void rf_lvnc_server_init(RfLVNCServer *this)
 	this->running = false;
 }
 
-RfVNCServer *rf_lvnc_server_new(RfConfig *config)
+G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfLVNCServer *this = g_object_new(RF_TYPE_LVNC_SERVER, NULL);
 	this->config = config;

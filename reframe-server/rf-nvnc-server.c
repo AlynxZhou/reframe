@@ -2,8 +2,6 @@
 #include <glib-unix.h>
 #define AML_UNSTABLE_API 1
 #include <aml.h>
-// XXX: There are several bugs in neatvnc's encoding, JPEG compress will make it
-// crash on start, and tight encoding will make it crash with GNOME overview.
 #include <neatvnc.h>
 #include <pixman.h>
 #include <libdrm/drm_fourcc.h>
@@ -374,7 +372,7 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 	this->running = false;
 }
 
-RfVNCServer *rf_nvnc_server_new(RfConfig *config)
+G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfNVNCServer *this = g_object_new(RF_TYPE_NVNC_SERVER, NULL);
 	this->config = config;

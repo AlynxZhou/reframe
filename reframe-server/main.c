@@ -1,5 +1,6 @@
 #include <locale.h>
 #include <glib-unix.h>
+#include <gmodule.h>
 
 #include "config.h"
 #include "rf-common.h"
@@ -7,10 +8,8 @@
 #include "rf-session.h"
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
-#include "rf-lvnc-server.h"
-#ifdef HAVE_NEATVNC
-#	include "rf-nvnc-server.h"
-#endif
+
+typedef RfVNCServer *(*RfVNCServerNewFunc)(RfConfig *config);
 
 struct _this {
 	GMainLoop *main_loop;
@@ -206,14 +205,41 @@ int main(int argc, char *argv[])
 	this->rotation = rf_config_get_rotation(this->config);
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
-#ifdef HAVE_NEATVNC
+
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
 	g_message("VNC: Implementation type is %s.", type);
+
+	const char *plugin_name = NULL;
 	if (g_strcmp0(type, "neatvnc") == 0)
-		this->vnc = rf_nvnc_server_new(this->config);
+		plugin_name = "rf-nvnc-server";
 	else
-#endif
-		this->vnc = rf_lvnc_server_new(this->config);
+		plugin_name = "rf-lvnc-server";
+	g_autofree char *module_filename = g_strconcat(
+		plugin_name, "." G_MODULE_SUFFIX, NULL);
+	g_autofree char *module_name = g_build_filename(LIBDIR, "reframe", "vnc",
+		module_filename, NULL);
+	GModule *module = g_module_open(module_name,
+		G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL);
+	if (!module) {
+		g_warning("Failed to load module %s: %s", module_name,
+			g_module_error());
+		return 1;
+	}
+	RfVNCServerNewFunc rf_vnc_server_new;
+	if (!g_module_symbol(module, "rf_vnc_server_new",
+	    (gpointer *)&rf_vnc_server_new)) {
+		g_warning("Failed to find rf_vnc_server_new symbol in module %s: %s",
+			  module_name, g_module_error());
+		g_module_close(module);
+		return 1;
+	}
+	this->vnc = rf_vnc_server_new(this->config);
+	if (!this->vnc) {
+		g_warning("Failed to load VNC server implementation");
+		g_module_close(module);
+		return 1;
+	}
+
 	this->converter = rf_converter_new(this->config);
 	this->session = rf_session_new();
 	rf_session_set_socket_path(this->session, session_socket_path);
@@ -309,6 +335,7 @@ int main(int argc, char *argv[])
 	g_clear_object(&this->converter);
 	g_clear_object(&this->vnc);
 	g_clear_object(&this->config);
+	g_module_close(module);
 
 	return 0;
 }

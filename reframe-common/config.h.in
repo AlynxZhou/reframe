@@ -4,6 +4,7 @@
 #mesondefine PROJECT_VERSION
 #mesondefine USERNAME
 #mesondefine BINDIR
+#mesondefine LIBDIR
 #mesondefine HAVE_LIBSYSTEMD
 #mesondefine HAVE_NEATVNC
 
