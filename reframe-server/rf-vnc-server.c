@@ -136,13 +136,13 @@ static void rf_vnc_server_init(RfVNCServer *this)
 
 	priv->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (priv->xkb_context == NULL)
-		g_error("Failed to create XKB context.");
+		g_error("VNC: Failed to create XKB context.");
 	struct xkb_rule_names names = { NULL, NULL, NULL, NULL, NULL };
 	priv->xkb_keymap = xkb_keymap_new_from_names(
 		priv->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS
 	);
 	if (priv->xkb_keymap == NULL)
-		g_error("Failed to create XKB context.");
+		g_error("VNC: Failed to create XKB context.");
 }
 
 void rf_vnc_server_start(RfVNCServer *this)

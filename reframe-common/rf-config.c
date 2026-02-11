@@ -53,8 +53,10 @@ char *rf_config_get_card_path(RfConfig *this)
 	g_autofree char *card = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP_REFRAME, "card", &error
 	);
-	if (error != NULL || card == NULL || card[0] == '\0')
+	if (error != NULL || card == NULL || card[0] == '\0') {
+		g_clear_pointer(&card, g_free);
 		return NULL;
+	}
 	char *card_path =
 		g_build_filename(G_DIR_SEPARATOR_S "dev", "dri", card, NULL);
 	return card_path;
@@ -68,8 +70,10 @@ char *rf_config_get_connector(RfConfig *this)
 	char *connector = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP_REFRAME, "connector", &error
 	);
-	if (error != NULL || connector == NULL || connector[0] == '\0')
+	if (error != NULL || connector == NULL || connector[0] == '\0') {
+		g_clear_pointer(&connector, g_free);
 		return NULL;
+	}
 	return connector;
 }
 
@@ -210,6 +214,21 @@ unsigned int rf_config_get_fps(RfConfig *this)
 	return fps;
 }
 
+char *rf_config_get_vnc_ip(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *ip = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_VNC, "ip", &error
+	);
+	if (error != NULL || ip == NULL || ip[0] == '\0') {
+		g_clear_pointer(&ip, g_free);
+		return NULL;
+	}
+	return ip;
+}
+
 unsigned int rf_config_get_vnc_port(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 5933);
@@ -252,8 +271,10 @@ char *rf_config_get_vnc_password(RfConfig *this)
 			this->f, RF_CONFIG_GROUP_REFRAME, "password", &error
 		);
 	}
-	if (error != NULL || password == NULL || password[0] == '\0')
+	if (error != NULL || password == NULL || password[0] == '\0') {
+		g_clear_pointer(&password, g_free);
 		return NULL;
+	}
 	return password;
 }
 

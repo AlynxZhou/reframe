@@ -196,14 +196,29 @@ static void _start(RfVNCServer *super)
 	}
 
 	g_autoptr(GError) error = NULL;
+	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
-	g_message("VNC: Listening on port %u.", port);
+	g_message("VNC: Listening on %s:%u.", ip, port);
 	this->service = g_socket_service_new();
-	g_socket_listener_add_inet_port(
-		G_SOCKET_LISTENER(this->service), port, NULL, &error
-	);
+	if (ip != NULL) {
+		g_autoptr(GSocketAddress) address =
+			g_inet_socket_address_new_from_string(ip, port);
+		g_socket_listener_add_address(
+			G_SOCKET_LISTENER(this->service),
+			address,
+			G_SOCKET_TYPE_STREAM,
+			G_SOCKET_PROTOCOL_TCP,
+			NULL,
+			NULL,
+			&error
+		);
+	} else {
+		g_socket_listener_add_inet_port(
+			G_SOCKET_LISTENER(this->service), port, NULL, &error
+		);
+	}
 	if (error != NULL)
-		g_error("Failed to listen on port %u: %s.",
+		g_error("VNC: Failed to listen on %u:%s.",
 			port,
 			error->message);
 	g_signal_connect(

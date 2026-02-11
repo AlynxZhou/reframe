@@ -229,7 +229,7 @@ int main(int argc, char *argv[])
 	if (!g_module_symbol(
 		    module, "rf_vnc_server_new", (void **)&rf_vnc_server_new
 	    ))
-		g_error("Failed to find rf_vnc_server_new symbol in module %s: %s",
+		g_error("VNC: Failed to find rf_vnc_server_new symbol in module %s: %s",
 			module_path,
 			g_module_error());
 	this->vnc = rf_vnc_server_new(this->config);

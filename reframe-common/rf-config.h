@@ -22,6 +22,7 @@ unsigned int rf_config_get_default_height(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
+char *rf_config_get_vnc_ip(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);
 char *rf_config_get_vnc_type(RfConfig *this);

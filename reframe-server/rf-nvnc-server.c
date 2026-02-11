@@ -173,17 +173,18 @@ static void _start(RfVNCServer *super)
 		);
 	}
 
+	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
-	g_message("VNC: Listening on port %u.", port);
+	g_message("VNC: Listening on %s:%u.", ip, port);
 
 	this->clients = 0;
 
 	this->aml = aml_new();
 	aml_set_default(this->aml);
 
-	this->nvnc = nvnc_open("0.0.0.0", port);
+	this->nvnc = nvnc_open(ip, port);
 	if (this->nvnc == NULL)
-		g_error("Failed to listen on port %u.", port);
+		g_error("VNC: Failed to listen on %s:%u.", ip, port);
 	nvnc_set_userdata(this->nvnc, this, NULL);
 	this->display = nvnc_display_new(0, 0);
 	if (this->display == NULL)
@@ -290,8 +291,12 @@ _update(RfVNCServer *super,
 	this->width = width;
 	this->height = height;
 	struct nvnc_fb *fb = nvnc_fb_from_buffer(
-		this->buf->data, this->width, this->height,
-		DRM_FORMAT_XBGR8888, this->width);
+		this->buf->data,
+		this->width,
+		this->height,
+		DRM_FORMAT_XBGR8888,
+		this->width
+	);
 	struct pixman_region16 region;
 	if (damage != NULL)
 		pixman_region_init_rect(
