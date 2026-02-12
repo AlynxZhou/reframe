@@ -845,14 +845,14 @@ static void _calculate_damage(RfConverter *this, struct rf_rect *damage)
 		for (unsigned int x = 0; x < this->width; x += TILE_SIZE) {
 			const unsigned int w = MIN(TILE_SIZE, this->width - x);
 			const unsigned int h = MIN(TILE_SIZE, this->height - y);
+			const unsigned int offset =
+				y * stride + x * RF_BYTES_PER_PIXEL;
 			bool different = false;
 			for (unsigned int row = 0; row < h; ++row) {
-				const uint8_t *new_row = new +
-							 (y + row) * stride +
-							 x * RF_BYTES_PER_PIXEL;
-				const uint8_t *old_row = old +
-							 (y + row) * stride +
-							 x * RF_BYTES_PER_PIXEL;
+				const uint8_t *new_row =
+					new + offset + row * stride;
+				const uint8_t *old_row =
+					old + offset + row * stride;
 				if (memcmp(new_row,
 					   old_row,
 					   w * RF_BYTES_PER_PIXEL) != 0) {
