@@ -19,6 +19,7 @@ int rf_config_get_monitor_x(RfConfig *this);
 int rf_config_get_monitor_y(RfConfig *this);
 unsigned int rf_config_get_default_width(RfConfig *this);
 unsigned int rf_config_get_default_height(RfConfig *this);
+bool rf_config_get_resize(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);

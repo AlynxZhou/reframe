@@ -16,6 +16,7 @@ struct _RfLVNCServer {
 	char *desktop_name;
 	unsigned int width;
 	unsigned int height;
+	bool resize;
 	bool running;
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
@@ -36,11 +37,13 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 static void _on_client_gone(rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
+	RfVNCServer *super = RF_VNC_SERVER(this);
 	GSource *source = client->clientData;
+
 	g_source_destroy(source);
 	g_source_unref(source);
 	if (this->clients-- == 1)
-		rf_vnc_server_handle_last_client(RF_VNC_SERVER(this));
+		rf_vnc_server_handle_last_client(super);
 }
 
 static enum rfbNewClientAction _on_new_client(rfbClientRec *client)
@@ -58,10 +61,14 @@ static int _on_set_desktop_size(
 )
 {
 	RfLVNCServer *this = client->screen->screenData;
+	RfVNCServer *super = RF_VNC_SERVER(this);
+
+	if (!this->resize)
+		return rfbExtDesktopSize_ResizeProhibited;
+
 	if (width != this->width || height != this->height)
-		rf_vnc_server_handle_resize_event(
-			RF_VNC_SERVER(this), width, height
-		);
+		rf_vnc_server_handle_resize_event(super, width, height);
+
 	return rfbExtDesktopSize_Success;
 }
 
@@ -69,22 +76,28 @@ static void
 _on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
+	RfVNCServer *super = RF_VNC_SERVER(this);
 	bool down = direction != 0;
-	rf_vnc_server_handle_keysym_event(RF_VNC_SERVER(this), keysym, down);
+
+	rf_vnc_server_handle_keysym_event(super, keysym, down);
 }
 
 static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
+	RfVNCServer *super = RF_VNC_SERVER(this);
 	const double rx = (double)x / this->width;
 	const double ry = (double)y / this->height;
-	rf_vnc_server_handle_pointer_event(RF_VNC_SERVER(this), rx, ry, mask);
+
+	rf_vnc_server_handle_pointer_event(super, rx, ry, mask);
 }
 
 static void _on_clipboard_text(char *text, int length, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
-	rf_vnc_server_handle_clipboard_text(RF_VNC_SERVER(this), text);
+	RfVNCServer *super = RF_VNC_SERVER(this);
+
+	rf_vnc_server_handle_clipboard_text(super, text);
 }
 
 static int _on_incoming(
@@ -95,6 +108,7 @@ static int _on_incoming(
 )
 {
 	RfLVNCServer *this = data;
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
 	if (this->screen == NULL) {
 		this->screen = rfbGetScreen(
@@ -132,7 +146,7 @@ static int _on_incoming(
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	g_debug("VNC: Got new connection %p.", socket);
 	if (++this->clients == 1)
-		rf_vnc_server_handle_first_client(RF_VNC_SERVER(this));
+		rf_vnc_server_handle_first_client(super);
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
@@ -154,8 +168,9 @@ static int _on_incoming(
 static void _dispose(GObject *o)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(o);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	rf_vnc_server_stop(RF_VNC_SERVER(this));
+	rf_vnc_server_stop(super);
 
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->dispose(o);
 }
@@ -194,6 +209,11 @@ static void _start(RfVNCServer *super)
 			this->height
 		);
 	}
+	this->resize = rf_config_get_resize(this->config);
+	g_message(
+		"VNC: Client resizing will be %s.",
+		this->resize ? "allowed" : "prohibited"
+	);
 
 	g_autoptr(GError) error = NULL;
 	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
@@ -394,6 +414,7 @@ static void rf_lvnc_server_init(RfLVNCServer *this)
 	this->desktop_name = NULL;
 	this->width = 0;
 	this->height = 0;
+	this->resize = true;
 	this->running = false;
 }
 

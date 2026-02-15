@@ -23,6 +23,7 @@ struct _RfNVNCServer {
 	char *desktop_name;
 	unsigned int width;
 	unsigned int height;
+	bool resize;
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
@@ -30,8 +31,9 @@ G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
 static void _dispose(GObject *o)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(o);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	rf_vnc_server_stop(RF_VNC_SERVER(this));
+	rf_vnc_server_stop(super);
 
 	G_OBJECT_CLASS(rf_nvnc_server_parent_class)->dispose(o);
 }
@@ -47,7 +49,8 @@ static void
 _on_keysym_event(struct nvnc_client *client, uint32_t keysym, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
+	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
 	rf_vnc_server_handle_keysym_event(super, keysym, down);
 }
@@ -56,7 +59,8 @@ static void
 _on_keycode_event(struct nvnc_client *client, uint32_t keycode, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
+	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
 	rf_vnc_server_handle_keycode_event(super, keycode, down);
 }
@@ -83,7 +87,8 @@ static void
 _on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
-	RfVNCServer *super = RF_VNC_SERVER(nvnc_get_userdata(nvnc));
+	RfNVNCServer *this = nvnc_get_userdata(nvnc);
+	RfVNCServer *super = RF_VNC_SERVER(this);
 
 	rf_vnc_server_handle_clipboard_text(super, text);
 }
@@ -99,9 +104,11 @@ static bool _on_resize_event(
 	unsigned int width = nvnc_desktop_layout_get_width(layout);
 	unsigned int height = nvnc_desktop_layout_get_height(layout);
 
-	if (width != this->width || height != this->height) {
+	if (!this->resize)
+		return false;
+
+	if (width != this->width || height != this->height)
 		rf_vnc_server_handle_resize_event(super, width, height);
-	}
 
 	return true;
 }
@@ -172,6 +179,11 @@ static void _start(RfVNCServer *super)
 			this->height
 		);
 	}
+	this->resize = rf_config_get_resize(this->config);
+	g_message(
+		"VNC: Client resizing will be %s.",
+		this->resize ? "allowed" : "prohibited"
+	);
 
 	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
@@ -190,9 +202,6 @@ static void _start(RfVNCServer *super)
 	if (this->display == NULL)
 		g_error("VNC: Failed to create neatvnc display.");
 	nvnc_add_display(this->nvnc, this->display);
-	struct nvnc_fb *fb = nvnc_fb_new(
-		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
-	);
 	if (this->desktop_name != NULL)
 		nvnc_set_name(this->nvnc, this->desktop_name);
 	nvnc_set_key_fn(this->nvnc, _on_keysym_event);
@@ -205,6 +214,12 @@ static void _start(RfVNCServer *super)
 		nvnc_enable_auth(
 			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, _on_auth, this
 		);
+	struct nvnc_fb *fb = nvnc_fb_new(
+		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
+	);
+	memset(nvnc_fb_get_addr(fb),
+	       0x33,
+	       this->width * this->height * nvnc_fb_get_pixel_size(fb));
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 	nvnc_display_feed_buffer(this->display, fb, &region);
@@ -287,9 +302,11 @@ _update(RfVNCServer *super,
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_ref(buf);
 	}
-
-	this->width = width;
-	this->height = height;
+	if (this->width != width || this->height != height) {
+		this->width = width;
+		this->height = height;
+		// nvnc_display_set_logical_size(this->display, width, height);
+	}
 	struct nvnc_fb *fb = nvnc_fb_from_buffer(
 		this->buf->data,
 		this->width,
@@ -356,6 +373,7 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 	this->desktop_name = NULL;
 	this->width = 0;
 	this->height = 0;
+	this->resize = true;
 	this->running = false;
 }
 
