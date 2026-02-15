@@ -229,8 +229,8 @@ static int _export_fb2(int cfd, struct rf_buffer *b, uint32_t fb_id)
 			break;
 		++b->md.length;
 	}
-	b->md.width = fb->width;
-	b->md.height = fb->height;
+	b->md.fb_width = fb->width;
+	b->md.fb_height = fb->height;
 	b->md.fourcc = fb->pixel_format;
 	b->md.modifier = fb->flags & DRM_MODE_FB_MODIFIERS ?
 				 fb->modifier :
@@ -255,8 +255,8 @@ static int _export_fb(int cfd, struct rf_buffer *b, uint32_t fb_id)
 	if (b->fds[0] < 0)
 		return 0;
 	b->md.length = 1;
-	b->md.width = fb->width;
-	b->md.height = fb->height;
+	b->md.fb_width = fb->width;
+	b->md.fb_height = fb->height;
 	b->md.fourcc = DRM_FORMAT_XRGB8888;
 	b->md.modifier = DRM_FORMAT_MOD_INVALID;
 	b->md.offsets[0] = 0;
@@ -379,6 +379,21 @@ static ssize_t _on_frame_msg(struct _this *this)
 		return ret;
 	}
 
+	// CRTC size.
+	drmModeCrtc *crtc = drmModeGetCrtc(this->cfd, this->crtc_id);
+	// Empty CRTC, maybe locked screen and turned monitor off, skip it.
+	if (crtc == NULL) {
+		g_debug("Frame: Got empty CRTC.");
+		ret = _send_frame_msg(this, 0, NULL);
+		return ret;
+	}
+	for (size_t i = 0; i < RF_MAX_BUFS; ++i) {
+		bufs[i].md.crtc_width = crtc->width;
+		bufs[i].md.crtc_height = crtc->height;
+	}
+	drmModeFreeCrtc(crtc);
+
+	// Primary plane.
 	length = 0;
 	ret = _make_buffer(
 		this->cfd,
@@ -393,6 +408,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 		return ret;
 	}
 
+	// Cursor plane.
 	if (this->cursor && this->cursor_id == 0)
 		this->cursor_id = _get_plane_id(
 			this->cfd, this->crtc_id, DRM_PLANE_TYPE_CURSOR

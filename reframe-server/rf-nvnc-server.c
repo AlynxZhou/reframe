@@ -218,7 +218,7 @@ static void _start(RfVNCServer *super)
 		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
 	);
 	memset(nvnc_fb_get_addr(fb),
-	       0x33,
+	       0,
 	       this->width * this->height * nvnc_fb_get_pixel_size(fb));
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);

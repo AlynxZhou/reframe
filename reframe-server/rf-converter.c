@@ -427,7 +427,7 @@ static int _setup_gl(RfConverter *this)
 
 	glGenFramebuffers(1, &this->framebuffer);
 
-	glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
 	return 0;
 }
@@ -643,8 +643,8 @@ static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
 		EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
 	};
 	GArray *image_attribs = g_array_new(false, false, sizeof(EGLAttrib));
-	_append_attrib(image_attribs, EGL_WIDTH, b->md.width);
-	_append_attrib(image_attribs, EGL_HEIGHT, b->md.height);
+	_append_attrib(image_attribs, EGL_WIDTH, b->md.fb_width);
+	_append_attrib(image_attribs, EGL_HEIGHT, b->md.fb_height);
 	_append_attrib(image_attribs, EGL_LINUX_DRM_FOURCC_EXT, b->md.fourcc);
 	for (unsigned int i = 0; i < b->md.length; ++i) {
 		_append_attrib(image_attribs, fd_keys[i], b->fds[i]);
@@ -681,10 +681,6 @@ static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
 
 static void _draw_begin(RfConverter *this)
 {
-	// Because we are expected to draw the whole frame, it should be OK that
-	// we don't clear those buffers to improve performance.
-	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 	glUseProgram(this->program);
 	if (this->gles_major >= 3)
 		glBindVertexArray(this->vertex_array);
@@ -799,8 +795,8 @@ static void _draw_buffer(
 		b->md.src_y,
 		b->md.src_w,
 		b->md.src_h,
-		b->md.width,
-		b->md.height,
+		b->md.fb_width,
+		b->md.fb_height,
 		b->md.crtc_x,
 		b->md.crtc_y,
 		b->md.crtc_w,
@@ -925,12 +921,18 @@ GByteArray *rf_converter_convert(
 	}
 
 	const struct rf_buffer *primary = &bufs[0];
-	// Monitor size should be CRTC size, and primary plane is used to store
-	// CRTC's framebuffer, so primary plane size should be CRTC size.
-	const uint32_t frame_width = primary->md.crtc_w;
-	const uint32_t frame_height = primary->md.crtc_h;
+	// Monitor size should be CRTC size.
+	const uint32_t frame_width = primary->md.crtc_width;
+	const uint32_t frame_height = primary->md.crtc_height;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
+
+	// When we cover the whole frame, it should be OK that we don't clear
+	// those buffers to improve performance.
+	if (primary->md.crtc_x > 0 || primary->md.crtc_y > 0 ||
+	    primary->md.crtc_x + primary->md.crtc_w < frame_width ||
+	    primary->md.crtc_y + primary->md.crtc_h < frame_height)
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	_draw_begin(this);
 

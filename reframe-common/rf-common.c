@@ -10,7 +10,8 @@ void rf_buffer_debug(struct rf_buffer *b)
 	g_debug("Frame: Got buffer metadata: length %u, type %s, "
 		"crtc_x %d, crtc_y %d, crtc_w %u, crtc_h %u, "
 		"src_x %u, src_y %u, src_w %u, src_h %u, "
-		"width %u, height %u, fourcc %c%c%c%c, modifier %#lx.",
+		"crtc_width %u, crtc_height %u, fb_width %u, fb_height %u, "
+		"fourcc %c%c%c%c, modifier %#lx.",
 		b->md.length,
 		rf_plane_type(b->md.type),
 		b->md.crtc_x,
@@ -21,8 +22,10 @@ void rf_buffer_debug(struct rf_buffer *b)
 		b->md.src_y,
 		b->md.src_w,
 		b->md.src_h,
-		b->md.width,
-		b->md.height,
+		b->md.crtc_width,
+		b->md.crtc_height,
+		b->md.fb_width,
+		b->md.fb_height,
 		(b->md.fourcc >> 0) & 0xff,
 		(b->md.fourcc >> 8) & 0xff,
 		(b->md.fourcc >> 16) & 0xff,

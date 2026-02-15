@@ -43,16 +43,23 @@ struct rf_buffer_metadata {
 	// DRM plane type.
 	uint32_t type;
 	// See <https://events.static.linuxfound.org/sites/events/files/slides/brezillon-drm-kms.pdf>.
+	//
+	// Rect on monitor. Used as destination.
 	int32_t crtc_x;
 	int32_t crtc_y;
 	uint32_t crtc_w;
 	uint32_t crtc_h;
+	// Rect on framebuffer. Used as source.
 	uint32_t src_x;
 	uint32_t src_y;
 	uint32_t src_w;
 	uint32_t src_h;
-	uint32_t width;
-	uint32_t height;
+	// Monitor size. Used by projection matrix.
+	uint32_t crtc_width;
+	uint32_t crtc_height;
+	// Framebuffer size. Used by EGLImage and crop matrix.
+	uint32_t fb_width;
+	uint32_t fb_height;
 	uint32_t fourcc;
 	uint64_t modifier;
 	uint32_t offsets[RF_MAX_FDS];

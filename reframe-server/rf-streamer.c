@@ -261,13 +261,12 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	}
 
 	struct rf_buffer *primary = &bufs[0];
-	// Monitor size should be CRTC size, and primary plane is used to store
-	// CRTC's framebuffer, so primary plane size should be CRTC size.
-	uint32_t frame_width = primary->md.crtc_w;
-	uint32_t frame_height = primary->md.crtc_h;
+	// Monitor size should be CRTC size.
+	uint32_t frame_width = primary->md.crtc_width;
+	uint32_t frame_height = primary->md.crtc_height;
 	if (this->rotation % 180 != 0) {
-		frame_width = primary->md.crtc_h;
-		frame_height = primary->md.crtc_w;
+		frame_width = primary->md.crtc_height;
+		frame_height = primary->md.crtc_width;
 	}
 	if (this->frame_width != frame_width ||
 	    this->frame_height != frame_height) {
