@@ -9,7 +9,7 @@
 #include "rf-converter.h"
 #include "rf-vnc-server.h"
 
-struct _this {
+struct this {
 	GMainLoop *main_loop;
 	RfConfig *config;
 	RfStreamer *streamer;
@@ -22,18 +22,18 @@ struct _this {
 	bool skip_damage;
 };
 
-static void _on_resize_event(RfVNCServer *v, int width, int height, void *data)
+static void on_resize_event(RfVNCServer *v, int width, int height, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	this->width = width;
 	this->height = height;
 }
 
 static void
-_on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
+on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	const struct rf_buffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
@@ -72,9 +72,9 @@ _on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data
 		);
 }
 
-static void _on_first_client(RfVNCServer *v, void *data)
+static void on_first_client(RfVNCServer *v, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	this->rotation = rf_config_get_rotation(this->config);
 	this->width = rf_config_get_default_width(this->config);
@@ -84,17 +84,17 @@ static void _on_first_client(RfVNCServer *v, void *data)
 		rf_vnc_server_flush(this->vnc);
 }
 
-static void _on_last_client(RfVNCServer *v, void *data)
+static void on_last_client(RfVNCServer *v, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	rf_converter_stop(this->converter);
 	rf_streamer_stop(this->streamer);
 }
 
-static int _on_sigint(void *data)
+static int on_sigint(void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	g_main_loop_quit(this->main_loop);
 
@@ -197,7 +197,7 @@ int main(int argc, char *argv[])
 		g_setenv("XKB_DEFAULT_LAYOUT", "us", true);
 	}
 
-	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->skip_damage = skip_damage;
 	this->config = rf_config_new(config_path);
 	this->rotation = rf_config_get_rotation(this->config);
@@ -257,7 +257,7 @@ int main(int argc, char *argv[])
 		G_CALLBACK(rf_vnc_server_set_desktop_name),
 		this->vnc
 	);
-	g_signal_connect(this->streamer, "frame", G_CALLBACK(_on_frame), this);
+	g_signal_connect(this->streamer, "frame", G_CALLBACK(on_frame), this);
 	g_signal_connect_swapped(
 		this->session,
 		"clipboard-text",
@@ -265,13 +265,13 @@ int main(int argc, char *argv[])
 		this->vnc
 	);
 	g_signal_connect(
-		this->vnc, "first-client", G_CALLBACK(_on_first_client), this
+		this->vnc, "first-client", G_CALLBACK(on_first_client), this
 	);
 	g_signal_connect(
-		this->vnc, "last-client", G_CALLBACK(_on_last_client), this
+		this->vnc, "last-client", G_CALLBACK(on_last_client), this
 	);
 	g_signal_connect(
-		this->vnc, "resize-event", G_CALLBACK(_on_resize_event), this
+		this->vnc, "resize-event", G_CALLBACK(on_resize_event), this
 	);
 	g_signal_connect_swapped(
 		this->vnc,
@@ -318,7 +318,7 @@ int main(int argc, char *argv[])
 	rf_vnc_server_start(this->vnc);
 
 	this->main_loop = g_main_loop_new(NULL, false);
-	g_unix_signal_add(SIGINT, _on_sigint, this);
+	g_unix_signal_add(SIGINT, on_sigint, this);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 

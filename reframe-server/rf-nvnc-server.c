@@ -28,7 +28,7 @@ struct _RfNVNCServer {
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
 
-static void _dispose(GObject *o)
+static void dispose(GObject *o)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(o);
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -38,7 +38,7 @@ static void _dispose(GObject *o)
 	G_OBJECT_CLASS(rf_nvnc_server_parent_class)->dispose(o);
 }
 
-// static void _finalize(GObject *o)
+// static void finalize(GObject *o)
 // {
 // 	RfNVNCServer *this = RF_NVNC_SERVER(o);
 
@@ -46,7 +46,7 @@ static void _dispose(GObject *o)
 // }
 
 static void
-_on_keysym_event(struct nvnc_client *client, uint32_t keysym, bool down)
+on_keysym_event(struct nvnc_client *client, uint32_t keysym, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
@@ -56,7 +56,7 @@ _on_keysym_event(struct nvnc_client *client, uint32_t keysym, bool down)
 }
 
 static void
-_on_keycode_event(struct nvnc_client *client, uint32_t keycode, bool down)
+on_keycode_event(struct nvnc_client *client, uint32_t keycode, bool down)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
@@ -65,7 +65,7 @@ _on_keycode_event(struct nvnc_client *client, uint32_t keycode, bool down)
 	rf_vnc_server_handle_keycode_event(super, keycode, down);
 }
 
-static void _on_pointer_event(
+static void on_pointer_event(
 	struct nvnc_client *client,
 	uint16_t x,
 	uint16_t y,
@@ -84,7 +84,7 @@ static void _on_pointer_event(
 }
 
 static void
-_on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length)
+on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
@@ -93,7 +93,7 @@ _on_clipboard_text(struct nvnc_client *client, const char *text, uint32_t length
 	rf_vnc_server_handle_clipboard_text(super, text);
 }
 
-static bool _on_resize_event(
+static bool on_resize_event(
 	struct nvnc_client *client,
 	const struct nvnc_desktop_layout *layout
 )
@@ -113,7 +113,7 @@ static bool _on_resize_event(
 	return true;
 }
 
-static void _on_client_gone(struct nvnc_client *client)
+static void on_client_gone(struct nvnc_client *client)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
@@ -123,25 +123,25 @@ static void _on_client_gone(struct nvnc_client *client)
 		rf_vnc_server_handle_last_client(super);
 }
 
-static void _on_new_client(struct nvnc_client *client)
+static void on_new_client(struct nvnc_client *client)
 {
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	nvnc_set_client_cleanup_fn(client, _on_client_gone);
+	nvnc_set_client_cleanup_fn(client, on_client_gone);
 	if (++this->clients == 1)
 		rf_vnc_server_handle_first_client(super);
 }
 
-static bool _on_auth(const char *username, const char *password, void *data)
+static bool on_auth(const char *username, const char *password, void *data)
 {
 	RfNVNCServer *this = data;
 
 	return g_strcmp0(password, this->password) == 0;
 }
 
-static int _poll_aml(int fd, GIOCondition condition, void *data)
+static int poll_aml(int fd, GIOCondition condition, void *data)
 {
 	RfNVNCServer *this = data;
 
@@ -154,7 +154,7 @@ static int _poll_aml(int fd, GIOCondition condition, void *data)
 	return G_SOURCE_CONTINUE;
 }
 
-static void _start(RfVNCServer *super)
+static void start(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -204,15 +204,15 @@ static void _start(RfVNCServer *super)
 	nvnc_add_display(this->nvnc, this->display);
 	if (this->desktop_name != NULL)
 		nvnc_set_name(this->nvnc, this->desktop_name);
-	nvnc_set_key_fn(this->nvnc, _on_keysym_event);
-	nvnc_set_key_code_fn(this->nvnc, _on_keycode_event);
-	nvnc_set_pointer_fn(this->nvnc, _on_pointer_event);
-	nvnc_set_cut_text_fn(this->nvnc, _on_clipboard_text);
-	nvnc_set_desktop_layout_fn(this->nvnc, _on_resize_event);
-	nvnc_set_new_client_fn(this->nvnc, _on_new_client);
+	nvnc_set_key_fn(this->nvnc, on_keysym_event);
+	nvnc_set_key_code_fn(this->nvnc, on_keycode_event);
+	nvnc_set_pointer_fn(this->nvnc, on_pointer_event);
+	nvnc_set_cut_text_fn(this->nvnc, on_clipboard_text);
+	nvnc_set_desktop_layout_fn(this->nvnc, on_resize_event);
+	nvnc_set_new_client_fn(this->nvnc, on_new_client);
 	if (this->password != NULL && this->password[0] != '\0')
 		nvnc_enable_auth(
-			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, _on_auth, this
+			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, on_auth, this
 		);
 	struct nvnc_fb *fb = nvnc_fb_new(
 		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
@@ -228,20 +228,20 @@ static void _start(RfVNCServer *super)
 
 	// Integrate aml into GLib's main loop.
 	this->aml_id = g_unix_fd_add(
-		aml_get_fd(this->aml), this->io_flags, _poll_aml, this
+		aml_get_fd(this->aml), this->io_flags, poll_aml, this
 	);
 
 	this->running = true;
 }
 
-static bool _is_running(RfVNCServer *super)
+static bool is_running(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
 	return this->running;
 }
 
-static void _stop(RfVNCServer *super)
+static void stop(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -264,7 +264,7 @@ static void _stop(RfVNCServer *super)
 	g_clear_pointer(&this->password, g_free);
 }
 
-static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
+static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -276,7 +276,7 @@ static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// nvnc_set_name(this->nvnc, this->desktop_name);
 }
 
-static void _send_clipboard_text(RfVNCServer *super, const char *text)
+static void send_clipboard_text(RfVNCServer *super, const char *text)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -287,11 +287,11 @@ static void _send_clipboard_text(RfVNCServer *super, const char *text)
 }
 
 static void
-_update(RfVNCServer *super,
-	GByteArray *buf,
-	unsigned int width,
-	unsigned int height,
-	const struct rf_rect *damage)
+update(RfVNCServer *super,
+       GByteArray *buf,
+       unsigned int width,
+       unsigned int height,
+       const struct rf_rect *damage)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -328,7 +328,7 @@ _update(RfVNCServer *super,
 	nvnc_fb_unref(fb);
 }
 
-static void _flush(RfVNCServer *super)
+static void flush(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
@@ -348,16 +348,16 @@ static void rf_nvnc_server_class_init(RfNVNCServerClass *klass)
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 	RfVNCServerClass *v_class = RF_VNC_SERVER_CLASS(klass);
 
-	o_class->dispose = _dispose;
-	// o_class->finalize = _finalize;
+	o_class->dispose = dispose;
+	// o_class->finalize = finalize;
 
-	v_class->start = _start;
-	v_class->is_running = _is_running;
-	v_class->stop = _stop;
-	v_class->set_desktop_name = _set_desktop_name;
-	v_class->send_clipboard_text = _send_clipboard_text;
-	v_class->update = _update;
-	v_class->flush = _flush;
+	v_class->start = start;
+	v_class->is_running = is_running;
+	v_class->stop = stop;
+	v_class->set_desktop_name = set_desktop_name;
+	v_class->send_clipboard_text = send_clipboard_text;
+	v_class->update = update;
+	v_class->flush = flush;
 }
 
 static void rf_nvnc_server_init(RfNVNCServer *this)

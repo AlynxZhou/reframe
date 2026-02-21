@@ -33,7 +33,7 @@ struct _RfConverter {
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
 
-static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
+static EGLDisplay get_egl_display_from_drm_card(const char *card_path)
 {
 	if (card_path == NULL)
 		return EGL_NO_DISPLAY;
@@ -71,7 +71,7 @@ static EGLDisplay _get_egl_display_from_drm_card(const char *card_path)
 	return eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT, device, NULL);
 }
 
-static int _setup_egl(RfConverter *this)
+static int setup_egl(RfConverter *this)
 {
 	EGLint major;
 	EGLint minor;
@@ -99,7 +99,7 @@ static int _setup_egl(RfConverter *this)
 	};
 	// clang-format on
 
-	this->display = _get_egl_display_from_drm_card(this->card_path);
+	this->display = get_egl_display_from_drm_card(this->card_path);
 	if (this->display == EGL_NO_DISPLAY) {
 		g_warning(
 			"EGL: Failed to get platform display. Fallback to default display (may not work if you have more than one GPUs)."
@@ -163,7 +163,7 @@ static int _setup_egl(RfConverter *this)
 	return 0;
 }
 
-static void _clean_egl(RfConverter *this)
+static void clean_egl(RfConverter *this)
 {
 	if (this->context != EGL_NO_CONTEXT) {
 		eglDestroyContext(this->display, this->context);
@@ -177,7 +177,7 @@ static void _clean_egl(RfConverter *this)
 }
 
 #ifdef __DEBUG__
-static void _gl_message(
+static void gl_message(
 	unsigned int source,
 	unsigned int type,
 	unsigned int id,
@@ -192,7 +192,7 @@ static void _gl_message(
 }
 #endif
 
-static unsigned int _make_shader(GLenum type, const char *s)
+static unsigned int make_shader(GLenum type, const char *s)
 {
 	unsigned int shader = glCreateShader(type);
 	if (shader == 0)
@@ -210,10 +210,10 @@ static unsigned int _make_shader(GLenum type, const char *s)
 	return shader;
 }
 
-static unsigned int _make_program(const char *vs, const char *fs)
+static unsigned int make_program(const char *vs, const char *fs)
 {
-	unsigned int v = _make_shader(GL_VERTEX_SHADER, vs);
-	unsigned int f = _make_shader(GL_FRAGMENT_SHADER, fs);
+	unsigned int v = make_shader(GL_VERTEX_SHADER, vs);
+	unsigned int f = make_shader(GL_FRAGMENT_SHADER, fs);
 	if (v == 0 || f == 0)
 		return 0;
 	unsigned int program = glCreateProgram();
@@ -234,7 +234,7 @@ static unsigned int _make_program(const char *vs, const char *fs)
 	return program;
 }
 
-static void _bind_buffers(RfConverter *this)
+static void bind_buffers(RfConverter *this)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
 	glVertexAttribPointer(
@@ -265,7 +265,7 @@ static void _bind_buffers(RfConverter *this)
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
 }
 
-static void _unbind_buffers(RfConverter *this)
+static void unbind_buffers(RfConverter *this)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glDisableVertexAttribArray(
@@ -280,7 +280,7 @@ static void _unbind_buffers(RfConverter *this)
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
-static int _setup_gl(RfConverter *this)
+static int setup_gl(RfConverter *this)
 {
 	if (!eglMakeCurrent(
 		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
@@ -294,7 +294,7 @@ static int _setup_gl(RfConverter *this)
 
 #ifdef __DEBUG__
 	glEnable(GL_DEBUG_OUTPUT);
-	glDebugMessageCallback(_gl_message, NULL);
+	glDebugMessageCallback(gl_message, NULL);
 #endif
 	glEnable(GL_CULL_FACE);
 	// glDisable(GL_CULL_FACE);
@@ -331,7 +331,7 @@ static int _setup_gl(RfConverter *this)
 			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0f, 1.0f);\n"
 			"	out_color = texture(image, out_coordinate.xy);\n"
 			"}\n";
-		this->program = _make_program(vs, fs);
+		this->program = make_program(vs, fs);
 	} else {
 		const char vs[] =
 			"#version 100\n"
@@ -354,7 +354,7 @@ static int _setup_gl(RfConverter *this)
 			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0, 1.0);\n"
 			"	gl_FragColor = texture2D(image, out_coordinate.xy);\n"
 			"}\n";
-		this->program = _make_program(vs, fs);
+		this->program = make_program(vs, fs);
 	}
 	if (this->program == 0)
 		return -5;
@@ -421,7 +421,7 @@ static int _setup_gl(RfConverter *this)
 		glGenVertexArrays(1, &this->vertex_array);
 
 		glBindVertexArray(this->vertex_array);
-		_bind_buffers(this);
+		bind_buffers(this);
 		glBindVertexArray(0);
 	}
 
@@ -432,7 +432,7 @@ static int _setup_gl(RfConverter *this)
 	return 0;
 }
 
-static void _clean_gl(RfConverter *this)
+static void clean_gl(RfConverter *this)
 {
 	if (this->texture != 0) {
 		glDeleteTextures(1, &this->texture);
@@ -458,7 +458,7 @@ static void _clean_gl(RfConverter *this)
 	}
 }
 
-static void _finalize(GObject *o)
+static void finalize(GObject *o)
 {
 	RfConverter *this = RF_CONVERTER(o);
 
@@ -471,7 +471,7 @@ static void rf_converter_class_init(RfConverterClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
-	o_class->finalize = _finalize;
+	o_class->finalize = finalize;
 }
 
 static void rf_converter_init(RfConverter *this)
@@ -532,10 +532,10 @@ int rf_converter_start(RfConverter *this)
 	this->prev_width = 0;
 	this->prev_height = 0;
 	int ret = 0;
-	ret = _setup_egl(this);
+	ret = setup_egl(this);
 	if (ret < 0)
 		goto out;
-	ret = _setup_gl(this);
+	ret = setup_gl(this);
 	if (ret < 0)
 		goto out;
 
@@ -543,8 +543,8 @@ int rf_converter_start(RfConverter *this)
 
 out:
 	if (ret < 0) {
-		_clean_gl(this);
-		_clean_egl(this);
+		clean_gl(this);
+		clean_egl(this);
 		g_clear_pointer(&this->card_path, g_free);
 	}
 	return ret;
@@ -569,17 +569,17 @@ void rf_converter_stop(RfConverter *this)
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->prev, g_byte_array_unref);
 	g_clear_pointer(&this->card_path, g_free);
-	_clean_gl(this);
-	_clean_egl(this);
+	clean_gl(this);
+	clean_egl(this);
 }
 
-static inline void _append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
+static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 {
 	g_array_append_val(a, k);
 	g_array_append_val(a, v);
 }
 
-static void _gen_texture(RfConverter *this)
+static void gen_texture(RfConverter *this)
 {
 	g_debug("GL: Generating new texture for width %u and height %u.",
 		this->width,
@@ -616,7 +616,7 @@ static void _gen_texture(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
+static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
 {
 	EGLAttrib fd_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					  EGL_DMA_BUF_PLANE1_FD_EXT,
@@ -643,20 +643,20 @@ static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
 		EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
 	};
 	GArray *image_attribs = g_array_new(false, false, sizeof(EGLAttrib));
-	_append_attrib(image_attribs, EGL_WIDTH, b->md.fb_width);
-	_append_attrib(image_attribs, EGL_HEIGHT, b->md.fb_height);
-	_append_attrib(image_attribs, EGL_LINUX_DRM_FOURCC_EXT, b->md.fourcc);
+	append_attrib(image_attribs, EGL_WIDTH, b->md.fb_width);
+	append_attrib(image_attribs, EGL_HEIGHT, b->md.fb_height);
+	append_attrib(image_attribs, EGL_LINUX_DRM_FOURCC_EXT, b->md.fourcc);
 	for (unsigned int i = 0; i < b->md.length; ++i) {
-		_append_attrib(image_attribs, fd_keys[i], b->fds[i]);
-		_append_attrib(image_attribs, offset_keys[i], b->md.offsets[i]);
-		_append_attrib(image_attribs, pitch_keys[i], b->md.pitches[i]);
+		append_attrib(image_attribs, fd_keys[i], b->fds[i]);
+		append_attrib(image_attribs, offset_keys[i], b->md.offsets[i]);
+		append_attrib(image_attribs, pitch_keys[i], b->md.pitches[i]);
 		if (b->md.modifier != DRM_FORMAT_MOD_INVALID) {
-			_append_attrib(
+			append_attrib(
 				image_attribs,
 				modlo_keys[i],
 				(b->md.modifier & 0xFFFFFFFF)
 			);
-			_append_attrib(
+			append_attrib(
 				image_attribs,
 				modhi_keys[i],
 				(b->md.modifier >> 32)
@@ -679,16 +679,16 @@ static EGLImage _make_image(EGLDisplay *display, const struct rf_buffer *b)
 	return image;
 }
 
-static void _draw_begin(RfConverter *this)
+static void draw_begin(RfConverter *this)
 {
 	glUseProgram(this->program);
 	if (this->gles_major >= 3)
 		glBindVertexArray(this->vertex_array);
 	else
-		_bind_buffers(this);
+		bind_buffers(this);
 }
 
-static void _draw_rect(
+static void draw_rect(
 	RfConverter *this,
 	EGLImage image,
 	// Texture coordinates.
@@ -775,7 +775,7 @@ static void _draw_rect(
 	glDeleteTextures(1, &texture);
 }
 
-static void _draw_buffer(
+static void draw_buffer(
 	RfConverter *this,
 	const struct rf_buffer *b,
 	int32_t z,
@@ -783,12 +783,12 @@ static void _draw_buffer(
 	uint32_t frame_height
 )
 {
-	EGLImage image = _make_image(this->display, b);
+	EGLImage image = make_image(this->display, b);
 	if (image == EGL_NO_IMAGE) {
 		g_warning("EGL: Failed to create image: %d.", eglGetError());
 		return;
 	}
-	_draw_rect(
+	draw_rect(
 		this,
 		image,
 		b->md.src_x,
@@ -808,16 +808,16 @@ static void _draw_buffer(
 	eglDestroyImage(this->display, image);
 }
 
-static void _draw_end(RfConverter *this)
+static void draw_end(RfConverter *this)
 {
 	if (this->gles_major >= 3)
 		glBindVertexArray(0);
 	else
-		_unbind_buffers(this);
+		unbind_buffers(this);
 	glUseProgram(0);
 }
 
-static void _calculate_damage(RfConverter *this, struct rf_rect *damage)
+static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 {
 	if (this->prev == NULL || this->prev_width != this->width ||
 	    this->prev_height != this->height) {
@@ -913,7 +913,7 @@ GByteArray *rf_converter_convert(
 		this->width = width;
 		this->height = height;
 		glViewport(0, 0, this->width, this->height);
-		_gen_texture(this);
+		gen_texture(this);
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_sized_new(
 			RF_BYTES_PER_PIXEL * this->width * this->height
@@ -934,14 +934,14 @@ GByteArray *rf_converter_convert(
 	    primary->md.crtc_y + primary->md.crtc_h < frame_height)
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	_draw_begin(this);
+	draw_begin(this);
 
 	for (size_t i = 0; i < length; ++i)
-		_draw_buffer(
+		draw_buffer(
 			this, &bufs[i], length - i, frame_width, frame_height
 		);
 
-	_draw_end(this);
+	draw_end(this);
 
 	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
 	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
@@ -958,7 +958,7 @@ GByteArray *rf_converter_convert(
 	// g_debug("glReadPixels: %#x", glGetError());
 	if (glGetError() == GL_NO_ERROR) {
 		if (damage != NULL) {
-			_calculate_damage(this, damage);
+			calculate_damage(this, damage);
 			g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
 				damage->x,
 				damage->y,

@@ -8,7 +8,7 @@
 #include "config.h"
 #include "rf-common.h"
 
-struct _this {
+struct this {
 	GMainLoop *main_loop;
 	GHashTable *sockets;
 	GIOCondition io_flags;
@@ -17,7 +17,7 @@ struct _this {
 };
 
 static void
-_send_clipboard_text_msg(struct _this *this, const char *clipboard_text)
+send_clipboard_text_msg(struct this *this, const char *clipboard_text)
 {
 	size_t length = strlen(clipboard_text) + 1;
 	GHashTableIter it;
@@ -55,9 +55,9 @@ _send_clipboard_text_msg(struct _this *this, const char *clipboard_text)
 }
 
 static void
-_on_read_text_finish(GObject *source_object, GAsyncResult *res, void *data)
+on_read_text_finish(GObject *source_object, GAsyncResult *res, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 	GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
 	g_autoptr(GError) error = NULL;
 	g_autofree char *text = NULL;
@@ -68,23 +68,23 @@ _on_read_text_finish(GObject *source_object, GAsyncResult *res, void *data)
 		return;
 	}
 	g_debug("Clipboard: Got new text %s.", text);
-	_send_clipboard_text_msg(this, text);
+	send_clipboard_text_msg(this, text);
 }
 
-static void _on_clipboard_changed(GdkClipboard *clipboard, void *data)
+static void on_clipboard_changed(GdkClipboard *clipboard, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	if (gdk_clipboard_is_local(clipboard))
 		return;
 
 	gdk_clipboard_read_text_async(
-		clipboard, NULL, _on_read_text_finish, this
+		clipboard, NULL, on_read_text_finish, this
 	);
 }
 
 static ssize_t
-_on_clipboard_text_msg(struct _this *this, GSocketConnection *connection)
+on_clipboard_text_msg(struct this *this, GSocketConnection *connection)
 {
 	g_autofree char *msg = NULL;
 	size_t length = 0;
@@ -114,9 +114,9 @@ out:
 	return ret;
 }
 
-static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
+static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	if (!(condition & this->io_flags))
 		return G_SOURCE_CONTINUE;
@@ -140,7 +140,7 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 
 	switch (type) {
 	case RF_MSG_TYPE_CLIPBOARD_TEXT:
-		ret = _on_clipboard_text_msg(this, connection);
+		ret = on_clipboard_text_msg(this, connection);
 		break;
 	default:
 		break;
@@ -156,7 +156,7 @@ out:
 	return G_SOURCE_CONTINUE;
 }
 
-static void _connect(struct _this *this, const char *socket_path)
+static void connect(struct this *this, const char *socket_path)
 {
 	g_debug("Socket: Connect to path %s.", socket_path);
 	g_autoptr(GError) error = NULL;
@@ -176,13 +176,12 @@ static void _connect(struct _this *this, const char *socket_path)
 
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	g_hash_table_insert(this->sockets, g_object_ref(socket), source);
-	// _send_clipboard_text_msg(this, "收到！");
 }
 
-static void _on_changed(
+static void on_changed(
 	GFileMonitor *monitor,
 	GFile *file,
 	GFile *other_file,
@@ -190,7 +189,7 @@ static void _on_changed(
 	void *data
 )
 {
-	struct _this *this = data;
+	struct this *this = data;
 
 	if (g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) !=
 	    G_FILE_TYPE_SPECIAL)
@@ -202,20 +201,20 @@ static void _on_changed(
 		socket_path);
 	switch (event_type) {
 	case G_FILE_MONITOR_EVENT_CREATED:
-		_connect(this, socket_path);
+		connect(this, socket_path);
 		break;
 	// It should be enough to handle disconnect on transfer.
 	// case G_FILE_MONITOR_EVENT_DELETED:
-	// 	_disconnect(this);
+	// 	disconnect(this);
 	// 	break;
 	default:
 		break;
 	}
 }
 
-static int _on_sigint(void *data)
+static int on_sigint(void *data)
 {
-	struct _this *this = data;
+	struct this *this = data;
 	g_main_loop_quit(this->main_loop);
 	return G_SOURCE_REMOVE;
 }
@@ -270,7 +269,7 @@ int main(int argc, char *argv[])
 	if (socket_dir[length - 1] == '/')
 		socket_dir[length - 1] = '\0';
 
-	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->io_flags = G_IO_IN | G_IO_PRI;
 
 	// See <https://gitlab.gnome.org/GNOME/gtk/-/issues/1874>.
@@ -291,7 +290,7 @@ int main(int argc, char *argv[])
 	g_signal_connect(
 		this->clipboard,
 		"changed",
-		G_CALLBACK(_on_clipboard_changed),
+		G_CALLBACK(on_clipboard_changed),
 		this
 	);
 
@@ -308,7 +307,7 @@ int main(int argc, char *argv[])
 		while ((name = g_dir_read_name(dir)) != NULL) {
 			g_autofree char *socket_path =
 				g_build_filename(socket_dir, name, NULL);
-			_connect(this, socket_path);
+			connect(this, socket_path);
 		}
 	}
 
@@ -318,10 +317,10 @@ int main(int argc, char *argv[])
 	);
 	if (monitor == NULL)
 		g_warning("Failed to monitor socket dir: %s", error->message);
-	g_signal_connect(monitor, "changed", G_CALLBACK(_on_changed), this);
+	g_signal_connect(monitor, "changed", G_CALLBACK(on_changed), this);
 
 	this->main_loop = g_main_loop_new(NULL, false);
-	g_unix_signal_add(SIGINT, _on_sigint, this);
+	g_unix_signal_add(SIGINT, on_sigint, this);
 	g_main_loop_run(this->main_loop);
 	g_main_loop_unref(this->main_loop);
 

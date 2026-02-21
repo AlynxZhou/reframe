@@ -80,9 +80,9 @@ For `reframe-streamer`, it is easy because it could have `CAP_SYS_PRTACE`, so it
 
 # Coding
 
-There is a `.clang-format`, so you could run `clang-format -i *.c *.h` in each source directories, it is suggested but not a must, because if you forget it, I'll do it.
+This project follows [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/coding-style.html). There is a `.clang-format`, so you could run `clang-format --verbose -i reframe-{common,streamer,server,session}/*.{c,h}` to format all sources, it is suggested but not a must, because if you forget it, I'll do it.
 
-While this project uses GLib, I prefer not to use [GLib basic types](https://docs.gtk.org/glib/types.html#gboolean), because most of them are just aliases of C types, and I prefer newer C standard so just use C types. For example, use `size_t`, `unsigned char` and `void *` instead of `gsize`, `guchar` and `gpointer`.
+While this project uses GLib, I prefer not to use [GLib basic types](https://docs.gtk.org/glib/types.html), because most of them are just aliases of C types, and I prefer newer C standard so just use C types. For example, use `size_t`, `unsigned char` and `void *` instead of `gsize`, `guchar` and `gpointer`.
 
 `gboolean` might be hard to deal with, because it is not `bool` from `stdbool.h`. Replacing `gboolean` with `bool` directly leads into type mismatch and memory leak. However, we could always use `int` instead of `gboolean` for the type and use `true` and `false` instead of `TRUE` and `FALSE` for the value. For other conditions that not interacting with GLib, always prefer `bool` from `stdbool.h`.
 
@@ -92,9 +92,11 @@ However, always prefer GLib variant of functions, because they add more checks t
 
 Use `g_autofree`, `g_autoptr` and `g_auto` whenever is possible, because they reduce the burden of manually memory management.
 
-# Debug
+When you are writing new functions, follow existing name and coding style. Use `static` for private methods, you don't need to add prefix for private methods, including underline, but like most GObject projects, add reasonable prefix for public methods. Put private methods at the top of a file, then GObject methods (`class_init` and `init`), then public methods. Use `this` as the first parameter name for methods and use `klass` as the first parameter name for class methods.
 
-This program will load/link against libraries under prefix, so you may need to `meson install` them before running it, otherwise it may still load old files.
+# Debugging
+
+This program will load/link against libraries under installation prefix, so you may need to `meson install` them before running it, otherwise it may still load old files.
 
 # Profiling
 

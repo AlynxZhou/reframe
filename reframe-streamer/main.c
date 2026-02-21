@@ -21,7 +21,7 @@
 #define WAKEUP_MAX_EVENTS 4
 
 // clang-format off
-#define _ioctl_must(...)                                                         \
+#define ioctl_must(...)                                                         \
 	G_STMT_START {                                                           \
 		int e;                                                           \
 		if ((e = ioctl(__VA_ARGS__)))                                    \
@@ -29,7 +29,7 @@
 				__LINE__,                                        \
 				e);                                              \
 	} G_STMT_END
-#define _ioctl_may(...)                                                          \
+#define ioctl_may(...)                                                          \
 	G_STMT_START {                                                           \
 		int e;                                                           \
 		if ((e = ioctl(__VA_ARGS__)))                                    \
@@ -40,7 +40,7 @@
 			);                                                       \
 	} G_STMT_END
 
-#define _write_may(fd, buf, count)                                                                              \
+#define write_may(fd, buf, count)                                                                              \
 	G_STMT_START {                                                                                          \
 		size_t e = write((fd), (buf), (count));                                                        \
 		if (e != (count))                                                                               \
@@ -54,7 +54,7 @@
 	} G_STMT_END
 // clang-format on
 
-struct _this {
+struct this {
 	RfConfig *config;
 	GSocketConnection *connection;
 	char *card_path;
@@ -69,7 +69,7 @@ struct _this {
 	bool skip_auth;
 };
 
-static int _auth_pid(struct _this *this, pid_t pid, const char *target)
+static int auth_pid(struct this *this, pid_t pid, const char *target)
 {
 	if (this->skip_auth)
 		return 0;
@@ -95,7 +95,7 @@ static int _auth_pid(struct _this *this, pid_t pid, const char *target)
 	return 0;
 }
 
-static ssize_t _send_auth_msg(struct _this *this, pid_t pid, bool ok)
+static ssize_t send_auth_msg(struct this *this, pid_t pid, bool ok)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
@@ -122,7 +122,7 @@ out:
 	return ret;
 }
 
-static ssize_t _on_auth_msg(struct _this *this)
+static ssize_t on_auth_msg(struct this *this)
 {
 	ssize_t ret = 0;
 	size_t length = 0;
@@ -139,10 +139,10 @@ static ssize_t _on_auth_msg(struct _this *this)
 		goto out;
 
 	g_debug("Auth: Received auth message for PID %d.", pid);
-	bool ok = _auth_pid(
+	bool ok = auth_pid(
 			  this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-session"
 		  ) == 0;
-	return _send_auth_msg(this, pid, ok);
+	return send_auth_msg(this, pid, ok);
 
 out:
 	if (ret < 0)
@@ -154,7 +154,7 @@ out:
 }
 
 // You need to explicitly cast the type of returned value.
-static uint64_t _get_plane_prop(
+static uint64_t get_plane_prop(
 	int cfd,
 	uint32_t plane_id,
 	const char *name,
@@ -181,7 +181,7 @@ static uint64_t _get_plane_prop(
 }
 
 // We have to get plane via ID every frame to get the newest framebuffer.
-static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
+static uint32_t get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 {
 	uint32_t plane_id = 0;
 	drmModePlaneRes *pres = drmModeGetPlaneResources(cfd);
@@ -193,7 +193,7 @@ static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 		rf_plane_type(type),
 		crtc_id);
 	for (size_t i = 0; i < pres->count_planes; ++i) {
-		if (_get_plane_prop(
+		if (get_plane_prop(
 			    cfd, pres->planes[i], "type", DRM_PLANE_TYPE_OVERLAY
 		    ) != type)
 			continue;
@@ -215,7 +215,7 @@ static uint32_t _get_plane_id(int cfd, uint32_t crtc_id, uint32_t type)
 	return plane_id;
 }
 
-static int _export_fb2(int cfd, struct rf_buffer *b, uint32_t fb_id)
+static int export_fb2(int cfd, struct rf_buffer *b, uint32_t fb_id)
 {
 	drmModeFB2 *fb = drmModeGetFB2(cfd, fb_id);
 	if (fb == NULL)
@@ -243,7 +243,7 @@ static int _export_fb2(int cfd, struct rf_buffer *b, uint32_t fb_id)
 	return b->md.length;
 }
 
-static int _export_fb(int cfd, struct rf_buffer *b, uint32_t fb_id)
+static int export_fb(int cfd, struct rf_buffer *b, uint32_t fb_id)
 {
 	drmModeFB *fb = drmModeGetFB(cfd, fb_id);
 	if (fb == NULL)
@@ -266,7 +266,7 @@ static int _export_fb(int cfd, struct rf_buffer *b, uint32_t fb_id)
 }
 
 static int
-_make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
+make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 {
 	drmModePlane *plane = drmModeGetPlane(cfd, plane_id);
 	if (plane == NULL)
@@ -279,19 +279,19 @@ _make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 		rf_plane_type(type),
 		fb_id);
 	b->md.type = type;
-	b->md.crtc_x = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_X", 0);
-	b->md.crtc_y = (int32_t)_get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
-	b->md.crtc_w = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_W", 0);
-	b->md.crtc_h = (uint32_t)_get_plane_prop(cfd, plane_id, "CRTC_H", 0);
+	b->md.crtc_x = (int32_t)get_plane_prop(cfd, plane_id, "CRTC_X", 0);
+	b->md.crtc_y = (int32_t)get_plane_prop(cfd, plane_id, "CRTC_Y", 0);
+	b->md.crtc_w = (uint32_t)get_plane_prop(cfd, plane_id, "CRTC_W", 0);
+	b->md.crtc_h = (uint32_t)get_plane_prop(cfd, plane_id, "CRTC_H", 0);
 	// These are in 16.16 fixed point, we only need integer.
 	b->md.src_x =
-		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_X", 0) >> 16);
+		(uint32_t)(get_plane_prop(cfd, plane_id, "SRC_X", 0) >> 16);
 	b->md.src_y =
-		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_Y", 0) >> 16);
+		(uint32_t)(get_plane_prop(cfd, plane_id, "SRC_Y", 0) >> 16);
 	b->md.src_w =
-		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_W", 0) >> 16);
+		(uint32_t)(get_plane_prop(cfd, plane_id, "SRC_W", 0) >> 16);
 	b->md.src_h =
-		(uint32_t)(_get_plane_prop(cfd, plane_id, "SRC_H", 0) >> 16);
+		(uint32_t)(get_plane_prop(cfd, plane_id, "SRC_H", 0) >> 16);
 
 	int ret = 0;
 	// GUnixFDList refuses to send invalid fds like -1, so we need
@@ -304,9 +304,9 @@ _make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 		b->md.pitches[i] = 0;
 	}
 	// Export DRM framebuffer to fds and metadata that EGL can import.
-	ret = _export_fb2(cfd, b, fb_id);
+	ret = export_fb2(cfd, b, fb_id);
 	if (ret <= 0)
-		ret = _export_fb(cfd, b, fb_id);
+		ret = export_fb(cfd, b, fb_id);
 	if (ret <= 0)
 		return ret;
 	rf_buffer_debug(b);
@@ -314,7 +314,7 @@ _make_buffer(int cfd, struct rf_buffer *b, uint32_t plane_id, uint32_t type)
 }
 
 static ssize_t
-_send_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
+send_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
 {
 	ssize_t ret = 0;
 	GOutputVector iov = { &b->md, sizeof(b->md) };
@@ -336,7 +336,7 @@ _send_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
 }
 
 static ssize_t
-_send_frame_msg(struct _this *this, size_t length, struct rf_buffer *bufs)
+send_frame_msg(struct this *this, size_t length, struct rf_buffer *bufs)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
@@ -347,7 +347,7 @@ _send_frame_msg(struct _this *this, size_t length, struct rf_buffer *bufs)
 	if (ret <= 0)
 		goto out;
 	for (size_t i = 0; i < length; ++i) {
-		ret = _send_buffer(this->connection, &bufs[i], &error);
+		ret = send_buffer(this->connection, &bufs[i], &error);
 		if (ret <= 0)
 			break;
 	}
@@ -358,7 +358,7 @@ out:
 	return ret;
 }
 
-static ssize_t _on_frame_msg(struct _this *this)
+static ssize_t on_frame_msg(struct this *this)
 {
 	g_debug("Frame: Received frame message.");
 
@@ -384,7 +384,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 	// Empty CRTC, maybe locked screen and turned monitor off, skip it.
 	if (crtc == NULL) {
 		g_debug("Frame: Got empty CRTC.");
-		ret = _send_frame_msg(this, 0, NULL);
+		ret = send_frame_msg(this, 0, NULL);
 		return ret;
 	}
 	for (size_t i = 0; i < RF_MAX_BUFS; ++i) {
@@ -395,7 +395,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 
 	// Primary plane.
 	length = 0;
-	ret = _make_buffer(
+	ret = make_buffer(
 		this->cfd,
 		&bufs[length++],
 		this->primary_id,
@@ -404,17 +404,17 @@ static ssize_t _on_frame_msg(struct _this *this)
 	// Empty buffer, maybe locked screen and turned monitor off, skip it.
 	if (ret <= 0) {
 		g_debug("Frame: Got empty buffer for primary plane.");
-		ret = _send_frame_msg(this, 0, NULL);
+		ret = send_frame_msg(this, 0, NULL);
 		return ret;
 	}
 
 	// Cursor plane.
 	if (this->cursor && this->cursor_id == 0)
-		this->cursor_id = _get_plane_id(
+		this->cursor_id = get_plane_id(
 			this->cfd, this->crtc_id, DRM_PLANE_TYPE_CURSOR
 		);
 	if (this->cursor_id != 0) {
-		ret = _make_buffer(
+		ret = make_buffer(
 			this->cfd,
 			&bufs[length++],
 			this->cursor_id,
@@ -425,7 +425,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 			--length;
 	}
 
-	ret = _send_frame_msg(this, length, bufs);
+	ret = send_frame_msg(this, length, bufs);
 
 	for (size_t i = 0; i < length; ++i)
 		for (unsigned int j = 0; j < bufs[i].md.length; ++j)
@@ -433,7 +433,7 @@ static ssize_t _on_frame_msg(struct _this *this)
 	return ret;
 }
 
-static ssize_t _on_input_msg(struct _this *this)
+static ssize_t on_input_msg(struct this *this)
 {
 	g_debug("Input: Received input message.");
 
@@ -452,7 +452,7 @@ static ssize_t _on_input_msg(struct _this *this)
 	if (ret <= 0)
 		goto out;
 
-	_write_may(this->ufd, ies, length * sizeof(*ies));
+	write_may(this->ufd, ies, length * sizeof(*ies));
 
 out:
 	if (ret < 0)
@@ -467,7 +467,7 @@ out:
 	return ret;
 }
 
-static ssize_t _send_card_path_msg(struct _this *this, const char *card_path)
+static ssize_t send_card_path_msg(struct this *this, const char *card_path)
 {
 	ssize_t ret = 0;
 	size_t length = strlen(card_path) + 1;
@@ -489,7 +489,7 @@ out:
 }
 
 static ssize_t
-_send_connector_name_msg(struct _this *this, const char *connector_name)
+send_connector_name_msg(struct this *this, const char *connector_name)
 {
 	ssize_t ret = 0;
 	size_t length = strlen(connector_name) + 1;
@@ -512,7 +512,7 @@ out:
 	return ret;
 }
 
-static inline char *_get_connector_name(drmModeConnector *connector)
+static inline char *get_connector_name(drmModeConnector *connector)
 {
 	return g_strdup_printf(
 		"%s-%d",
@@ -521,7 +521,7 @@ static inline char *_get_connector_name(drmModeConnector *connector)
 	);
 }
 
-static drmModeConnector *_get_connector(int cfd, const char *connector_name)
+static drmModeConnector *get_connector(int cfd, const char *connector_name)
 {
 	drmModeConnector *connector = NULL;
 	drmModeRes *res = drmModeGetResources(cfd);
@@ -536,7 +536,7 @@ static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 		connector = drmModeGetConnector(cfd, res->connectors[i]);
 		if (connector == NULL)
 			continue;
-		g_autofree char *full_name = _get_connector_name(connector);
+		g_autofree char *full_name = get_connector_name(connector);
 		g_debug("DRM: Connector %s is %s.",
 			full_name,
 			connector->connection == DRM_MODE_CONNECTED ?
@@ -554,7 +554,7 @@ static drmModeConnector *_get_connector(int cfd, const char *connector_name)
 }
 
 static drmModeConnector *
-_get_connected_card_and_connector(struct _this *this, const char *connector_name)
+get_connected_card_and_connector(struct this *this, const char *connector_name)
 {
 	g_autoptr(GDir) dir = g_dir_open("/dev/dri", 0, NULL);
 	if (dir == NULL)
@@ -572,7 +572,7 @@ _get_connected_card_and_connector(struct _this *this, const char *connector_name
 		g_debug("DRM: Finding the first connected connector on card %s.",
 			card_path);
 		drmModeConnector *connector =
-			_get_connector(cfd, connector_name);
+			get_connector(cfd, connector_name);
 		if (connector != NULL) {
 			this->cfd = cfd;
 			this->card_path = g_strdup(card_path);
@@ -588,10 +588,10 @@ _get_connected_card_and_connector(struct _this *this, const char *connector_name
 }
 
 static drmModeConnector *
-_get_card_and_connector(struct _this *this, const char *connector_name)
+get_card_and_connector(struct this *this, const char *connector_name)
 {
 	if (this->card_path == NULL)
-		return _get_connected_card_and_connector(this, connector_name);
+		return get_connected_card_and_connector(this, connector_name);
 	this->cfd = open(this->card_path, O_RDONLY | O_CLOEXEC);
 	if (this->cfd < 0) {
 		g_warning(
@@ -602,10 +602,10 @@ _get_card_and_connector(struct _this *this, const char *connector_name)
 		return NULL;
 	}
 	g_message("DRM: Opened card %s.", this->card_path);
-	return _get_connector(this->cfd, connector_name);
+	return get_connector(this->cfd, connector_name);
 }
 
-static drmModeCrtc *_get_crtc(int cfd, drmModeConnector *connector)
+static drmModeCrtc *get_crtc(int cfd, drmModeConnector *connector)
 {
 	drmModeEncoder *encoder = NULL;
 	drmModeCrtc *crtc = NULL;
@@ -617,7 +617,7 @@ static drmModeCrtc *_get_crtc(int cfd, drmModeConnector *connector)
 	return crtc;
 }
 
-static void _setup_drm(struct _this *this)
+static void setup_drm(struct this *this)
 {
 	this->crtc_id = 0;
 	this->primary_id = 0;
@@ -627,7 +627,7 @@ static void _setup_drm(struct _this *this)
 	this->card_path = rf_config_get_card_path(this->config);
 	this->connector_name = rf_config_get_connector(this->config);
 	drmModeConnector *connector =
-		_get_card_and_connector(this, this->connector_name);
+		get_card_and_connector(this, this->connector_name);
 	if (connector == NULL)
 		g_error("DRM: Failed to find a connected connector.");
 
@@ -636,10 +636,10 @@ static void _setup_drm(struct _this *this)
 	drmDropMaster(this->cfd);
 
 	if (this->connector_name == NULL)
-		this->connector_name = _get_connector_name(connector);
+		this->connector_name = get_connector_name(connector);
 	g_message("DRM: Found connected connector %s.", this->connector_name);
 
-	drmModeCrtc *crtc = _get_crtc(this->cfd, connector);
+	drmModeCrtc *crtc = get_crtc(this->cfd, connector);
 	drmModeFreeConnector(connector);
 	if (crtc == NULL)
 		g_error("DRM: Failed to find a CRTC for connector.");
@@ -654,7 +654,7 @@ static void _setup_drm(struct _this *this)
 		g_warning("DRM: Failed to set atomic capability.");
 
 	this->primary_id =
-		_get_plane_id(this->cfd, this->crtc_id, DRM_PLANE_TYPE_PRIMARY);
+		get_plane_id(this->cfd, this->crtc_id, DRM_PLANE_TYPE_PRIMARY);
 	if (this->primary_id == 0)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
 	this->cursor = rf_config_get_cursor(this->config);
@@ -663,11 +663,11 @@ static void _setup_drm(struct _this *this)
 		this->cursor ? "enabled" : "disabled"
 	);
 
-	_send_card_path_msg(this, this->card_path);
-	_send_connector_name_msg(this, this->connector_name);
+	send_card_path_msg(this, this->card_path);
+	send_connector_name_msg(this, this->connector_name);
 }
 
-static void _clean_drm(struct _this *this)
+static void clean_drm(struct this *this)
 {
 	if (this->cfd >= 0) {
 		close(this->cfd);
@@ -677,7 +677,7 @@ static void _clean_drm(struct _this *this)
 	g_clear_pointer(&this->connector_name, g_free);
 }
 
-static void _wakeup_uinput(struct _this *this)
+static void wakeup_uinput(struct this *this)
 {
 	struct input_event ies[WAKEUP_MAX_EVENTS];
 	memset(ies, 0, WAKEUP_MAX_EVENTS * sizeof(*ies));
@@ -698,10 +698,10 @@ static void _wakeup_uinput(struct _this *this)
 	ies[3].code = SYN_REPORT;
 	ies[3].value = 0;
 
-	_write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
 }
 
-static void _setup_uinput(struct _this *this)
+static void setup_uinput(struct this *this)
 {
 	this->ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
 	if (this->ufd < 0)
@@ -709,41 +709,41 @@ static void _setup_uinput(struct _this *this)
 	if (this->ufd < 0)
 		g_error("Input: Failed to open uinput: %s.", strerror(errno));
 
-	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
-	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
 	for (int i = 0; i < RF_KEYBOARD_MAX; ++i)
-		_ioctl_must(this->ufd, UI_SET_KEYBIT, i);
+		ioctl_must(this->ufd, UI_SET_KEYBIT, i);
 
-	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_ABS);
-	_ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_X);
-	_ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_Y);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_ABS);
+	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_X);
+	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_Y);
 
-	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
-	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
-	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+	ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
+	ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
 
-	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
-	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
-	_ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_RIGHT);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_RIGHT);
 
-	_ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
-	_ioctl_must(this->ufd, UI_SET_RELBIT, REL_WHEEL);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+	ioctl_must(this->ufd, UI_SET_RELBIT, REL_WHEEL);
 
 	struct uinput_abs_setup abs = { 0 };
 	abs.absinfo.maximum = RF_POINTER_MAX;
 	abs.absinfo.minimum = 0;
 	abs.code = ABS_X;
-	_ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
+	ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
 	abs.code = ABS_Y;
-	_ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
+	ioctl_must(this->ufd, UI_ABS_SETUP, &abs);
 
 	struct uinput_setup dev = { 0 };
 	dev.id.bustype = BUS_USB;
 	dev.id.vendor = 0xa3a7;
 	dev.id.product = 0x0003;
 	strcpy(dev.name, "reframe");
-	_ioctl_must(this->ufd, UI_DEV_SETUP, &dev);
-	_ioctl_must(this->ufd, UI_DEV_CREATE);
+	ioctl_must(this->ufd, UI_DEV_SETUP, &dev);
+	ioctl_must(this->ufd, UI_DEV_CREATE);
 
 	// If screen is turned off, we cannot get CRTC, so we have to wake it up.
 	this->wakeup = rf_config_get_wakeup(this->config);
@@ -752,7 +752,7 @@ static void _setup_uinput(struct _this *this)
 			"Input: Waiting for 1 second to let userspace detect the uinput device before wakeup."
 		);
 		g_usleep(G_USEC_PER_SEC);
-		_wakeup_uinput(this);
+		wakeup_uinput(this);
 		g_message(
 			"Input: Waiting for 1 second to let userspace process wakeup."
 		);
@@ -760,16 +760,16 @@ static void _setup_uinput(struct _this *this)
 	}
 }
 
-static void _clean_uinput(struct _this *this)
+static void clean_uinput(struct this *this)
 {
 	if (this->ufd >= 0) {
-		_ioctl_may(this->ufd, UI_DEV_DESTROY);
+		ioctl_may(this->ufd, UI_DEV_DESTROY);
 		close(this->ufd);
 		this->ufd = -1;
 	}
 }
 
-static void _on_sigint(int sig)
+static void on_sigint(int sig)
 {
 	// Non-zero hints that we didn't clean up.
 	exit(2);
@@ -863,7 +863,7 @@ int main(int argc, char *argv[])
 	g_message("Using configuration file %s.", config_path);
 	g_message("Using socket %s.", socket_path);
 
-	g_autofree struct _this *this = g_malloc0(sizeof(*this));
+	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->cfd = -1;
 	this->ufd = -1;
 	this->skip_auth = skip_auth;
@@ -904,7 +904,7 @@ int main(int argc, char *argv[])
 	if (error != NULL)
 		g_error("Failed to listen to socket: %s.", error->message);
 
-	signal(SIGINT, _on_sigint);
+	signal(SIGINT, on_sigint);
 	do {
 		this->connection =
 			g_socket_listener_accept(listener, NULL, NULL, &error);
@@ -915,7 +915,7 @@ int main(int argc, char *argv[])
 		GSocket *socket =
 			g_socket_connection_get_socket(this->connection);
 		const pid_t pid = rf_get_socket_pid(socket);
-		if (_auth_pid(
+		if (auth_pid(
 			    this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server"
 		    ) != 0) {
 			g_warning("Got disallowed socket client PID %d.", pid);
@@ -924,8 +924,8 @@ int main(int argc, char *argv[])
 
 		g_message("ReFrame Server connected.");
 
-		_setup_uinput(this);
-		_setup_drm(this);
+		setup_uinput(this);
+		setup_drm(this);
 
 		while (true) {
 			ssize_t ret = 0;
@@ -947,13 +947,13 @@ int main(int argc, char *argv[])
 
 			switch (type) {
 			case RF_MSG_TYPE_FRAME:
-				ret = _on_frame_msg(this);
+				ret = on_frame_msg(this);
 				break;
 			case RF_MSG_TYPE_INPUT:
-				ret = _on_input_msg(this);
+				ret = on_input_msg(this);
 				break;
 			case RF_MSG_TYPE_AUTH:
-				ret = _on_auth_msg(this);
+				ret = on_auth_msg(this);
 				break;
 			default:
 				break;
@@ -964,8 +964,8 @@ int main(int argc, char *argv[])
 
 		g_message("ReFrame Server disconnected.");
 
-		_clean_drm(this);
-		_clean_uinput(this);
+		clean_drm(this);
+		clean_uinput(this);
 
 	close:
 		// Dropping the last reference of it will automatically close IO

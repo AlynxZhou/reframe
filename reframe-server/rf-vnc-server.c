@@ -21,7 +21,7 @@ enum {
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
-static void _finalize(GObject *o)
+static void finalize(GObject *o)
 {
 	RfVNCServer *this = RF_VNC_SERVER(o);
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
@@ -36,7 +36,7 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
-	o_class->finalize = _finalize;
+	o_class->finalize = finalize;
 
 	klass->start = NULL;
 	klass->is_running = NULL;
@@ -225,15 +225,15 @@ void rf_vnc_server_flush(RfVNCServer *this)
 	klass->flush(this);
 }
 
-struct _iterate_data {
+struct iterate_data {
 	xkb_keysym_t keysym;
 	xkb_keycode_t keycode;
 	xkb_level_index_t level;
 };
 
-static void _iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
+static void iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 {
-	struct _iterate_data *idata = data;
+	struct iterate_data *idata = data;
 	if (idata->keycode != XKB_KEYCODE_INVALID)
 		return;
 
@@ -283,12 +283,12 @@ void rf_vnc_server_handle_keysym_event(
 		return;
 
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
-	struct _iterate_data idata = {
+	struct iterate_data idata = {
 		.keysym = keysym,
 		.keycode = XKB_KEYCODE_INVALID,
 		.level = 0,
 	};
-	xkb_keymap_key_for_each(priv->xkb_keymap, _iterate_keys, &idata);
+	xkb_keymap_key_for_each(priv->xkb_keymap, iterate_keys, &idata);
 	if (idata.keycode == XKB_KEYCODE_INVALID) {
 		g_warning(
 			"Input: Failed to find keysym %04x in keymap.", keysym
@@ -320,7 +320,7 @@ void rf_vnc_server_handle_keycode_event(
 	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
 }
 
-static inline char *_true_or_false(bool b)
+static inline char *true_or_false(bool b)
 {
 	return b ? "true" : "false";
 }
@@ -353,15 +353,15 @@ void rf_vnc_server_handle_pointer_event(
 		rx,
 		ry,
 		mask,
-		_true_or_false(left),
-		_true_or_false(middle),
-		_true_or_false(right),
-		_true_or_false(back),
-		_true_or_false(forward),
-		_true_or_false(wup),
-		_true_or_false(wdown),
-		_true_or_false(wleft),
-		_true_or_false(wright));
+		true_or_false(left),
+		true_or_false(middle),
+		true_or_false(right),
+		true_or_false(back),
+		true_or_false(forward),
+		true_or_false(wup),
+		true_or_false(wdown),
+		true_or_false(wleft),
+		true_or_false(wright));
 	g_signal_emit(
 		this,
 		sigs[SIG_POINTER_EVENT],
@@ -397,7 +397,7 @@ void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text)
 // events, it is not OK to release resources while still processing events so we
 // have to delay them until events are done.
 
-static void _emit_first_client(void *data)
+static void emit_first_client(void *data)
 {
 	RfVNCServer *this = data;
 	g_debug("Signal: Emitting VNC first client signal.");
@@ -411,10 +411,10 @@ void rf_vnc_server_handle_first_client(RfVNCServer *this)
 	if (!rf_vnc_server_is_running(this))
 		return;
 
-	g_idle_add_once(_emit_first_client, this);
+	g_idle_add_once(emit_first_client, this);
 }
 
-static void _emit_last_client(void *data)
+static void emit_last_client(void *data)
 {
 	RfVNCServer *this = data;
 	g_debug("Signal: Emitting VNC last client signal.");
@@ -428,5 +428,5 @@ void rf_vnc_server_handle_last_client(RfVNCServer *this)
 	if (!rf_vnc_server_is_running(this))
 		return;
 
-	g_idle_add_once(_emit_last_client, this);
+	g_idle_add_once(emit_last_client, this);
 }

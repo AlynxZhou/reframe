@@ -22,7 +22,7 @@ enum { SIG_START, SIG_STOP, SIG_CLIPBOARD_TEXT, SIG_AUTH, N_SIGS };
 static unsigned int sigs[N_SIGS] = { 0 };
 
 static ssize_t
-_on_clipboard_text_msg(RfSession *this, GSocketConnection *connection)
+on_clipboard_text_msg(RfSession *this, GSocketConnection *connection)
 {
 	g_autofree char *msg = NULL;
 	size_t length = 0;
@@ -52,7 +52,7 @@ out:
 	return ret;
 }
 
-static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
+static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfSession *this = data;
 
@@ -78,7 +78,7 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 
 	switch (type) {
 	case RF_MSG_TYPE_CLIPBOARD_TEXT:
-		ret = _on_clipboard_text_msg(this, connection);
+		ret = on_clipboard_text_msg(this, connection);
 		break;
 	default:
 		break;
@@ -94,7 +94,7 @@ out:
 	return G_SOURCE_CONTINUE;
 }
 
-static int _on_incoming(
+static int on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
 	GObject *source_object,
@@ -118,7 +118,7 @@ static int _on_incoming(
 	return true;
 }
 
-static void _dispose(GObject *o)
+static void dispose(GObject *o)
 {
 	RfSession *this = RF_SESSION(o);
 
@@ -128,7 +128,7 @@ static void _dispose(GObject *o)
 	G_OBJECT_CLASS(rf_session_parent_class)->dispose(o);
 }
 
-static void _finalize(GObject *o)
+static void finalize(GObject *o)
 {
 	RfSession *this = RF_SESSION(o);
 
@@ -142,8 +142,8 @@ static void rf_session_class_init(RfSessionClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
-	o_class->dispose = _dispose;
-	o_class->finalize = _finalize;
+	o_class->dispose = dispose;
+	o_class->finalize = finalize;
 
 	sigs[SIG_START] = g_signal_new(
 		"start", RF_TYPE_SESSION, 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0
@@ -239,7 +239,7 @@ int rf_session_start(RfSession *this)
 		return -2;
 	}
 	g_signal_connect(
-		this->service, "incoming", G_CALLBACK(_on_incoming), this
+		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
 
 	this->running = true;
@@ -339,7 +339,7 @@ void rf_session_auth(RfSession *this, pid_t pid, bool ok)
 		GSource *source =
 			g_socket_create_source(socket, this->io_flags, NULL);
 		g_source_set_callback(
-			source, G_SOURCE_FUNC(_on_socket_in), this, NULL
+			source, G_SOURCE_FUNC(on_socket_in), this, NULL
 		);
 		g_source_attach(source, NULL);
 		g_hash_table_insert(this->sockets, socket, source);

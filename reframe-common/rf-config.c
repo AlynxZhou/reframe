@@ -1,5 +1,5 @@
-#include "glib.h"
-#include "rf-common.h"
+#include <glib.h>
+
 #include "rf-config.h"
 
 struct _RfConfig {
@@ -11,7 +11,7 @@ G_DEFINE_TYPE(RfConfig, rf_config, G_TYPE_OBJECT)
 #define RF_CONFIG_GROUP_REFRAME "reframe"
 #define RF_CONFIG_GROUP_VNC "vnc"
 
-static void _finalize(GObject *o)
+static void finalize(GObject *o)
 {
 	RfConfig *this = RF_CONFIG(o);
 
@@ -29,7 +29,7 @@ static void rf_config_class_init(RfConfigClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
-	o_class->finalize = _finalize;
+	o_class->finalize = finalize;
 }
 
 RfConfig *rf_config_new(const char *config_path)

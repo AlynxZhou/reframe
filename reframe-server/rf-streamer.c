@@ -44,7 +44,7 @@ enum {
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
-static void _send_auth_msg(RfStreamer *this, pid_t pid)
+static void send_auth_msg(RfStreamer *this, pid_t pid)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
@@ -69,7 +69,7 @@ out:
 }
 
 static void
-_send_input_msg(RfStreamer *this, struct input_event *ies, const size_t length)
+send_input_msg(RfStreamer *this, struct input_event *ies, const size_t length)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
@@ -102,7 +102,7 @@ out:
 	}
 }
 
-static int _send_frame_msg(void *data)
+static int send_frame_msg(void *data)
 {
 	RfStreamer *this = data;
 	ssize_t ret = 0;
@@ -124,7 +124,7 @@ static int _send_frame_msg(void *data)
 	return G_SOURCE_REMOVE;
 }
 
-static void _schedule_frame_msg(RfStreamer *this)
+static void schedule_frame_msg(RfStreamer *this)
 {
 	if (this->timer_id != 0)
 		return;
@@ -136,7 +136,7 @@ static void _schedule_frame_msg(RfStreamer *this)
 		this->timer_id = g_timeout_add_full(
 			G_PRIORITY_HIGH,
 			(this->max_interval - delta) / 1000,
-			_send_frame_msg,
+			send_frame_msg,
 			this,
 			NULL
 		);
@@ -148,13 +148,13 @@ static void _schedule_frame_msg(RfStreamer *this)
 				delta / 1000
 			);
 		this->timer_id = g_timeout_add_full(
-			G_PRIORITY_HIGH, 1, _send_frame_msg, this, NULL
+			G_PRIORITY_HIGH, 1, send_frame_msg, this, NULL
 		);
 	}
 }
 
 static ssize_t
-_on_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
+on_buffer(GSocketConnection *connection, struct rf_buffer *b, GError **error)
 {
 	ssize_t ret = 0;
 	GSocket *socket = g_socket_connection_get_socket(connection);
@@ -229,7 +229,7 @@ out:
 	return ret;
 }
 
-static ssize_t _on_frame_msg(RfStreamer *this)
+static ssize_t on_frame_msg(RfStreamer *this)
 {
 	g_debug("Frame: Received frame message.");
 
@@ -255,7 +255,7 @@ static ssize_t _on_frame_msg(RfStreamer *this)
 	}
 
 	for (size_t i = 0; i < length; ++i) {
-		ret = _on_buffer(this->connection, &bufs[i], &error);
+		ret = on_buffer(this->connection, &bufs[i], &error);
 		if (ret <= 0)
 			goto out;
 	}
@@ -284,11 +284,11 @@ out:
 	if (ret < 0)
 		g_warning("Frame: Failed to receive frame: %s.", error->message);
 	else if (ret > 0)
-		_schedule_frame_msg(this);
+		schedule_frame_msg(this);
 	return ret;
 }
 
-static ssize_t _on_card_path_msg(RfStreamer *this)
+static ssize_t on_card_path_msg(RfStreamer *this)
 {
 	g_autofree char *msg = NULL;
 	ssize_t ret = 0;
@@ -318,7 +318,7 @@ out:
 	return ret;
 }
 
-static ssize_t _on_connector_name_msg(RfStreamer *this)
+static ssize_t on_connector_name_msg(RfStreamer *this)
 {
 	g_autofree char *msg = NULL;
 	size_t length = 0;
@@ -349,7 +349,7 @@ out:
 	return ret;
 }
 
-static ssize_t _on_auth_msg(RfStreamer *this)
+static ssize_t on_auth_msg(RfStreamer *this)
 {
 	struct rf_auth auth;
 	size_t length = 0;
@@ -380,7 +380,7 @@ out:
 	return ret;
 }
 
-static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
+static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfStreamer *this = data;
 
@@ -404,16 +404,16 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 
 	switch (type) {
 	case RF_MSG_TYPE_FRAME:
-		ret = _on_frame_msg(this);
+		ret = on_frame_msg(this);
 		break;
 	case RF_MSG_TYPE_CARD_PATH:
-		ret = _on_card_path_msg(this);
+		ret = on_card_path_msg(this);
 		break;
 	case RF_MSG_TYPE_CONNECTOR_NAME:
-		ret = _on_connector_name_msg(this);
+		ret = on_connector_name_msg(this);
 		break;
 	case RF_MSG_TYPE_AUTH:
-		ret = _on_auth_msg(this);
+		ret = on_auth_msg(this);
 		break;
 	default:
 		break;
@@ -429,7 +429,7 @@ out:
 	return G_SOURCE_CONTINUE;
 }
 
-static void _dispose(GObject *o)
+static void dispose(GObject *o)
 {
 	RfStreamer *this = RF_STREAMER(o);
 
@@ -443,7 +443,7 @@ static void rf_streamer_class_init(RfStreamerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
-	o_class->dispose = _dispose;
+	o_class->dispose = dispose;
 
 	sigs[SIG_START] = g_signal_new(
 		"start", RF_TYPE_STREAMER, 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0
@@ -586,10 +586,10 @@ int rf_streamer_start(RfStreamer *this)
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(
-		this->source, G_SOURCE_FUNC(_on_socket_in), this, NULL
+		this->source, G_SOURCE_FUNC(on_socket_in), this, NULL
 	);
 	g_source_attach(this->source, NULL);
-	_schedule_frame_msg(this);
+	schedule_frame_msg(this);
 
 	this->running = true;
 	g_debug("Signal: Emitting ReFrame Streamer start signal.");
@@ -622,8 +622,8 @@ void rf_streamer_stop(RfStreamer *this)
 		g_source_remove(this->timer_id);
 		this->timer_id = 0;
 	}
-	// Dropping the last reference of it will automatically close IO
-	// streams and socket.
+	// Dropping the last reference of it will automatically close IO streams
+	// and socket.
 	g_clear_object(&this->connection);
 }
 
@@ -649,7 +649,7 @@ void rf_streamer_send_keyboard_event(
 	ies[1].code = SYN_REPORT;
 	ies[1].value = 0;
 
-	_send_input_msg(this, ies, KEYBOARD_MAX_EVENTS);
+	send_input_msg(this, ies, KEYBOARD_MAX_EVENTS);
 }
 
 void rf_streamer_send_pointer_event(
@@ -751,7 +751,7 @@ void rf_streamer_send_pointer_event(
 	ies[length].value = 0;
 	++length;
 
-	_send_input_msg(this, ies, length);
+	send_input_msg(this, ies, length);
 }
 
 void rf_streamer_auth(RfStreamer *this, pid_t pid)
@@ -759,5 +759,5 @@ void rf_streamer_auth(RfStreamer *this, pid_t pid)
 	g_return_if_fail(RF_IS_STREAMER(this));
 	g_return_if_fail(pid >= 0);
 
-	_send_auth_msg(this, pid);
+	send_auth_msg(this, pid);
 }

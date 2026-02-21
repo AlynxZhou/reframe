@@ -21,7 +21,7 @@ struct _RfLVNCServer {
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
 
-static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
+static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 {
 	RfLVNCServer *this = data;
 
@@ -34,7 +34,7 @@ static int _on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	return G_SOURCE_CONTINUE;
 }
 
-static void _on_client_gone(rfbClientRec *client)
+static void on_client_gone(rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -46,13 +46,13 @@ static void _on_client_gone(rfbClientRec *client)
 		rf_vnc_server_handle_last_client(super);
 }
 
-static enum rfbNewClientAction _on_new_client(rfbClientRec *client)
+static enum rfbNewClientAction on_new_client(rfbClientRec *client)
 {
-	client->clientGoneHook = _on_client_gone;
+	client->clientGoneHook = on_client_gone;
 	return RFB_CLIENT_ACCEPT;
 }
 
-static int _on_set_desktop_size(
+static int on_set_desktop_size(
 	int width,
 	int height,
 	int num_screens,
@@ -73,7 +73,7 @@ static int _on_set_desktop_size(
 }
 
 static void
-_on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
+on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -82,7 +82,7 @@ _on_keysym_event(rfbBool direction, rfbKeySym keysym, rfbClientRec *client)
 	rf_vnc_server_handle_keysym_event(super, keysym, down);
 }
 
-static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
+static void on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -92,7 +92,7 @@ static void _on_pointer_event(int mask, int x, int y, rfbClientRec *client)
 	rf_vnc_server_handle_pointer_event(super, rx, ry, mask);
 }
 
-static void _on_clipboard_text(char *text, int length, rfbClientRec *client)
+static void on_clipboard_text(char *text, int length, rfbClientRec *client)
 {
 	RfLVNCServer *this = client->screen->screenData;
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -100,7 +100,7 @@ static void _on_clipboard_text(char *text, int length, rfbClientRec *client)
 	rf_vnc_server_handle_clipboard_text(super, text);
 }
 
-static int _on_incoming(
+static int on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
 	GObject *source_object,
@@ -130,12 +130,12 @@ static int _on_incoming(
 		this->screen->versionString = "ReFrame VNC Server";
 		this->screen->screenData = this;
 		this->screen->cursor = NULL;
-		this->screen->newClientHook = _on_new_client;
-		this->screen->setDesktopSizeHook = _on_set_desktop_size;
-		this->screen->ptrAddEvent = _on_pointer_event;
-		this->screen->kbdAddEvent = _on_keysym_event;
-		this->screen->setXCutText = _on_clipboard_text;
-		this->screen->setXCutTextUTF8 = _on_clipboard_text;
+		this->screen->newClientHook = on_new_client;
+		this->screen->setDesktopSizeHook = on_set_desktop_size;
+		this->screen->ptrAddEvent = on_pointer_event;
+		this->screen->kbdAddEvent = on_keysym_event;
+		this->screen->setXCutText = on_clipboard_text;
+		this->screen->setXCutTextUTF8 = on_clipboard_text;
 		if (this->passwords[0] != NULL &&
 		    this->passwords[0][0] != '\0') {
 			this->screen->authPasswdData = this->passwords;
@@ -150,7 +150,7 @@ static int _on_incoming(
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
-	g_source_set_callback(source, G_SOURCE_FUNC(_on_socket_in), this, NULL);
+	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	const int fd = g_socket_get_fd(socket);
 	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
@@ -158,14 +158,14 @@ static int _on_incoming(
 	client->clientData = source;
 	// Just in case client disconnects very soon.
 	if (client->sock == -1) {
-		_on_client_gone(client);
+		on_client_gone(client);
 		return false;
 	}
 
 	return true;
 }
 
-static void _dispose(GObject *o)
+static void dispose(GObject *o)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(o);
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -175,7 +175,7 @@ static void _dispose(GObject *o)
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->dispose(o);
 }
 
-static void _finalize(GObject *o)
+static void finalize(GObject *o)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(o);
 
@@ -184,7 +184,7 @@ static void _finalize(GObject *o)
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->finalize(o);
 }
 
-static void _start(RfVNCServer *super)
+static void start(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -242,20 +242,20 @@ static void _start(RfVNCServer *super)
 			port,
 			error->message);
 	g_signal_connect(
-		this->service, "incoming", G_CALLBACK(_on_incoming), this
+		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
 
 	this->running = true;
 }
 
-static bool _is_running(RfVNCServer *super)
+static bool is_running(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
 	return this->running;
 }
 
-static void _stop(RfVNCServer *super)
+static void stop(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -277,7 +277,7 @@ static void _stop(RfVNCServer *super)
 	g_clear_pointer(&this->passwords[0], g_free);
 }
 
-static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
+static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -293,7 +293,7 @@ static void _set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// }
 }
 
-static void _send_clipboard_text(RfVNCServer *super, const char *text)
+static void send_clipboard_text(RfVNCServer *super, const char *text)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -321,11 +321,11 @@ static void _send_clipboard_text(RfVNCServer *super, const char *text)
 }
 
 static void
-_update(RfVNCServer *super,
-	GByteArray *buf,
-	unsigned int width,
-	unsigned int height,
-	const struct rf_rect *damage)
+update(RfVNCServer *super,
+       GByteArray *buf,
+       unsigned int width,
+       unsigned int height,
+       const struct rf_rect *damage)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -369,7 +369,7 @@ _update(RfVNCServer *super,
 	rfbProcessEvents(this->screen, 0);
 }
 
-static void _flush(RfVNCServer *super)
+static void flush(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -390,16 +390,16 @@ static void rf_lvnc_server_class_init(RfLVNCServerClass *klass)
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 	RfVNCServerClass *v_class = RF_VNC_SERVER_CLASS(klass);
 
-	o_class->dispose = _dispose;
-	o_class->finalize = _finalize;
+	o_class->dispose = dispose;
+	o_class->finalize = finalize;
 
-	v_class->start = _start;
-	v_class->is_running = _is_running;
-	v_class->stop = _stop;
-	v_class->set_desktop_name = _set_desktop_name;
-	v_class->send_clipboard_text = _send_clipboard_text;
-	v_class->update = _update;
-	v_class->flush = _flush;
+	v_class->start = start;
+	v_class->is_running = is_running;
+	v_class->stop = stop;
+	v_class->set_desktop_name = set_desktop_name;
+	v_class->send_clipboard_text = send_clipboard_text;
+	v_class->update = update;
+	v_class->flush = flush;
 }
 
 static void rf_lvnc_server_init(RfLVNCServer *this)
