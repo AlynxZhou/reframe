@@ -937,11 +937,13 @@ int main(int argc, char *argv[])
 				is, &type, sizeof(type), NULL, &error
 			);
 			if (ret <= 0) {
-				if (ret < 0)
+				if (ret < 0) {
 					g_warning(
 						"Failed to read message type: %s.",
 						error->message
 					);
+					g_clear_pointer(&error, g_error_free);
+				}
 				break;
 			}
 
