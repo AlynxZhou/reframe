@@ -8,10 +8,10 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
-// Tile size larger than 4 causes artifacts with GPU side damage calculating.
-// Because we are comparing the linear average color of a tile, theoretically 4
-// is not enough if your frame size is extremely small, but it is ridiculous to
-// make remote desktop too small to read content.
+// Tile size larger than 4 causes artifacts with GPU side damage calculating,
+// because we are comparing the linear average color of a tile. Theoretically 4
+// is also not enough if your frame size is extremely small, but it is ridiculous
+// to make remote desktop too small to read content so don't worry.
 #define TILE_SIZE 4
 #define GL_MAX_BUFFERS 3
 
