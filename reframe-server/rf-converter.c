@@ -8,11 +8,6 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
-// Tile size larger than 4 causes artifacts with GPU side damage calculating,
-// because we are comparing the linear average color of a tile. Theoretically 4
-// is also not enough if your frame size is extremely small, but it is ridiculous
-// to make remote desktop too small to read content so don't worry.
-#define TILE_SIZE 4
 #define GL_MAX_BUFFERS 3
 
 struct _RfConverter {
@@ -37,6 +32,7 @@ struct _RfConverter {
 	unsigned int curr_texture;
 	unsigned int prev_texture;
 	unsigned int damage_texture;
+	unsigned int tile_size;
 	unsigned int rotation;
 	bool running;
 };
@@ -564,6 +560,7 @@ static void rf_converter_init(RfConverter *this)
 	this->curr_texture = 0;
 	this->prev_texture = 0;
 	this->damage_texture = 0;
+	this->tile_size = 4;
 	this->rotation = 0;
 	this->running = false;
 }
@@ -1101,12 +1098,12 @@ static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 				yt * stride + xt * RF_BYTES_PER_PIXEL;
 			// Checking only the red channel is enough.
 			if (damage_buffer[offset] > 0) {
-				const unsigned int x = xt * TILE_SIZE;
-				const unsigned int y = yt * TILE_SIZE;
+				const unsigned int x = xt * this->tile_size;
+				const unsigned int y = yt * this->tile_size;
 				const unsigned int w =
-					MIN(TILE_SIZE, this->width - x);
+					MIN(this->tile_size, this->width - x);
 				const unsigned int h =
-					MIN(TILE_SIZE, this->height - y);
+					MIN(this->tile_size, this->height - y);
 
 				x1 = MIN(x1, x);
 				y1 = MIN(y1, y);
@@ -1130,6 +1127,22 @@ static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 
 out:
 	damage_end(this);
+}
+
+static void update_damage_size(RfConverter *this)
+{
+	// Because we actually compare the linear average color of a tile in
+	// shader, larger tile size reduces the accuracy and causes artifacts.
+	// By testing we know that 4 is unacceptable for 1366x768.
+	if (this->width >= 1600 && this->height >= 900)
+		this->tile_size = 4;
+	else
+		this->tile_size = 2;
+	g_debug("GL: Set tile size of damage to %u.", this->tile_size);
+	this->damage_width =
+		(this->width + this->tile_size - 1) / this->tile_size;
+	this->damage_height =
+		(this->height + this->tile_size - 1) / this->tile_size;
 }
 
 GByteArray *rf_converter_convert(
@@ -1166,9 +1179,7 @@ GByteArray *rf_converter_convert(
 	if (this->width != width || this->height != height) {
 		this->width = width;
 		this->height = height;
-		this->damage_width = (this->width + TILE_SIZE - 1) / TILE_SIZE;
-		this->damage_height =
-			(this->height + TILE_SIZE - 1) / TILE_SIZE;
+		update_damage_size(this);
 		gen_textures(this);
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_sized_new(
