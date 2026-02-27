@@ -8,11 +8,14 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
-// Tile size larger than 4 causes artifacts with GPU side damage calculating,
-// because we are comparing the linear average color of a tile. Theoretically 4
-// is also not enough if your frame size is extremely small, but it is ridiculous
-// to make remote desktop too small to read content so don't worry.
-#define TILE_SIZE 4
+// We downscale texture into tiles on GPU, because we still need to scan the
+// result on CPU to get damage region, and per-pixel scanning is too heavy.
+// Because we actually compare the linear average color of a tile in shader,
+// larger tile size reduces the accuracy and causes artifacts. To increase
+// accuracy we generate mipmaps for textures and sampling the nearest mipmap,
+// then we need to ensure tile size is power-of-2 to match mipmap. By testing,
+// 8 is the largest tile size that does not cause artifacts for 800x600.
+#define TILE_SIZE 8
 #define GL_MAX_BUFFERS 3
 
 struct _RfConverter {
@@ -646,12 +649,12 @@ static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 	g_array_append_val(a, v);
 }
 
-static inline void set_texture_parameters(GLenum target)
+static inline void set_texture_parameters(GLenum target, GLint min_filter)
 {
 	// Setting sampling filter to scaling texture automatically.
 	glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter);
 	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
@@ -665,7 +668,7 @@ static void gen_textures(RfConverter *this)
 		glDeleteTextures(1, &this->curr_texture);
 	glGenTextures(1, &this->curr_texture);
 	glBindTexture(GL_TEXTURE_2D, this->curr_texture);
-	set_texture_parameters(GL_TEXTURE_2D);
+	set_texture_parameters(GL_TEXTURE_2D, GL_LINEAR_MIPMAP_NEAREST);
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,
@@ -683,7 +686,7 @@ static void gen_textures(RfConverter *this)
 		glDeleteTextures(1, &this->prev_texture);
 	glGenTextures(1, &this->prev_texture);
 	glBindTexture(GL_TEXTURE_2D, this->prev_texture);
-	set_texture_parameters(GL_TEXTURE_2D);
+	set_texture_parameters(GL_TEXTURE_2D, GL_LINEAR_MIPMAP_NEAREST);
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,
@@ -705,7 +708,8 @@ static void gen_textures(RfConverter *this)
 		glDeleteTextures(1, &this->damage_texture);
 	glGenTextures(1, &this->damage_texture);
 	glBindTexture(GL_TEXTURE_2D, this->damage_texture);
-	set_texture_parameters(GL_TEXTURE_2D);
+	// We won't sample this texture so this is useless.
+	// set_texture_parameters(GL_TEXTURE_2D, GL_LINEAR_MIPMAP_NEAREST);
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,
@@ -831,7 +835,8 @@ static void draw_rect(
 	// NVIDIA and linear modifier (which is used by TTY), we have to use
 	// `GL_TEXTURE_EXTERNAL_OES`.
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture);
-	set_texture_parameters(GL_TEXTURE_EXTERNAL_OES);
+	// `GL_TEXTURE_EXTERNAL_OES` does not support mipmap.
+	set_texture_parameters(GL_TEXTURE_EXTERNAL_OES, GL_LINEAR);
 	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 	// g_debug("glEGLImageTargetTexture2DOES: %#x", glGetError());
 
@@ -1008,8 +1013,10 @@ static void damage_rect(
 {
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, this->curr_texture);
+	glGenerateMipmap(GL_TEXTURE_2D);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, this->prev_texture);
+	glGenerateMipmap(GL_TEXTURE_2D);
 
 	mat4 model =
 		m4multiply(m4translate(v3s(x, y, z)), m4scale(v3s(w, h, 1.0f)));
