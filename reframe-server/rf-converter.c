@@ -8,26 +8,35 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
-#define TILE_SIZE 32
+// Tile size larger than 4 causes artifacts with GPU side damage calculating.
+// Because we are comparing the linear average color of a tile, theoretically 4
+// is not enough if your frame size is extremely small, but it is ridiculous to
+// make remote desktop too small to read content.
+#define TILE_SIZE 4
+#define GL_MAX_BUFFERS 3
 
 struct _RfConverter {
 	GObject parent_instance;
 	RfConfig *config;
 	char *card_path;
-	GByteArray *buf;
-	unsigned int width;
-	unsigned int height;
-	GByteArray *prev;
-	unsigned int prev_width;
-	unsigned int prev_height;
 	unsigned int gles_major;
 	EGLDisplay display;
 	EGLContext context;
-	unsigned int program;
-	unsigned int buffers[3];
-	unsigned int vertex_array;
-	unsigned int framebuffer;
-	unsigned int texture;
+	GByteArray *buf;
+	unsigned int width;
+	unsigned int height;
+	unsigned int damage_width;
+	unsigned int damage_height;
+	unsigned int buffers[GL_MAX_BUFFERS];
+	unsigned int draw_vertex_array;
+	unsigned int damage_vertex_array;
+	unsigned int draw_program;
+	unsigned int damage_program;
+	unsigned int draw_framebuffer;
+	unsigned int damage_framebuffer;
+	unsigned int curr_texture;
+	unsigned int prev_texture;
+	unsigned int damage_texture;
 	unsigned int rotation;
 	bool running;
 };
@@ -234,47 +243,41 @@ static unsigned int make_program(const char *vs, const char *fs)
 	return program;
 }
 
-static void bind_buffers(RfConverter *this)
+static void bind_buffers(RfConverter *this, unsigned int program)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
 	glVertexAttribPointer(
-		glGetAttribLocation(this->program, "in_position"),
+		glGetAttribLocation(program, "in_position"),
 		2,
 		GL_FLOAT,
 		GL_FALSE,
 		2 * sizeof(float),
 		0
 	);
-	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_position")
-	);
+	glEnableVertexAttribArray(glGetAttribLocation(program, "in_position"));
 
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[1]);
 	glVertexAttribPointer(
-		glGetAttribLocation(this->program, "in_coordinate"),
+		glGetAttribLocation(program, "in_coordinate"),
 		2,
 		GL_FLOAT,
 		GL_FALSE,
 		2 * sizeof(float),
 		0
 	);
-	glEnableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_coordinate")
-	);
+	glEnableVertexAttribArray(glGetAttribLocation(program, "in_coordinate"));
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->buffers[2]);
 }
 
-static void unbind_buffers(RfConverter *this)
+static void unbind_buffers(RfConverter *this, unsigned int program)
 {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glDisableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_position")
-	);
+	glDisableVertexAttribArray(glGetAttribLocation(program, "in_position"));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glDisableVertexAttribArray(
-		glGetAttribLocation(this->program, "in_coordinate")
+		glGetAttribLocation(program, "in_coordinate")
 	);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -315,7 +318,7 @@ static int setup_gl(RfConverter *this)
 			"	gl_Position = mvp * vec4(in_position, 0.0f, 1.0f);\n"
 			"	pass_coordinate = in_coordinate;\n"
 			"}\n";
-		const char fs[] =
+		const char draw_fs[] =
 			"#version 300 es\n"
 			"#ifdef GL_OES_EGL_image_external_essl3\n"
 			"#extension GL_OES_EGL_image_external_essl3 : require\n"
@@ -331,7 +334,23 @@ static int setup_gl(RfConverter *this)
 			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0f, 1.0f);\n"
 			"	out_color = texture(image, out_coordinate.xy);\n"
 			"}\n";
-		this->program = make_program(vs, fs);
+		this->draw_program = make_program(vs, draw_fs);
+		const char damage_fs[] =
+			"#version 300 es\n"
+			"precision highp float;\n"
+			"uniform sampler2D curr;\n"
+			"uniform sampler2D prev;\n"
+			"in vec2 pass_coordinate;\n"
+			"out vec4 out_color;\n"
+			"void main() {\n"
+			"	vec4 currp = texture(curr, pass_coordinate);\n"
+			"	vec4 prevp = texture(prev, pass_coordinate);\n"
+			"	if (any(notEqual(currp, prevp)))\n"
+			"		out_color = vec4(1.0f, 1.0f, 1.0f, 1.0f);\n"
+			"	else\n"
+			"		out_color = vec4(0.0f, 0.0f, 0.0f, 1.0f);\n"
+			"}\n";
+		this->damage_program = make_program(vs, damage_fs);
 	} else {
 		const char vs[] =
 			"#version 100\n"
@@ -343,7 +362,7 @@ static int setup_gl(RfConverter *this)
 			"	gl_Position = mvp * vec4(in_position, 0.0, 1.0);\n"
 			"	pass_coordinate = in_coordinate;\n"
 			"}\n";
-		const char fs[] =
+		const char draw_fs[] =
 			"#version 100\n"
 			"#extension GL_OES_EGL_image_external : require\n"
 			"precision highp float;\n"
@@ -354,17 +373,39 @@ static int setup_gl(RfConverter *this)
 			"	vec4 out_coordinate = crop * vec4(pass_coordinate, 0.0, 1.0);\n"
 			"	gl_FragColor = texture2D(image, out_coordinate.xy);\n"
 			"}\n";
-		this->program = make_program(vs, fs);
+		this->draw_program = make_program(vs, draw_fs);
+		const char damage_fs[] =
+			"#version 100\n"
+			"precision highp float;\n"
+			"uniform sampler2D curr;\n"
+			"uniform sampler2D prev;\n"
+			"varying vec2 pass_coordinate;\n"
+			"void main() {\n"
+			"	vec4 currp = texture2D(curr, pass_coordinate);\n"
+			"	vec4 prevp = texture2D(prev, pass_coordinate);\n"
+			"	if (any(notEqual(currp, prevp)))\n"
+			"		gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);\n"
+			"	else\n"
+			"		gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+			"}\n";
+		this->damage_program = make_program(vs, damage_fs);
 	}
-	if (this->program == 0)
+	if (this->draw_program == 0)
 		return -5;
+	if (this->damage_program == 0)
+		return -6;
 
-	glUseProgram(this->program);
+	glUseProgram(this->draw_program);
 	// Use texture 0 for this sampler. This only needs to be done once.
-	glUniform1i(glGetUniformLocation(this->program, "image"), 0);
+	glUniform1i(glGetUniformLocation(this->draw_program, "image"), 0);
 	glUseProgram(0);
 
-	glGenBuffers(3, this->buffers);
+	glUseProgram(this->damage_program);
+	glUniform1i(glGetUniformLocation(this->damage_program, "curr"), 0);
+	glUniform1i(glGetUniformLocation(this->damage_program, "prev"), 1);
+	glUseProgram(0);
+
+	glGenBuffers(GL_MAX_BUFFERS, this->buffers);
 
 	// clang-format off
 	const float vertices[] = {
@@ -418,14 +459,19 @@ static int setup_gl(RfConverter *this)
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 	if (this->gles_major >= 3) {
-		glGenVertexArrays(1, &this->vertex_array);
+		glGenVertexArrays(1, &this->draw_vertex_array);
+		glBindVertexArray(this->draw_vertex_array);
+		bind_buffers(this, this->draw_program);
+		glBindVertexArray(0);
 
-		glBindVertexArray(this->vertex_array);
-		bind_buffers(this);
+		glGenVertexArrays(1, &this->damage_vertex_array);
+		glBindVertexArray(this->damage_vertex_array);
+		bind_buffers(this, this->damage_program);
 		glBindVertexArray(0);
 	}
 
-	glGenFramebuffers(1, &this->framebuffer);
+	glGenFramebuffers(1, &this->draw_framebuffer);
+	glGenFramebuffers(1, &this->damage_framebuffer);
 
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -434,27 +480,47 @@ static int setup_gl(RfConverter *this)
 
 static void clean_gl(RfConverter *this)
 {
-	if (this->texture != 0) {
-		glDeleteTextures(1, &this->texture);
-		this->texture = 0;
-	}
-	if (this->framebuffer != 0) {
-		glDeleteFramebuffers(1, &this->framebuffer);
-		this->framebuffer = 0;
-	}
-	if (this->vertex_array != 0) {
-		glDeleteVertexArrays(1, &this->vertex_array);
-		this->vertex_array = 0;
-	}
 	if (this->buffers[0] != 0) {
-		glDeleteBuffers(3, this->buffers);
+		glDeleteBuffers(GL_MAX_BUFFERS, this->buffers);
 		this->buffers[0] = 0;
 		this->buffers[1] = 0;
 		this->buffers[2] = 0;
 	}
-	if (this->program != 0) {
-		glDeleteProgram(this->program);
-		this->program = 0;
+	if (this->draw_vertex_array != 0) {
+		glDeleteVertexArrays(1, &this->draw_vertex_array);
+		this->draw_vertex_array = 0;
+	}
+	if (this->damage_vertex_array != 0) {
+		glDeleteVertexArrays(1, &this->damage_vertex_array);
+		this->damage_vertex_array = 0;
+	}
+	if (this->draw_program != 0) {
+		glDeleteProgram(this->draw_program);
+		this->draw_program = 0;
+	}
+	if (this->damage_program != 0) {
+		glDeleteProgram(this->damage_program);
+		this->damage_program = 0;
+	}
+	if (this->draw_framebuffer != 0) {
+		glDeleteFramebuffers(1, &this->draw_framebuffer);
+		this->draw_framebuffer = 0;
+	}
+	if (this->damage_framebuffer != 0) {
+		glDeleteFramebuffers(1, &this->damage_framebuffer);
+		this->damage_framebuffer = 0;
+	}
+	if (this->curr_texture != 0) {
+		glDeleteTextures(1, &this->curr_texture);
+		this->curr_texture = 0;
+	}
+	if (this->prev_texture != 0) {
+		glDeleteTextures(1, &this->prev_texture);
+		this->prev_texture = 0;
+	}
+	if (this->damage_texture != 0) {
+		glDeleteTextures(1, &this->damage_texture);
+		this->damage_texture = 0;
 	}
 }
 
@@ -478,22 +544,26 @@ static void rf_converter_init(RfConverter *this)
 {
 	this->config = NULL;
 	this->card_path = NULL;
-	this->buf = NULL;
-	this->width = 0;
-	this->height = 0;
-	this->prev = NULL;
-	this->prev_width = 0;
-	this->prev_height = 0;
 	this->gles_major = 3;
 	this->display = EGL_NO_DISPLAY;
 	this->context = EGL_NO_CONTEXT;
-	this->program = 0;
+	this->buf = NULL;
+	this->width = 0;
+	this->height = 0;
+	this->damage_width = 0;
+	this->damage_height = 0;
 	this->buffers[0] = 0;
 	this->buffers[1] = 0;
 	this->buffers[2] = 0;
-	this->vertex_array = 0;
-	this->framebuffer = 0;
-	this->texture = 0;
+	this->draw_vertex_array = 0;
+	this->damage_vertex_array = 0;
+	this->draw_program = 0;
+	this->damage_program = 0;
+	this->draw_framebuffer = 0;
+	this->damage_framebuffer = 0;
+	this->curr_texture = 0;
+	this->prev_texture = 0;
+	this->damage_texture = 0;
 	this->rotation = 0;
 	this->running = false;
 }
@@ -529,8 +599,6 @@ int rf_converter_start(RfConverter *this)
 	g_message("GL: Got screen rotation %u.", this->rotation);
 	this->width = 0;
 	this->height = 0;
-	this->prev_width = 0;
-	this->prev_height = 0;
 	int ret = 0;
 	ret = setup_egl(this);
 	if (ret < 0)
@@ -567,7 +635,6 @@ void rf_converter_stop(RfConverter *this)
 	this->running = false;
 
 	g_clear_pointer(&this->buf, g_byte_array_unref);
-	g_clear_pointer(&this->prev, g_byte_array_unref);
 	g_clear_pointer(&this->card_path, g_free);
 	clean_gl(this);
 	clean_egl(this);
@@ -579,18 +646,26 @@ static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 	g_array_append_val(a, v);
 }
 
-static void gen_texture(RfConverter *this)
+static inline void set_texture_parameters(GLenum target)
 {
-	g_debug("GL: Generating new texture for width %u and height %u.",
+	// Setting sampling filter to scaling texture automatically.
+	glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
+static void gen_textures(RfConverter *this)
+{
+	g_debug("GL: Generating new draw textures for width %u and height %u.",
 		this->width,
 		this->height);
 
-	if (this->texture != 0)
-		glDeleteTextures(1, &this->texture);
-
-	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
-	glGenTextures(1, &this->texture);
-	glBindTexture(GL_TEXTURE_2D, this->texture);
+	if (this->curr_texture != 0)
+		glDeleteTextures(1, &this->curr_texture);
+	glGenTextures(1, &this->curr_texture);
+	glBindTexture(GL_TEXTURE_2D, this->curr_texture);
+	set_texture_parameters(GL_TEXTURE_2D);
 	glTexImage2D(
 		GL_TEXTURE_2D,
 		0,
@@ -602,18 +677,47 @@ static void gen_texture(RfConverter *this)
 		GL_UNSIGNED_BYTE,
 		NULL
 	);
-	glFramebufferTexture2D(
-		GL_FRAMEBUFFER,
-		GL_COLOR_ATTACHMENT0,
-		GL_TEXTURE_2D,
-		this->texture,
-		0
-	);
-	GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
-	glDrawBuffers(1, &draw_buffer);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	if (this->prev_texture != 0)
+		glDeleteTextures(1, &this->prev_texture);
+	glGenTextures(1, &this->prev_texture);
+	glBindTexture(GL_TEXTURE_2D, this->prev_texture);
+	set_texture_parameters(GL_TEXTURE_2D);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		GL_RGBA,
+		this->width,
+		this->height,
+		0,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		NULL
+	);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	g_debug("GL: Generating new damage texture for width %u and height %u.",
+		this->damage_width,
+		this->damage_height);
+
+	if (this->damage_texture != 0)
+		glDeleteTextures(1, &this->damage_texture);
+	glGenTextures(1, &this->damage_texture);
+	glBindTexture(GL_TEXTURE_2D, this->damage_texture);
+	set_texture_parameters(GL_TEXTURE_2D);
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		GL_RGBA,
+		this->damage_width,
+		this->damage_height,
+		0,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		NULL
+	);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
@@ -681,11 +785,23 @@ static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
 
 static void draw_begin(RfConverter *this)
 {
-	glUseProgram(this->program);
+	glBindFramebuffer(GL_FRAMEBUFFER, this->draw_framebuffer);
+	// We always rebind texture to framebuffer because we swap current and
+	// previous textures.
+	glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		GL_TEXTURE_2D,
+		this->curr_texture,
+		0
+	);
+	glViewport(0, 0, this->width, this->height);
+
+	glUseProgram(this->draw_program);
 	if (this->gles_major >= 3)
-		glBindVertexArray(this->vertex_array);
+		glBindVertexArray(this->draw_vertex_array);
 	else
-		bind_buffers(this);
+		bind_buffers(this, this->draw_program);
 }
 
 static void draw_rect(
@@ -696,16 +812,16 @@ static void draw_rect(
 	uint32_t sy,
 	uint32_t sw,
 	uint32_t sh,
-	uint32_t width,
-	uint32_t height,
+	uint32_t texture_width,
+	uint32_t texture_height,
 	// Vertex coordinates.
 	int32_t x,
 	int32_t y,
 	uint32_t w,
 	uint32_t h,
 	int32_t z,
-	uint32_t frame_width,
-	uint32_t frame_height
+	uint32_t canvas_width,
+	uint32_t canvas_height
 )
 {
 	unsigned int texture;
@@ -715,19 +831,7 @@ static void draw_rect(
 	// NVIDIA and linear modifier (which is used by TTY), we have to use
 	// `GL_TEXTURE_EXTERNAL_OES`.
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture);
-	// Setting sampling filter to scaling texture automatically.
-	glTexParameteri(
-		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE
-	);
-	glTexParameteri(
-		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE
-	);
-	glTexParameteri(
-		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR
-	);
-	glTexParameteri(
-		GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR
-	);
+	set_texture_parameters(GL_TEXTURE_EXTERNAL_OES);
 	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 	// g_debug("glEGLImageTargetTexture2DOES: %#x", glGetError());
 
@@ -739,7 +843,7 @@ static void draw_rect(
 		v3s(0.0f, 1.0f, 0.0f)
 	);
 	mat4 projection =
-		m4ortho(0.0f, frame_width, frame_height, 0.0f, 0.1f, 100.0f);
+		m4ortho(0.0f, canvas_width, canvas_height, 0.0f, 0.1f, 100.0f);
 	mat4 mvp = m4multiply(projection, m4multiply(view, model));
 	// Rotating monitor is just the same as rotating the whole world.
 	if (this->rotation % 360 != 0)
@@ -751,19 +855,28 @@ static void draw_rect(
 		);
 
 	mat4 crop = m4identity();
-	if (sx != 0 || sy != 0 || sw != width || sh != height)
+	if (sx != 0 || sy != 0 || sw != texture_width || sh != texture_height)
 		crop = m4multiply(
 			m4translate(
-				v3s((float)sx / width, (float)sy / height, 0.0f)
+				v3s((float)sx / texture_width,
+				    (float)sy / texture_height,
+				    0.0f)
 			),
-			m4scale(v3s((float)sw / width, (float)sh / height, 1.0f))
+			m4scale(
+				v3s((float)sw / texture_width,
+				    (float)sh / texture_height,
+				    1.0f)
+			)
 		);
 
 	glUniformMatrix4fv(
-		glGetUniformLocation(this->program, "mvp"), 1, false, MARRAY(mvp)
+		glGetUniformLocation(this->draw_program, "mvp"),
+		1,
+		false,
+		MARRAY(mvp)
 	);
 	glUniformMatrix4fv(
-		glGetUniformLocation(this->program, "crop"),
+		glGetUniformLocation(this->draw_program, "crop"),
 		1,
 		false,
 		MARRAY(crop)
@@ -771,6 +884,7 @@ static void draw_rect(
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
 	// g_debug("glDrawElements: %#x", glGetError());
 
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 	glDeleteTextures(1, &texture);
 }
@@ -813,50 +927,187 @@ static void draw_end(RfConverter *this)
 	if (this->gles_major >= 3)
 		glBindVertexArray(0);
 	else
-		unbind_buffers(this);
+		unbind_buffers(this, this->draw_program);
 	glUseProgram(0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+static int
+convert_buffers(RfConverter *this, size_t length, const struct rf_buffer *bufs)
+{
+	int res = 0;
+
+	draw_begin(this);
+
+	const struct rf_buffer *primary = &bufs[0];
+	// Monitor size should be CRTC size.
+	const uint32_t frame_width = primary->md.crtc_width;
+	const uint32_t frame_height = primary->md.crtc_height;
+
+	// When we cover the whole frame, it should be OK that we don't clear
+	// those buffers to improve performance.
+	if (primary->md.crtc_x > 0 || primary->md.crtc_y > 0 ||
+	    primary->md.crtc_x + primary->md.crtc_w < frame_width ||
+	    primary->md.crtc_y + primary->md.crtc_h < frame_height)
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	for (size_t i = 0; i < length; ++i)
+		draw_buffer(
+			this, &bufs[i], length - i, frame_width, frame_height
+		);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
+	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
+	// But luckily LibVNCServer accepts RGBA by default.
+	glReadPixels(
+		0,
+		0,
+		this->width,
+		this->height,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		this->buf->data
+	);
+	if (glGetError() != GL_NO_ERROR)
+		res = -1;
+
+	draw_end(this);
+	return res;
+}
+
+static void damage_begin(RfConverter *this)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, this->damage_framebuffer);
+	glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		GL_TEXTURE_2D,
+		this->damage_texture,
+		0
+	);
+	glViewport(0, 0, this->damage_width, this->damage_height);
+
+	glUseProgram(this->damage_program);
+	if (this->gles_major >= 3)
+		glBindVertexArray(this->damage_vertex_array);
+	else
+		bind_buffers(this, this->damage_program);
+}
+
+static void damage_rect(
+	RfConverter *this,
+	int32_t x,
+	int32_t y,
+	uint32_t w,
+	uint32_t h,
+	int32_t z,
+	uint32_t canvas_width,
+	uint32_t canvas_height
+)
+{
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, this->curr_texture);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, this->prev_texture);
+
+	mat4 model =
+		m4multiply(m4translate(v3s(x, y, z)), m4scale(v3s(w, h, 1.0f)));
+	mat4 view = m4camera(
+		v3s(0.0f, 0.0f, 0.0f),
+		v3s(0.0f, 0.0f, 1.0f),
+		v3s(0.0f, 1.0f, 0.0f)
+	);
+	mat4 projection =
+		m4ortho(0.0f, canvas_width, canvas_height, 0.0f, 0.1f, 100.0f);
+	mat4 mvp = m4multiply(projection, m4multiply(view, model));
+
+	glUniformMatrix4fv(
+		glGetUniformLocation(this->damage_program, "mvp"),
+		1,
+		false,
+		MARRAY(mvp)
+	);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static void damage_end(RfConverter *this)
+{
+	if (this->gles_major >= 3)
+		glBindVertexArray(0);
+	else
+		unbind_buffers(this, this->damage_program);
+	glUseProgram(0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 {
-	if (this->prev == NULL || this->prev_width != this->width ||
-	    this->prev_height != this->height) {
+	damage_begin(this);
+
+	// We always redraw the whole damage framebuffer so this is useless.
+	// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// Always fullfill the whole canvas.
+	damage_rect(
+		this,
+		0,
+		0,
+		this->damage_width,
+		this->damage_height,
+		1,
+		this->damage_width,
+		this->damage_height
+	);
+
+	g_autofree uint8_t *damage_buffer = g_malloc0_n(
+		this->damage_width * this->damage_height * RF_BYTES_PER_PIXEL,
+		sizeof(*damage_buffer)
+	);
+	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
+	glReadPixels(
+		0,
+		0,
+		this->damage_width,
+		this->damage_height,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		damage_buffer
+	);
+	if (glGetError() != GL_NO_ERROR) {
+		g_debug("Frame: Reading damage error, return full damage.");
 		damage->x = 0;
 		damage->y = 0;
 		damage->w = this->width;
 		damage->h = this->height;
-		return;
+		goto out;
 	}
 
-	// This is a naive damage region tracking but works fairly enough for us.
 	unsigned int x1 = this->width;
 	unsigned int y1 = this->height;
 	unsigned int x2 = 0;
 	unsigned int y2 = 0;
 
-	const uint8_t *new = this->buf->data;
-	const uint8_t *old = this->prev->data;
-	const size_t stride = this->width * RF_BYTES_PER_PIXEL;
-	for (unsigned int y = 0; y < this->height; y += TILE_SIZE) {
-		for (unsigned int x = 0; x < this->width; x += TILE_SIZE) {
-			const unsigned int w = MIN(TILE_SIZE, this->width - x);
-			const unsigned int h = MIN(TILE_SIZE, this->height - y);
-			const unsigned int offset =
-				y * stride + x * RF_BYTES_PER_PIXEL;
-			bool different = false;
-			for (unsigned int row = 0; row < h; ++row) {
-				const uint8_t *new_row =
-					new + offset + row * stride;
-				const uint8_t *old_row =
-					old + offset + row * stride;
-				if (memcmp(new_row,
-					   old_row,
-					   w * RF_BYTES_PER_PIXEL) != 0) {
-					different = true;
-					break;
-				}
-			}
-			if (different) {
+	const size_t stride = this->damage_width * RF_BYTES_PER_PIXEL;
+	for (unsigned int yt = 0; yt < this->damage_height; ++yt) {
+		for (unsigned int xt = 0; xt < this->damage_width; ++xt) {
+			const size_t offset =
+				yt * stride + xt * RF_BYTES_PER_PIXEL;
+			// Checking only the red channel is enough.
+			if (damage_buffer[offset] > 0) {
+				const unsigned int x = xt * TILE_SIZE;
+				const unsigned int y = yt * TILE_SIZE;
+				const unsigned int w =
+					MIN(TILE_SIZE, this->width - x);
+				const unsigned int h =
+					MIN(TILE_SIZE, this->height - y);
+
 				x1 = MIN(x1, x);
 				y1 = MIN(y1, y);
 				x2 = MAX(x2, x + w);
@@ -876,6 +1127,9 @@ static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 		damage->w = 0;
 		damage->h = 0;
 	}
+
+out:
+	damage_end(this);
 }
 
 GByteArray *rf_converter_convert(
@@ -912,79 +1166,42 @@ GByteArray *rf_converter_convert(
 	if (this->width != width || this->height != height) {
 		this->width = width;
 		this->height = height;
-		glViewport(0, 0, this->width, this->height);
-		gen_texture(this);
+		this->damage_width = (this->width + TILE_SIZE - 1) / TILE_SIZE;
+		this->damage_height =
+			(this->height + TILE_SIZE - 1) / TILE_SIZE;
+		gen_textures(this);
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_sized_new(
 			RF_BYTES_PER_PIXEL * this->width * this->height
 		);
 	}
 
-	const struct rf_buffer *primary = &bufs[0];
-	// Monitor size should be CRTC size.
-	const uint32_t frame_width = primary->md.crtc_width;
-	const uint32_t frame_height = primary->md.crtc_height;
-
-	glBindFramebuffer(GL_FRAMEBUFFER, this->framebuffer);
-
-	// When we cover the whole frame, it should be OK that we don't clear
-	// those buffers to improve performance.
-	if (primary->md.crtc_x > 0 || primary->md.crtc_y > 0 ||
-	    primary->md.crtc_x + primary->md.crtc_w < frame_width ||
-	    primary->md.crtc_y + primary->md.crtc_h < frame_height)
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	draw_begin(this);
-
-	for (size_t i = 0; i < length; ++i)
-		draw_buffer(
-			this, &bufs[i], length - i, frame_width, frame_height
-		);
-
-	draw_end(this);
-
-	glPixelStorei(GL_PACK_ALIGNMENT, RF_BYTES_PER_PIXEL);
-	// OpenGL ES only ensures `GL_RGBA` and `GL_RGB`, `GL_BGRA` is optional.
-	// But luckily LibVNCServer accepts RGBA by default.
-	glReadPixels(
-		0,
-		0,
-		this->width,
-		this->height,
-		GL_RGBA,
-		GL_UNSIGNED_BYTE,
-		this->buf->data
-	);
-	// g_debug("glReadPixels: %#x", glGetError());
-	if (glGetError() == GL_NO_ERROR) {
-		if (damage != NULL) {
-			calculate_damage(this, damage);
-			g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
-				damage->x,
-				damage->y,
-				damage->w,
-				damage->h);
-		}
-		if (damage == NULL || (damage->w != 0 && damage->h != 0)) {
-			g_clear_pointer(&this->prev, g_byte_array_unref);
-			this->prev_width = this->width;
-			this->prev_height = this->height;
-			// `GByteArray`'s `len` is not size, it is only updated
-			// with its API, we directly access its memory buffer, so
-			// we cannot use it.
-			const unsigned int size =
-				RF_BYTES_PER_PIXEL * this->width * this->height;
-			this->prev = g_byte_array_sized_new(size);
-			memcpy(this->prev->data, this->buf->data, size);
-		}
+	int res = convert_buffers(this, length, bufs);
+	if (res >= 0 && damage != NULL) {
+		calculate_damage(this, damage);
+		g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
+			damage->x,
+			damage->y,
+			damage->w,
+			damage->h);
 	}
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	unsigned int swap_texture = this->curr_texture;
+	this->curr_texture = this->prev_texture;
+	this->prev_texture = swap_texture;
 
 #ifdef __DEBUG__
 	const int64_t end = g_get_monotonic_time();
 	g_debug("GL: Converted frame in %ldms.", (end - begin) / 1000);
 #endif
+
+	if (res < 0)
+		return NULL;
+
+	if (damage != NULL && damage->w == 0 && damage->h == 0) {
+		g_debug("Frame: Empty damage, return empty buffer.");
+		return NULL;
+	}
 
 	return this->buf;
 }
