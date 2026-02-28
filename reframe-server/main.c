@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 		  G_OPTION_FLAG_NONE,
 		  G_OPTION_ARG_NONE,
 		  &skip_damage,
-		  "Skip damage region tracking and always update the whole frame buffer (debug purpose).",
+		  "Skip damage region detection and always update the whole frame buffer (debug purpose).",
 		  NULL },
 		{ NULL,
 		  0,
@@ -182,7 +182,7 @@ int main(int argc, char *argv[])
 	}
 
 	g_message(
-		"Skip damage region tracking mode is %s.",
+		"Skip damage region detection mode is %s.",
 		skip_damage ? "enabled" : "disabled"
 	);
 	g_message("Using configuration file %s.", config_path);

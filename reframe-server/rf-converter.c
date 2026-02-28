@@ -17,7 +17,7 @@ struct _RfConverter {
 	unsigned int gles_major;
 	EGLDisplay display;
 	EGLContext context;
-	GByteArray *buf;
+	GByteArray *curr;
 	GByteArray *prev;
 	unsigned int width;
 	unsigned int height;
@@ -547,7 +547,7 @@ static void rf_converter_init(RfConverter *this)
 	this->gles_major = 3;
 	this->display = EGL_NO_DISPLAY;
 	this->context = EGL_NO_CONTEXT;
-	this->buf = NULL;
+	this->curr = NULL;
 	this->prev = NULL;
 	this->width = 0;
 	this->height = 0;
@@ -606,16 +606,16 @@ int rf_converter_start(RfConverter *this)
 	switch (this->damage_type) {
 	case RF_DAMAGE_TYPE_CPU:
 		g_message(
-			"Frame: Damage region tracking implementation is CPU."
+			"Frame: Damage region detection implementation is CPU."
 		);
 		break;
 	case RF_DAMAGE_TYPE_GPU:
 		g_message(
-			"Frame: Damage region tracking implementation is GPU."
+			"Frame: Damage region detection implementation is GPU."
 		);
 		break;
 	default:
-		g_message("Frame: No damage region tracking implementation.");
+		g_message("Frame: No damage region detection implementation.");
 		break;
 	}
 	this->width = 0;
@@ -657,7 +657,7 @@ void rf_converter_stop(RfConverter *this)
 
 	this->running = false;
 
-	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->curr, g_byte_array_unref);
 	g_clear_pointer(&this->prev, g_byte_array_unref);
 	g_clear_pointer(&this->card_path, g_free);
 	clean_gl(this);
@@ -671,8 +671,8 @@ void rf_converter_stop(RfConverter *this)
 // accuracy we generate mipmaps for textures and sampling the nearest mipmap,
 // then we need to ensure that tile size is power-of-2 to match mipmap.
 //
-// For CPU damage region tracking we could safely choose a relative larger value
-// as tile size. 128 is a balanced value between comparing and transfering.
+// For CPU damage region detection we could safely choose a relative larger value
+// as tile size. 16 is a balanced value between comparing and transfering.
 static void update_damage_size(RfConverter *this)
 {
 	if (this->damage_type == RF_DAMAGE_TYPE_GPU) {
@@ -681,7 +681,7 @@ static void update_damage_size(RfConverter *this)
 		else
 			this->tile_size = 2;
 	} else {
-		this->tile_size = 128;
+		this->tile_size = 16;
 	}
 
 	g_debug("GL: Set tile size of damage to %u.", this->tile_size);
@@ -776,8 +776,8 @@ static void gen_buffers(RfConverter *this)
 	const unsigned int size =
 		RF_BYTES_PER_PIXEL * this->width * this->height;
 
-	g_clear_pointer(&this->buf, g_byte_array_unref);
-	this->buf = g_byte_array_sized_new(size);
+	g_clear_pointer(&this->curr, g_byte_array_unref);
+	this->curr = g_byte_array_sized_new(size);
 
 	g_clear_pointer(&this->prev, g_byte_array_unref);
 	this->prev = g_byte_array_sized_new(size);
@@ -1039,7 +1039,7 @@ convert_buffers(RfConverter *this, size_t length, const struct rf_buffer *bufs)
 		this->height,
 		GL_RGBA,
 		GL_UNSIGNED_BYTE,
-		this->buf->data
+		this->curr->data
 	);
 	if (glGetError() != GL_NO_ERROR)
 		res = -1;
@@ -1129,7 +1129,7 @@ static void damage_end(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-static void calculate_damage_gpu(RfConverter *this, struct rf_rect *damage)
+static void detect_damage_gpu(RfConverter *this, struct rf_rect *damage)
 {
 	damage_begin(this);
 
@@ -1211,45 +1211,35 @@ out:
 	damage_end(this);
 }
 
-static void calculate_damage_cpu(RfConverter *this, struct rf_rect *damage)
+// This is a naive damage region detection but works fairly enough for us.
+static void detect_damage_cpu(RfConverter *this, struct rf_rect *damage)
 {
-	// This is a naive damage region tracking but works fairly enough for us.
 	unsigned int x1 = this->width;
 	unsigned int y1 = this->height;
 	unsigned int x2 = 0;
 	unsigned int y2 = 0;
 
-	const uint8_t *new = this->buf->data;
+	// Optimization: We don't compare by square tiles, but compare by rows,
+	// so we are accessing continuous memory.
+	//
+	// This will increase network bandwidth compared with square tiles based
+	// detection, but on the earth I am doing what VNC/RDP encoders should
+	// concern (but they does not), so please don't be too harsh on me. IMO
+	// you should avoid using remote desktop with mobile data hotspot.
+	const uint8_t *new = this->curr->data;
 	const uint8_t *old = this->prev->data;
 	const size_t stride = this->width * RF_BYTES_PER_PIXEL;
+	const unsigned int x = 0;
+	const unsigned int w = this->width;
 	for (unsigned int y = 0; y < this->height; y += this->tile_size) {
-		for (unsigned int x = 0; x < this->width;
-		     x += this->tile_size) {
-			const unsigned int w =
-				MIN(this->tile_size, this->width - x);
-			const unsigned int h =
-				MIN(this->tile_size, this->height - y);
-			bool different = false;
-			for (unsigned int row = 0; row < h; ++row) {
-				const uint8_t *new_row = new +
-							 (y + row) * stride +
-							 x * RF_BYTES_PER_PIXEL;
-				const uint8_t *old_row = old +
-							 (y + row) * stride +
-							 x * RF_BYTES_PER_PIXEL;
-				if (memcmp(new_row,
-					   old_row,
-					   w * RF_BYTES_PER_PIXEL) != 0) {
-					different = true;
-					break;
-				}
-			}
-			if (different) {
-				x1 = MIN(x1, x);
-				y1 = MIN(y1, y);
-				x2 = MAX(x2, x + w);
-				y2 = MAX(y2, y + h);
-			}
+		const unsigned int h = MIN(this->tile_size, this->height - y);
+		const size_t offset = y * stride + x * RF_BYTES_PER_PIXEL;
+		const size_t size = w * h * RF_BYTES_PER_PIXEL;
+		if (memcmp(new + offset, old + offset, size) != 0) {
+			x1 = MIN(x1, x);
+			y1 = MIN(y1, y);
+			x2 = MAX(x2, x + w);
+			y2 = MAX(y2, y + h);
 		}
 	}
 
@@ -1266,17 +1256,17 @@ static void calculate_damage_cpu(RfConverter *this, struct rf_rect *damage)
 	}
 }
 
-static void calculate_damage(RfConverter *this, struct rf_rect *damage)
+static void detect_damage(RfConverter *this, struct rf_rect *damage)
 {
 	if (this->damage_type == RF_DAMAGE_TYPE_GPU) {
-		calculate_damage_gpu(this, damage);
+		detect_damage_gpu(this, damage);
 		unsigned int swap_texture = this->curr_texture;
 		this->curr_texture = this->prev_texture;
 		this->prev_texture = swap_texture;
 	} else if (this->damage_type == RF_DAMAGE_TYPE_CPU) {
-		calculate_damage_cpu(this, damage);
+		detect_damage_cpu(this, damage);
 		memcpy(this->prev->data,
-		       this->buf->data,
+		       this->curr->data,
 		       RF_BYTES_PER_PIXEL * this->width * this->height);
 	} else {
 		damage_full(this, damage);
@@ -1329,7 +1319,7 @@ GByteArray *rf_converter_convert(
 
 	int res = convert_buffers(this, length, bufs);
 	if (res >= 0 && damage != NULL)
-		calculate_damage(this, damage);
+		detect_damage(this, damage);
 
 #ifdef __DEBUG__
 	const int64_t end = g_get_monotonic_time();
@@ -1344,5 +1334,5 @@ GByteArray *rf_converter_convert(
 		return NULL;
 	}
 
-	return this->buf;
+	return this->curr;
 }
