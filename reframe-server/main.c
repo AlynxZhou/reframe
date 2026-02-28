@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 #ifdef HAVE_NEATVNC
 	// Only check VNC type when we have choices.
 	g_autofree char *type = rf_config_get_vnc_type(this->config);
-	g_message("VNC: Implementation type is %s.", type);
+	g_message("VNC: Implementation is %s.", type);
 	if (g_strcmp0(type, "neatvnc") == 0)
 		module_name = "lib" PROJECT_NAME "-neatvnc." G_MODULE_SUFFIX;
 	else

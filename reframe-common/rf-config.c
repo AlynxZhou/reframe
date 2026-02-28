@@ -214,6 +214,25 @@ bool rf_config_get_wakeup(RfConfig *this)
 	return wakeup;
 }
 
+enum rf_damage_type rf_config_get_damage(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), RF_DAMAGE_TYPE_CPU);
+
+	g_autoptr(GError) error = NULL;
+	g_autofree char *damage = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_REFRAME, "damage", &error
+	);
+	// The default implementation is CPU if upgraded from a old version.
+	if (error != NULL || damage == NULL)
+		return RF_DAMAGE_TYPE_CPU;
+	if (g_strcmp0(damage, "gpu") == 0)
+		return RF_DAMAGE_TYPE_GPU;
+	if (g_strcmp0(damage, "cpu") == 0)
+		return RF_DAMAGE_TYPE_CPU;
+	// Empty string or others means dumb.
+	return RF_DAMAGE_TYPE_DUMB;
+}
+
 unsigned int rf_config_get_fps(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);

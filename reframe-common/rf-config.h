@@ -6,6 +6,12 @@
 
 G_BEGIN_DECLS
 
+enum rf_damage_type {
+	RF_DAMAGE_TYPE_DUMB,
+	RF_DAMAGE_TYPE_CPU,
+	RF_DAMAGE_TYPE_GPU
+};
+
 #define RF_TYPE_CONFIG rf_config_get_type()
 G_DECLARE_FINAL_TYPE(RfConfig, rf_config, RF, CONFIG, GObject)
 
@@ -22,6 +28,7 @@ unsigned int rf_config_get_default_height(RfConfig *this);
 bool rf_config_get_resize(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
+enum rf_damage_type rf_config_get_damage(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
 char *rf_config_get_vnc_ip(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);

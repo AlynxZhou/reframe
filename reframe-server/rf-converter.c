@@ -18,8 +18,11 @@ struct _RfConverter {
 	EGLDisplay display;
 	EGLContext context;
 	GByteArray *buf;
+	GByteArray *prev;
 	unsigned int width;
 	unsigned int height;
+	unsigned int prev_width;
+	unsigned int prev_height;
 	unsigned int damage_width;
 	unsigned int damage_height;
 	unsigned int buffers[GL_MAX_BUFFERS];
@@ -34,6 +37,7 @@ struct _RfConverter {
 	unsigned int damage_texture;
 	unsigned int tile_size;
 	unsigned int rotation;
+	enum rf_damage_type damage_type;
 	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
@@ -544,8 +548,11 @@ static void rf_converter_init(RfConverter *this)
 	this->display = EGL_NO_DISPLAY;
 	this->context = EGL_NO_CONTEXT;
 	this->buf = NULL;
+	this->prev = NULL;
 	this->width = 0;
 	this->height = 0;
+	this->prev_width = 0;
+	this->prev_height = 0;
 	this->damage_width = 0;
 	this->damage_height = 0;
 	this->buffers[0] = 0;
@@ -562,6 +569,7 @@ static void rf_converter_init(RfConverter *this)
 	this->damage_texture = 0;
 	this->tile_size = 4;
 	this->rotation = 0;
+	this->damage_type = RF_DAMAGE_TYPE_CPU;
 	this->running = false;
 }
 
@@ -594,8 +602,26 @@ int rf_converter_start(RfConverter *this)
 	}
 	this->rotation = rf_config_get_rotation(this->config);
 	g_message("GL: Got screen rotation %u.", this->rotation);
+	this->damage_type = rf_config_get_damage(this->config);
+	switch (this->damage_type) {
+	case RF_DAMAGE_TYPE_CPU:
+		g_message(
+			"Frame: Damage region tracking implementation is CPU."
+		);
+		break;
+	case RF_DAMAGE_TYPE_GPU:
+		g_message(
+			"Frame: Damage region tracking implementation is GPU."
+		);
+		break;
+	default:
+		g_message("Frame: No damage region tracking implementation.");
+		break;
+	}
 	this->width = 0;
 	this->height = 0;
+	this->prev_width = 0;
+	this->prev_height = 0;
 	int ret = 0;
 	ret = setup_egl(this);
 	if (ret < 0)
@@ -632,9 +658,38 @@ void rf_converter_stop(RfConverter *this)
 	this->running = false;
 
 	g_clear_pointer(&this->buf, g_byte_array_unref);
+	g_clear_pointer(&this->prev, g_byte_array_unref);
 	g_clear_pointer(&this->card_path, g_free);
 	clean_gl(this);
 	clean_egl(this);
+}
+
+// We downscale texture into tiles on GPU, because we still need to scan the
+// result on CPU to get damage region, and per-pixel scanning is too heavy.
+// Because we actually compare the linear average color of a tile in shader,
+// larger tile size reduces the accuracy and causes artifacts. To increase
+// accuracy we generate mipmaps for textures and sampling the nearest mipmap,
+// then we need to ensure that tile size is power-of-2 to match mipmap.
+//
+// For CPU damage region tracking we could safely choose a relative larger value
+// as tile size. 128 is a balanced value between comparing and transfering.
+static void update_damage_size(RfConverter *this)
+{
+	if (this->damage_type == RF_DAMAGE_TYPE_GPU) {
+		if (this->width >= 1280 && this->height >= 720)
+			this->tile_size = 4;
+		else
+			this->tile_size = 2;
+	} else {
+		this->tile_size = 128;
+	}
+
+	g_debug("GL: Set tile size of damage to %u.", this->tile_size);
+
+	this->damage_width =
+		(this->width + this->tile_size - 1) / this->tile_size;
+	this->damage_height =
+		(this->height + this->tile_size - 1) / this->tile_size;
 }
 
 static inline void set_texture_parameters(GLenum target, GLint min_filter)
@@ -644,27 +699,6 @@ static inline void set_texture_parameters(GLenum target, GLint min_filter)
 	glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter);
 	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-}
-
-// We downscale texture into tiles on GPU, because we still need to scan the
-// result on CPU to get damage region, and per-pixel scanning is too heavy.
-// Because we actually compare the linear average color of a tile in shader,
-// larger tile size reduces the accuracy and causes artifacts. To increase
-// accuracy we generate mipmaps for textures and sampling the nearest mipmap,
-// then we need to ensure that tile size is power-of-2 to match mipmap.
-static void update_damage_size(RfConverter *this)
-{
-	if (this->width >= 1280 && this->height >= 720)
-		this->tile_size = 4;
-	else
-		this->tile_size = 2;
-
-	g_debug("GL: Set tile size of damage to %u.", this->tile_size);
-
-	this->damage_width =
-		(this->width + this->tile_size - 1) / this->tile_size;
-	this->damage_height =
-		(this->height + this->tile_size - 1) / this->tile_size;
 }
 
 static void gen_textures(RfConverter *this)
@@ -731,6 +765,24 @@ static void gen_textures(RfConverter *this)
 		NULL
 	);
 	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static void gen_buffers(RfConverter *this)
+{
+	g_debug("GL: Generate new buffers for width %u and height %u.",
+		this->width,
+		this->height);
+
+	const unsigned int size =
+		RF_BYTES_PER_PIXEL * this->width * this->height;
+
+	g_clear_pointer(&this->buf, g_byte_array_unref);
+	this->buf = g_byte_array_sized_new(size);
+
+	g_clear_pointer(&this->prev, g_byte_array_unref);
+	this->prev = g_byte_array_sized_new(size);
+	// Clear prev buffer so we will get a full update.
+	memset(this->prev->data, 0, size);
 }
 
 static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
@@ -996,6 +1048,14 @@ convert_buffers(RfConverter *this, size_t length, const struct rf_buffer *bufs)
 	return res;
 }
 
+static void damage_full(RfConverter *this, struct rf_rect *damage)
+{
+	damage->x = 0;
+	damage->y = 0;
+	damage->w = this->width;
+	damage->h = this->height;
+}
+
 static void damage_begin(RfConverter *this)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, this->damage_framebuffer);
@@ -1069,7 +1129,7 @@ static void damage_end(RfConverter *this)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-static void calculate_damage(RfConverter *this, struct rf_rect *damage)
+static void calculate_damage_gpu(RfConverter *this, struct rf_rect *damage)
 {
 	damage_begin(this);
 
@@ -1104,10 +1164,7 @@ static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 	);
 	if (glGetError() != GL_NO_ERROR) {
 		g_debug("Frame: Reading damage error, return full damage.");
-		damage->x = 0;
-		damage->y = 0;
-		damage->w = this->width;
-		damage->h = this->height;
+		damage_full(this, damage);
 		goto out;
 	}
 
@@ -1154,6 +1211,83 @@ out:
 	damage_end(this);
 }
 
+static void calculate_damage_cpu(RfConverter *this, struct rf_rect *damage)
+{
+	// This is a naive damage region tracking but works fairly enough for us.
+	unsigned int x1 = this->width;
+	unsigned int y1 = this->height;
+	unsigned int x2 = 0;
+	unsigned int y2 = 0;
+
+	const uint8_t *new = this->buf->data;
+	const uint8_t *old = this->prev->data;
+	const size_t stride = this->width * RF_BYTES_PER_PIXEL;
+	for (unsigned int y = 0; y < this->height; y += this->tile_size) {
+		for (unsigned int x = 0; x < this->width;
+		     x += this->tile_size) {
+			const unsigned int w =
+				MIN(this->tile_size, this->width - x);
+			const unsigned int h =
+				MIN(this->tile_size, this->height - y);
+			bool different = false;
+			for (unsigned int row = 0; row < h; ++row) {
+				const uint8_t *new_row = new +
+							 (y + row) * stride +
+							 x * RF_BYTES_PER_PIXEL;
+				const uint8_t *old_row = old +
+							 (y + row) * stride +
+							 x * RF_BYTES_PER_PIXEL;
+				if (memcmp(new_row,
+					   old_row,
+					   w * RF_BYTES_PER_PIXEL) != 0) {
+					different = true;
+					break;
+				}
+			}
+			if (different) {
+				x1 = MIN(x1, x);
+				y1 = MIN(y1, y);
+				x2 = MAX(x2, x + w);
+				y2 = MAX(y2, y + h);
+			}
+		}
+	}
+
+	if (x1 < x2 && y1 < y2) {
+		damage->x = x1;
+		damage->y = y1;
+		damage->w = x2 - x1;
+		damage->h = y2 - y1;
+	} else {
+		damage->x = 0;
+		damage->y = 0;
+		damage->w = 0;
+		damage->h = 0;
+	}
+}
+
+static void calculate_damage(RfConverter *this, struct rf_rect *damage)
+{
+	if (this->damage_type == RF_DAMAGE_TYPE_GPU) {
+		calculate_damage_gpu(this, damage);
+		unsigned int swap_texture = this->curr_texture;
+		this->curr_texture = this->prev_texture;
+		this->prev_texture = swap_texture;
+	} else if (this->damage_type == RF_DAMAGE_TYPE_CPU) {
+		calculate_damage_cpu(this, damage);
+		memcpy(this->prev->data,
+		       this->buf->data,
+		       RF_BYTES_PER_PIXEL * this->width * this->height);
+	} else {
+		damage_full(this, damage);
+	}
+	g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
+		damage->x,
+		damage->y,
+		damage->w,
+		damage->h);
+}
+
 GByteArray *rf_converter_convert(
 	RfConverter *this,
 	size_t length,
@@ -1190,25 +1324,12 @@ GByteArray *rf_converter_convert(
 		this->height = height;
 		update_damage_size(this);
 		gen_textures(this);
-		g_clear_pointer(&this->buf, g_byte_array_unref);
-		this->buf = g_byte_array_sized_new(
-			RF_BYTES_PER_PIXEL * this->width * this->height
-		);
+		gen_buffers(this);
 	}
 
 	int res = convert_buffers(this, length, bufs);
-	if (res >= 0 && damage != NULL) {
+	if (res >= 0 && damage != NULL)
 		calculate_damage(this, damage);
-		g_debug("Frame: Got buffer damage: x %u, y %u, width %u, height %u.",
-			damage->x,
-			damage->y,
-			damage->w,
-			damage->h);
-	}
-
-	unsigned int swap_texture = this->curr_texture;
-	this->curr_texture = this->prev_texture;
-	this->prev_texture = swap_texture;
 
 #ifdef __DEBUG__
 	const int64_t end = g_get_monotonic_time();
