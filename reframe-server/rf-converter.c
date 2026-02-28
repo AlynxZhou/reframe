@@ -8,14 +8,6 @@
 #include "rf-common.h"
 #include "rf-converter.h"
 
-// We downscale texture into tiles on GPU, because we still need to scan the
-// result on CPU to get damage region, and per-pixel scanning is too heavy.
-// Because we actually compare the linear average color of a tile in shader,
-// larger tile size reduces the accuracy and causes artifacts. To increase
-// accuracy we generate mipmaps for textures and sampling the nearest mipmap,
-// then we need to ensure tile size is power-of-2 to match mipmap. By testing,
-// 8 is the largest tile size that does not cause artifacts for 800x600.
-#define TILE_SIZE 8
 #define GL_MAX_BUFFERS 3
 
 struct _RfConverter {
@@ -40,6 +32,7 @@ struct _RfConverter {
 	unsigned int curr_texture;
 	unsigned int prev_texture;
 	unsigned int damage_texture;
+	unsigned int tile_size;
 	unsigned int rotation;
 	bool running;
 };
@@ -567,6 +560,7 @@ static void rf_converter_init(RfConverter *this)
 	this->curr_texture = 0;
 	this->prev_texture = 0;
 	this->damage_texture = 0;
+	this->tile_size = 4;
 	this->rotation = 0;
 	this->running = false;
 }
@@ -643,12 +637,6 @@ void rf_converter_stop(RfConverter *this)
 	clean_egl(this);
 }
 
-static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
-{
-	g_array_append_val(a, k);
-	g_array_append_val(a, v);
-}
-
 static inline void set_texture_parameters(GLenum target, GLint min_filter)
 {
 	// Setting sampling filter to scaling texture automatically.
@@ -656,6 +644,27 @@ static inline void set_texture_parameters(GLenum target, GLint min_filter)
 	glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter);
 	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
+// We downscale texture into tiles on GPU, because we still need to scan the
+// result on CPU to get damage region, and per-pixel scanning is too heavy.
+// Because we actually compare the linear average color of a tile in shader,
+// larger tile size reduces the accuracy and causes artifacts. To increase
+// accuracy we generate mipmaps for textures and sampling the nearest mipmap,
+// then we need to ensure that tile size is power-of-2 to match mipmap.
+static void update_damage_size(RfConverter *this)
+{
+	if (this->width >= 1280 && this->height >= 720)
+		this->tile_size = 4;
+	else
+		this->tile_size = 2;
+
+	g_debug("GL: Set tile size of damage to %u.", this->tile_size);
+
+	this->damage_width =
+		(this->width + this->tile_size - 1) / this->tile_size;
+	this->damage_height =
+		(this->height + this->tile_size - 1) / this->tile_size;
 }
 
 static void gen_textures(RfConverter *this)
@@ -722,6 +731,12 @@ static void gen_textures(RfConverter *this)
 		NULL
 	);
 	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
+{
+	g_array_append_val(a, k);
+	g_array_append_val(a, v);
 }
 
 static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
@@ -1108,12 +1123,12 @@ static void calculate_damage(RfConverter *this, struct rf_rect *damage)
 				yt * stride + xt * RF_BYTES_PER_PIXEL;
 			// Checking only the red channel is enough.
 			if (damage_buffer[offset] > 0) {
-				const unsigned int x = xt * TILE_SIZE;
-				const unsigned int y = yt * TILE_SIZE;
+				const unsigned int x = xt * this->tile_size;
+				const unsigned int y = yt * this->tile_size;
 				const unsigned int w =
-					MIN(TILE_SIZE, this->width - x);
+					MIN(this->tile_size, this->width - x);
 				const unsigned int h =
-					MIN(TILE_SIZE, this->height - y);
+					MIN(this->tile_size, this->height - y);
 
 				x1 = MIN(x1, x);
 				y1 = MIN(y1, y);
@@ -1173,9 +1188,7 @@ GByteArray *rf_converter_convert(
 	if (this->width != width || this->height != height) {
 		this->width = width;
 		this->height = height;
-		this->damage_width = (this->width + TILE_SIZE - 1) / TILE_SIZE;
-		this->damage_height =
-			(this->height + TILE_SIZE - 1) / TILE_SIZE;
+		update_damage_size(this);
 		gen_textures(this);
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_sized_new(
