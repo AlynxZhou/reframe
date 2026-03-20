@@ -141,9 +141,11 @@ ReFrame Server systemd service should automatically pull ReFrame systemd socket,
 
 ## Multi-monitor
 
-If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make mouse position mapping work.
+If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make pointer position mapping work.
 
-Unfortunately there is no general way to get those values for all desktop environments. You could run a program to get the current cursor position, and then move the cursor to get the following values.
+All things mentioned here is only about the **logical** position of monitors, which is generally how you place them in the *Display* page of *Settings*, and have nothing about how you place them physically.
+
+Unfortunately there is no general way to get those values for all desktop environments. You could run a program that reports the current cursor position, and then move the cursor to get the following values.
 
 - `desktop-width`: The x coordinate of right border of your rightmost monitor.
 - `desktop-height`: The y coordinate of bottom border of your bottommost monitor.
@@ -153,7 +155,11 @@ Here is an example about what those keys are and how to find their values:
 
 ![monitor-mapping.drawio.svg](./docs/images/monitor-mapping.drawio.svg)
 
-You need to keep the same multi-monitor layout for **both user session and display manager session** to make remote login work correctly.
+You need to keep the same multi-monitor layout for **both user session and display manager session** to make remote login work correctly. For example, to sync monitor layout of your user session to GDM's display manager session:
+
+```
+# cp /home/YOURUSER/.config/monitors.xml /etc/xdg/monitors.xml
+```
 
 ## Headless Setup
 
