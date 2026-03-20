@@ -149,6 +149,10 @@ Unfortunately there is no general way to get those values for all desktop enviro
 - `desktop-height`: The y coordinate of bottom border of your bottommost monitor.
 - `monitor-x` and `monitor-y`: The x and y coordinates of top-left corner of your selected monitor.
 
+Here is an example about what those keys are and how to find their values:
+
+![monitor-mapping.drawio.svg](./docs/images/monitor-mapping.drawio.svg)
+
 You need to keep the same multi-monitor layout for **both user session and display manager session** to make remote login work correctly.
 
 ## Headless Setup
