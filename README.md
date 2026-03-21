@@ -183,7 +183,7 @@ If you don't want this, you can disable automatic screen blank for **both user s
 You need to add your user to `reframe` group to use clipboard text sync.
 
 ```
-# gpasswd -a USER reframe
+# gpasswd -a YOURUSER reframe
 ```
 
 If you set other username than `reframe` while building, the group name should be changed accordingly.
@@ -201,7 +201,7 @@ This is implemented by putting a desktop file to XDG autostart dir to start `ref
 	+ ReFrame supports Remote Login on Wayland, [RustDesk does not support it](https://rustdesk.com/docs/en/client/linux/#login-screen).
 - [GNOME Remote Desktop](https://gitlab.gnome.org/GNOME/gnome-remote-desktop/)
 	+ ReFrame supports non-GNOME desktop environments.
-	+ ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements Server Redirection (Microsoft's Windows App on macOS does NOT implement it and that's why I decides to write my own solution).
+	+ ReFrame supports Remote Login with VNC, GNOME Remote Desktop only supports Remote Login with RDP clients that implements *Server Redirection* (Microsoft's Windows App on macOS does **NOT** implement it and that's why I decides to write my own solution).
 - [wayvnc](https://github.com/any1/wayvnc/)
 	+ ReFrame supports non-wlroots desktop environments.
 - [w0vncserver](https://tigervnc.org/)
