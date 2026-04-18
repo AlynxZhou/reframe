@@ -28,7 +28,7 @@ static void on_resize_event(RfVNCServer *v, int width, int height, void *data)
 	struct this *this = data;
 
 	// Resize, but follow aspect ratio.
-	if ((double)width / height > this->aspect_ratio) {
+	if ((double)width / height >= this->aspect_ratio) {
 		this->width = height * this->aspect_ratio;
 		this->height = height;
 	} else {
@@ -44,10 +44,9 @@ on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 
 	const struct rf_buffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
-		if (rf_is_landscape(this->rotation)) {
-			this->width = primary->md.crtc_w;
-			this->height = primary->md.crtc_h;
-		} else {
+		this->width = primary->md.crtc_w;
+		this->height = primary->md.crtc_h;
+		if (!rf_is_landscape(this->rotation)) {
 			this->width = primary->md.crtc_h;
 			this->height = primary->md.crtc_w;
 		}
