@@ -264,7 +264,7 @@ static ssize_t on_frame_msg(RfStreamer *this)
 	// Monitor size should be CRTC size.
 	uint32_t frame_width = primary->md.crtc_width;
 	uint32_t frame_height = primary->md.crtc_height;
-	if (this->rotation % 180 != 0) {
+	if (rf_is_landscape(this->rotation)) {
 		frame_width = primary->md.crtc_height;
 		frame_height = primary->md.crtc_width;
 	}

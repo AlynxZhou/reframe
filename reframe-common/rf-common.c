@@ -106,3 +106,8 @@ pid_t rf_get_socket_pid(GSocket *socket)
 		);
 	return pid;
 }
+
+bool rf_is_landscape(unsigned int rotation)
+{
+	return rotation % 180 == 0;
+}

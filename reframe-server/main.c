@@ -19,6 +19,7 @@ struct this {
 	unsigned int width;
 	unsigned int height;
 	unsigned int rotation;
+	double aspect_ratio;
 	bool skip_damage;
 };
 
@@ -26,8 +27,14 @@ static void on_resize_event(RfVNCServer *v, int width, int height, void *data)
 {
 	struct this *this = data;
 
-	this->width = width;
-	this->height = height;
+	// Resize, but follow aspect ratio.
+	if ((double)width / height > this->aspect_ratio) {
+		this->width = height * this->aspect_ratio;
+		this->height = height;
+	} else {
+		this->width = width;
+		this->height = width / this->aspect_ratio;
+	}
 }
 
 static void
@@ -37,7 +44,7 @@ on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 
 	const struct rf_buffer *primary = &bufs[0];
 	if (this->width == 0 || this->height == 0) {
-		if (this->rotation % 180 == 0) {
+		if (rf_is_landscape(this->rotation)) {
 			this->width = primary->md.crtc_w;
 			this->height = primary->md.crtc_h;
 		} else {
@@ -45,6 +52,9 @@ on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 			this->height = primary->md.crtc_w;
 		}
 	}
+	this->aspect_ratio = (double)primary->md.crtc_w / primary->md.crtc_h;
+	if (!rf_is_landscape(this->rotation))
+		this->aspect_ratio = 1 / this->aspect_ratio;
 
 	if (!rf_converter_is_running(this->converter)) {
 		if (rf_converter_start(this->converter) < 0) {
@@ -79,6 +89,8 @@ static void on_first_client(RfVNCServer *v, void *data)
 	this->rotation = rf_config_get_rotation(this->config);
 	this->width = rf_config_get_default_width(this->config);
 	this->height = rf_config_get_default_height(this->config);
+	// We always recalculate this on frame so here is not important.
+	this->aspect_ratio = 1.0;
 
 	if (rf_streamer_start(this->streamer) < 0)
 		rf_vnc_server_flush(this->vnc);
@@ -200,9 +212,6 @@ int main(int argc, char *argv[])
 	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->skip_damage = skip_damage;
 	this->config = rf_config_new(config_path);
-	this->rotation = rf_config_get_rotation(this->config);
-	this->width = rf_config_get_default_width(this->config);
-	this->height = rf_config_get_default_height(this->config);
 
 	const char *module_name = NULL;
 #ifdef HAVE_NEATVNC

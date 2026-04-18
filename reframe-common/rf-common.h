@@ -92,6 +92,7 @@ ssize_t rf_send_header(
 const char *rf_plane_type(uint32_t type);
 int rf_set_group(const char *path);
 pid_t rf_get_socket_pid(GSocket *socket);
+bool rf_is_landscape(unsigned int rotation);
 
 G_END_DECLS
 
