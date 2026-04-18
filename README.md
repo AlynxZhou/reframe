@@ -4,6 +4,10 @@ ReFrame Remote Desktop
 DRM/KMS based remote desktop for Linux that supports Wayland/NVIDIA/headless/login…
 -----------------------------------------------------------------------------------
 
+# Where Are My Users?
+
+I am really interested in how ReFrame helps you in your daily life! Please send email to [alynx.zhou@gmail.com](mailto:alynx.zhou@gmail.com) and tell me about how you use ReFrame. If you feel good about it, don't forget to star this repo and introduce ReFrame to others!
+
 # Features
 
 If you are interested in contribution, you may read [HACKING.md](./HACKING.md) first which should be helpful.
@@ -115,6 +119,8 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 
 If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. If it cannot find your monitor, you need to manually select monitor via DRM card and connector. If you can see screen content, but cannot control it, you need to manually load `uinput` kernel module (`modprobe uinput`).
 
+You need to disconnect and restart it once you modify any monitor settings.
+
 ## Select Monitor via DRM Card and Connector
 
 1. Find your DRM card name (e.g., `card0`) and connector name (e.g., `DP-1`) in `/sys/class/drm/`.
@@ -189,6 +195,8 @@ You need to add your user to `reframe` group to use clipboard text sync.
 If you set other username than `reframe` while building, the group name should be changed accordingly.
 
 This is implemented by putting a desktop file to XDG autostart dir to start `reframe-session` with your session and handle your clipboard. `reframe-session` talks with `reframe-server` via sockets in directory `/run/reframe-session`, if you are not using systemd, or you changed the directory via `reframe-server`'s argument, don't forget to modify the XDG autostart file to change argument for `reframe-session`
+
+You have to restart `reframe-session` once you update it, because the binary is changed. This could be done via log out and log in again.
 
 # Comparison with Other Linux Remote Desktop
 
