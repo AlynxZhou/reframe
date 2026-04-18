@@ -1,7 +1,7 @@
 project(
   'reframe',
   'c',
-  version: '1.14.1',
+  version: '1.15.0',
   license: 'Apache-2.0',
   default_options: ['c_std=gnu11']
 )
