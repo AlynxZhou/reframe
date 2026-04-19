@@ -238,7 +238,8 @@ static void start(RfVNCServer *super)
 		);
 	}
 	if (error != NULL)
-		g_error("VNC: Failed to listen on %u:%s.",
+		g_error("VNC: Failed to listen on %s:%u:%s.",
+			ip,
 			port,
 			error->message);
 	g_signal_connect(
