@@ -78,6 +78,11 @@ static void on_clipboard_changed(GdkClipboard *clipboard, void *data)
 	if (gdk_clipboard_is_local(clipboard))
 		return;
 
+	GdkContentFormats *formats = gdk_clipboard_get_formats(clipboard);
+
+	if (!gdk_content_formats_contain_mime_type(formats, "text/plain"))
+		return;
+
 	gdk_clipboard_read_text_async(
 		clipboard, NULL, on_read_text_finish, this
 	);
