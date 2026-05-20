@@ -521,21 +521,16 @@ static inline char *get_connector_name(drmModeConnector *connector)
 	);
 }
 
-static bool connector_has_crtc(int cfd, drmModeConnector *connector)
+static drmModeCrtc *get_crtc(int cfd, drmModeConnector *connector)
 {
 	drmModeEncoder *encoder = NULL;
-	bool has_crtc = false;
-
-	if (connector->encoder_id == 0)
-		return false;
-
+	drmModeCrtc *crtc = NULL;
 	encoder = drmModeGetEncoder(cfd, connector->encoder_id);
 	if (encoder == NULL)
-		return false;
-
-	has_crtc = encoder->crtc_id != 0;
+		return NULL;
+	crtc = drmModeGetCrtc(cfd, encoder->crtc_id);
 	drmModeFreeEncoder(encoder);
-	return has_crtc;
+	return crtc;
 }
 
 static drmModeConnector *get_connector(int cfd, const char *connector_name)
@@ -547,31 +542,24 @@ static drmModeConnector *get_connector(int cfd, const char *connector_name)
 		return NULL;
 	}
 	if (connector_name != NULL)
-		g_debug("DRM: Finding connector for connector %s.",
-			connector_name);
+		g_debug("DRM: Finding connector for %s.", connector_name);
 	for (int i = 0; i < res->count_connectors; ++i) {
 		connector = drmModeGetConnector(cfd, res->connectors[i]);
 		if (connector == NULL)
 			continue;
 		g_autofree char *full_name = get_connector_name(connector);
-		g_debug("DRM: Connector %s is %s.",
+		bool connected = connector->connection == DRM_MODE_CONNECTED;
+		drmModeCrtc *crtc = get_crtc(cfd, connector);
+		bool has_crtc = crtc != NULL;
+		if (crtc != NULL)
+			drmModeFreeCrtc(crtc);
+		bool matched = connector_name == NULL ||
+			       g_strcmp0(full_name, connector_name) == 0;
+		g_debug("DRM: Connector %s is %s and %s.",
 			full_name,
-			connector->connection == DRM_MODE_CONNECTED ?
-				"connected" :
-				"disconnected");
-		if (connector->connection == DRM_MODE_CONNECTED &&
-		    !connector_has_crtc(cfd, connector)) {
-			g_debug(
-				"DRM: Skipping connector %s because it has no active CRTC.",
-				full_name
-			);
-			drmModeFreeConnector(connector);
-			connector = NULL;
-			continue;
-		}
-		if (connector->connection == DRM_MODE_CONNECTED &&
-		    (connector_name == NULL ||
-		     g_strcmp0(full_name, connector_name) == 0))
+			connected ? "connected" : "disconnected",
+			has_crtc ? "has active CRTC" : "has no active CRTC");
+		if (connected && has_crtc && matched)
 			break;
 		drmModeFreeConnector(connector);
 		connector = NULL;
@@ -581,7 +569,7 @@ static drmModeConnector *get_connector(int cfd, const char *connector_name)
 }
 
 static drmModeConnector *
-get_connected_card_and_connector(struct this *this, const char *connector_name)
+get_usable_card_and_connector(struct this *this, const char *connector_name)
 {
 	g_autoptr(GDir) dir = g_dir_open("/dev/dri", 0, NULL);
 	if (dir == NULL)
@@ -596,7 +584,7 @@ get_connected_card_and_connector(struct this *this, const char *connector_name)
 		int cfd = open(card_path, O_RDONLY | O_CLOEXEC);
 		if (cfd < 0)
 			continue;
-		g_debug("DRM: Finding the first connected connector with an active CRTC on card %s.",
+		g_debug("DRM: Finding the first usable connector on card %s.",
 			card_path);
 		drmModeConnector *connector =
 			get_connector(cfd, connector_name);
@@ -604,7 +592,7 @@ get_connected_card_and_connector(struct this *this, const char *connector_name)
 			this->cfd = cfd;
 			this->card_path = g_strdup(card_path);
 			g_message(
-				"DRM: Found the first connected connector with an active CRTC on card %s.",
+				"DRM: Found the first usable connector on card %s.",
 				card_path
 			);
 			return connector;
@@ -618,7 +606,7 @@ static drmModeConnector *
 get_card_and_connector(struct this *this, const char *connector_name)
 {
 	if (this->card_path == NULL)
-		return get_connected_card_and_connector(this, connector_name);
+		return get_usable_card_and_connector(this, connector_name);
 	this->cfd = open(this->card_path, O_RDONLY | O_CLOEXEC);
 	if (this->cfd < 0) {
 		g_warning(
@@ -630,18 +618,6 @@ get_card_and_connector(struct this *this, const char *connector_name)
 	}
 	g_message("DRM: Opened card %s.", this->card_path);
 	return get_connector(this->cfd, connector_name);
-}
-
-static drmModeCrtc *get_crtc(int cfd, drmModeConnector *connector)
-{
-	drmModeEncoder *encoder = NULL;
-	drmModeCrtc *crtc = NULL;
-	encoder = drmModeGetEncoder(cfd, connector->encoder_id);
-	if (encoder == NULL)
-		return NULL;
-	crtc = drmModeGetCrtc(cfd, encoder->crtc_id);
-	drmModeFreeEncoder(encoder);
-	return crtc;
 }
 
 static void setup_drm(struct this *this)
@@ -656,7 +632,7 @@ static void setup_drm(struct this *this)
 	drmModeConnector *connector =
 		get_card_and_connector(this, this->connector_name);
 	if (connector == NULL)
-		g_error("DRM: Failed to find a connected connector.");
+		g_error("DRM: Failed to find a usable connector.");
 
 	// We may become DRM master if we are the first process that opens DRM
 	// card, then drop DRM master so we could start compositor after ReFrame.
@@ -664,12 +640,13 @@ static void setup_drm(struct this *this)
 
 	if (this->connector_name == NULL)
 		this->connector_name = get_connector_name(connector);
-	g_message("DRM: Found connected connector %s.", this->connector_name);
+	g_message("DRM: Found usable connector %s.", this->connector_name);
 
 	drmModeCrtc *crtc = get_crtc(this->cfd, connector);
 	drmModeFreeConnector(connector);
 	if (crtc == NULL)
-		g_error("DRM: Failed to find a CRTC for connector.");
+		g_error("DRM: Failed to find an active CRTC for connector %s.",
+			this->connector_name);
 	this->crtc_id = crtc->crtc_id;
 	drmModeFreeCrtc(crtc);
 
