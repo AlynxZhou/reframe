@@ -270,10 +270,7 @@ static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 
 	g_clear_pointer(&this->desktop_name, g_free);
 	this->desktop_name = g_strdup(desktop_name);
-	// Well this does not work because VNC does not update desktop name to
-	// client after it is inited. Clients will get the previous desktop name
-	// which may not be correct.
-	// nvnc_set_name(this->nvnc, this->desktop_name);
+	nvnc_set_name(this->nvnc, this->desktop_name);
 }
 
 static void send_clipboard_text(RfVNCServer *super, const char *text)
