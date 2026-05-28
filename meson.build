@@ -18,6 +18,7 @@ if get_option('systemd')
 endif
 if get_option('neatvnc')
   neatvnc = dependency('neatvnc', required: false)
+  neatvnc_unstable_api = neatvnc.version().version_compare('<1.0.0')
 endif
 
 prefix = get_option('prefix')
@@ -69,6 +70,7 @@ conf_data.set_quoted('BINDIR', bindir)
 conf_data.set_quoted('LIBDIR', libdir)
 conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
 conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
+conf_data.set('NEATVNC_UNSTABLE_API', get_option('neatvnc') and neatvnc.found() and neatvnc_unstable_api)
 
 configure_file(
   input: 'reframe-common' / 'config.h.in',
@@ -90,14 +92,19 @@ summary({
   'libdir': libdir,
   'moduledir': moduledir,
   'confdir': confdir,
-}, section: 'Confiuration')
+}, section: 'Configuration')
 if systemd.found()
   summary({
     'systemunitdir': systemunitdir,
     'sysusersdir': sysusersdir,
     'tmpfilesdir': tmpfilesdir,
     'username': username
-  }, section: 'Confiuration')
+  }, section: 'Configuration')
+endif
+if neatvnc.found()
+  summary({
+    'neatvnc unstable API': neatvnc_unstable_api
+  }, section: 'Configuration')
 endif
 
 meson.add_install_script(

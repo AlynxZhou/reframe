@@ -1,11 +1,11 @@
 #include <stdbool.h>
 #include <glib-unix.h>
-#define AML_UNSTABLE_API 1
 #include <aml.h>
 #include <neatvnc.h>
 #include <pixman.h>
 #include <libdrm/drm_fourcc.h>
 
+#include "config.h"
 #include "rf-common.h"
 #include "rf-nvnc-server.h"
 
@@ -129,7 +129,11 @@ static void on_new_client(struct nvnc_client *client)
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
+#ifndef NEATVNC_UNSTABLE_API
+	nvnc_client_set_userdata(client, client, on_client_gone);
+#else
 	nvnc_set_client_cleanup_fn(client, on_client_gone);
+#endif
 	if (++this->clients == 1)
 		rf_vnc_server_handle_first_client(super);
 }
@@ -194,9 +198,15 @@ static void start(RfVNCServer *super)
 	this->aml = aml_new();
 	aml_set_default(this->aml);
 
+#ifndef NEATVNC_UNSTABLE_API
+	this->nvnc = nvnc_new();
+	if (nvnc_listen_tcp(this->nvnc, ip, port, NVNC_STREAM_NORMAL) != 0)
+		g_error("VNC: Failed to listen on %s:%u.", ip, port);
+#else
 	this->nvnc = nvnc_open(ip, port);
 	if (this->nvnc == NULL)
 		g_error("VNC: Failed to listen on %s:%u.", ip, port);
+#endif
 	nvnc_set_userdata(this->nvnc, this, NULL);
 	this->display = nvnc_display_new(0, 0);
 	if (this->display == NULL)
@@ -214,17 +224,29 @@ static void start(RfVNCServer *super)
 		nvnc_enable_auth(
 			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, on_auth, this
 		);
+	struct pixman_region16 region;
+	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
+#ifndef NEATVNC_UNSTABLE_API
+	struct nvnc_frame *frame = nvnc_frame_new(
+		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
+	);
+	memset(nvnc_frame_get_addr(frame),
+	       0,
+	       this->width * this->height * nvnc_frame_get_pixel_size(frame));
+	nvnc_display_feed_frame(this->display, frame, &region);
+	nvnc_frame_unref(frame);
+#else
 	struct nvnc_fb *fb = nvnc_fb_new(
 		this->width, this->height, DRM_FORMAT_XBGR8888, this->width
 	);
 	memset(nvnc_fb_get_addr(fb),
 	       0,
 	       this->width * this->height * nvnc_fb_get_pixel_size(fb));
-	struct pixman_region16 region;
-	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
+
 	nvnc_display_feed_buffer(this->display, fb, &region);
-	pixman_region_fini(&region);
 	nvnc_fb_unref(fb);
+#endif
+	pixman_region_fini(&region);
 
 	// Integrate aml into GLib's main loop.
 	this->aml_id = g_unix_fd_add(
@@ -255,8 +277,13 @@ static void stop(RfVNCServer *super)
 		g_source_remove(this->aml_id);
 		this->aml_id = 0;
 	}
+	nvnc_remove_display(this->nvnc, this->display);
 	g_clear_pointer(&this->display, nvnc_display_unref);
+#ifndef NEATVNC_UNSTABLE_API
+	g_clear_pointer(&this->nvnc, nvnc_del);
+#else
 	g_clear_pointer(&this->nvnc, nvnc_close);
+#endif
 	aml_set_default(NULL);
 	g_clear_pointer(&this->aml, aml_unref);
 	g_clear_pointer(&this->buf, g_byte_array_unref);
@@ -270,7 +297,9 @@ static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 
 	g_clear_pointer(&this->desktop_name, g_free);
 	this->desktop_name = g_strdup(desktop_name);
+#ifndef NEATVNC_UNSTABLE_API
 	nvnc_set_name(this->nvnc, this->desktop_name);
+#endif
 }
 
 static void send_clipboard_text(RfVNCServer *super, const char *text)
@@ -304,13 +333,6 @@ update(RfVNCServer *super,
 		this->height = height;
 		// nvnc_display_set_logical_size(this->display, width, height);
 	}
-	struct nvnc_fb *fb = nvnc_fb_from_buffer(
-		this->buf->data,
-		this->width,
-		this->height,
-		DRM_FORMAT_XBGR8888,
-		this->width
-	);
 	struct pixman_region16 region;
 	if (damage != NULL)
 		pixman_region_init_rect(
@@ -320,9 +342,28 @@ update(RfVNCServer *super,
 		pixman_region_init_rect(
 			&region, 0, 0, this->width, this->height
 		);
+#ifndef NEATVNC_UNSTABLE_API
+	struct nvnc_frame *frame = nvnc_frame_from_raw(
+		this->buf->data,
+		this->width,
+		this->height,
+		DRM_FORMAT_XBGR8888,
+		this->width
+	);
+	nvnc_display_feed_frame(this->display, frame, &region);
+	nvnc_frame_unref(frame);
+#else
+	struct nvnc_fb *fb = nvnc_fb_from_buffer(
+		this->buf->data,
+		this->width,
+		this->height,
+		DRM_FORMAT_XBGR8888,
+		this->width
+	);
 	nvnc_display_feed_buffer(this->display, fb, &region);
-	pixman_region_fini(&region);
 	nvnc_fb_unref(fb);
+#endif
+	pixman_region_fini(&region);
 }
 
 static void flush(RfVNCServer *super)

@@ -81,6 +81,7 @@ if get_option('neatvnc') and neatvnc.found()
   nvnc_dependencies = []
   libdrm = dependency('libdrm', required: true)
   aml = dependency('aml', required: true)
+  aml_unstable_api = aml.version().version_compare('<1.0.0')
   pixman = dependency('pixman-1', required: true)
   nvnc_dependencies += [
     glib,
@@ -94,11 +95,17 @@ if get_option('neatvnc') and neatvnc.found()
     reframe_common_dep
   ]
 
+  nvnc_c_args = []
+  if aml_unstable_api
+    nvnc_c_args += ['-DAML_UNSTABLE_API=1']
+  endif
+
   shared_module(
     meson.project_name() + '-neatvnc',
     sources: nvnc_sources,
     dependencies: nvnc_dependencies,
     include_directories: include_directories,
+    c_args: nvnc_c_args,
     install: true,
     install_dir: moduledir / 'vnc'
   )
