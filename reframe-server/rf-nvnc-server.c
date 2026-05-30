@@ -113,8 +113,9 @@ static bool on_resize_event(
 	return true;
 }
 
-static void on_client_gone(struct nvnc_client *client)
+static void on_client_gone(void *data)
 {
+	struct nvnc_client *client = data;
 	struct nvnc *nvnc = nvnc_client_get_server(client);
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
@@ -132,7 +133,7 @@ static void on_new_client(struct nvnc_client *client)
 #ifndef NEATVNC_UNSTABLE_API
 	nvnc_client_set_userdata(client, client, on_client_gone);
 #else
-	nvnc_set_client_cleanup_fn(client, on_client_gone);
+	nvnc_set_client_cleanup_fn(client, (nvnc_client_fn)on_client_gone);
 #endif
 	if (++this->clients == 1)
 		rf_vnc_server_handle_first_client(super);
@@ -233,7 +234,8 @@ static void start(RfVNCServer *super)
 	memset(nvnc_frame_get_addr(frame),
 	       0,
 	       this->width * this->height * nvnc_frame_get_pixel_size(frame));
-	nvnc_display_feed_frame(this->display, frame, &region);
+	nvnc_frame_set_damage(frame, &region);
+	nvnc_display_feed_frame(this->display, frame);
 	nvnc_frame_unref(frame);
 #else
 	struct nvnc_fb *fb = nvnc_fb_new(
@@ -350,7 +352,8 @@ update(RfVNCServer *super,
 		DRM_FORMAT_XBGR8888,
 		this->width
 	);
-	nvnc_display_feed_frame(this->display, frame, &region);
+	nvnc_frame_set_damage(frame, &region);
+	nvnc_display_feed_frame(this->display, frame);
 	nvnc_frame_unref(frame);
 #else
 	struct nvnc_fb *fb = nvnc_fb_from_buffer(
