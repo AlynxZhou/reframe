@@ -80,7 +80,10 @@ if get_option('neatvnc') and neatvnc.found()
 
   nvnc_dependencies = []
   libdrm = dependency('libdrm', required: true)
-  aml = dependency('aml', required: true)
+  aml = dependency('aml1', required: false)
+  if not aml.found()
+    aml = dependency('aml', required: true)
+  endif
   aml_unstable_api = aml.version().version_compare('<1.0.0')
   pixman = dependency('pixman-1', required: true)
   nvnc_dependencies += [
