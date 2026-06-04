@@ -93,7 +93,7 @@ summary({
   'moduledir': moduledir,
   'confdir': confdir,
 }, section: 'Configuration')
-if systemd.found()
+if get_option('systemd') and systemd.found()
   summary({
     'systemunitdir': systemunitdir,
     'sysusersdir': sysusersdir,
@@ -101,7 +101,7 @@ if systemd.found()
     'username': username
   }, section: 'Configuration')
 endif
-if neatvnc.found()
+if get_option('neatvnc') and neatvnc.found()
   summary({
     'neatvnc unstable API': neatvnc_unstable_api
   }, section: 'Configuration')
