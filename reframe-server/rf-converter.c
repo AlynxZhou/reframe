@@ -1265,9 +1265,10 @@ static void detect_damage(RfConverter *this, struct rf_rect *damage)
 		this->prev_texture = swap_texture;
 	} else if (this->damage_type == RF_DAMAGE_TYPE_CPU) {
 		detect_damage_cpu(this, damage);
-		memcpy(this->prev->data,
-		       this->curr->data,
-		       RF_BYTES_PER_PIXEL * this->width * this->height);
+		if (this->prev != NULL && this->curr != NULL)
+			memcpy(this->prev->data,
+			       this->curr->data,
+			       (size_t)RF_BYTES_PER_PIXEL * this->width * this->height);
 	} else {
 		damage_full(this, damage);
 	}
