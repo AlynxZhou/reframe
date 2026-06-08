@@ -141,26 +141,24 @@ static void on_new_client(struct nvnc_client *client)
 }
 
 #ifndef NEATVNC_UNSTABLE_API
-static bool authenticate_user(RfNVNCServer *this, const struct nvnc_auth_creds *credentials)
+static bool check_password(RfNVNCServer *this, struct nvnc_auth_creds *creds)
 {
-	const char* password = nvnc_auth_creds_get_password(credentials);
+	const char *password = nvnc_auth_creds_get_password(creds);
 
-	if (!password)
-		return nvnc_auth_creds_verify(credentials, this->password);
-	if (strcmp(password, this->password) != 0)
-		return false;
+	if (password == NULL)
+		return nvnc_auth_creds_verify(creds, this->password);
 
-	return true;
+	return g_strcmp0(password, this->password) == 0;
 }
 
-void on_auth(struct nvnc_auth_creds *credentials, void *data)
+static void on_auth(struct nvnc_auth_creds *creds, void *data)
 {
 	RfNVNCServer *this = data;
 
-	if (authenticate_user(this, credentials))
-		nvnc_auth_creds_accept(credentials);
+	if (check_password(this, creds))
+		nvnc_auth_creds_accept(creds);
 	else
-		nvnc_auth_creds_reject(credentials, "Invalid password");
+		nvnc_auth_creds_reject(creds, "Invalid Password");
 }
 #else
 static bool on_auth(const char *username, const char *password, void *data)
@@ -254,9 +252,7 @@ static void start(RfVNCServer *super)
 		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
 #endif
 	if (this->password != NULL && this->password[0] != '\0')
-		nvnc_enable_auth(
-			this->nvnc, auth_flags, on_auth, this
-		);
+		nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 #ifndef NEATVNC_UNSTABLE_API
@@ -318,12 +314,11 @@ static void stop(RfVNCServer *super)
 #else
 	g_clear_pointer(&this->nvnc, nvnc_close);
 #endif
-	aml_set_default(NULL);
-#ifndef AML_UNSTABLE_API
-	g_clear_pointer(&this->aml, aml_loop_unref);
-#else
-	g_clear_pointer(&this->aml, aml_unref);
-#endif
+	if (this->aml != NULL) {
+		aml_set_default(NULL);
+		aml_unref(this->aml);
+		this->aml = NULL;
+	}
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->desktop_name, g_free);
 	g_clear_pointer(&this->password, g_free);
