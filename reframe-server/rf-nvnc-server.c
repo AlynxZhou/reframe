@@ -24,6 +24,7 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	bool allow_broken_crypto;
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
@@ -213,6 +214,8 @@ static void start(RfVNCServer *super)
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
 	);
+	this->allow_broken_crypto =
+		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 
 	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
@@ -245,9 +248,14 @@ static void start(RfVNCServer *super)
 	nvnc_set_cut_text_fn(this->nvnc, on_clipboard_text);
 	nvnc_set_desktop_layout_fn(this->nvnc, on_resize_event);
 	nvnc_set_new_client_fn(this->nvnc, on_new_client);
+	enum nvnc_auth_flags auth_flags = NVNC_AUTH_REQUIRE_AUTH;
+#ifndef NEATVNC_UNSTABLE_API
+	if (this->allow_broken_crypto)
+		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
+#endif
 	if (this->password != NULL && this->password[0] != '\0')
 		nvnc_enable_auth(
-			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, on_auth, this
+			this->nvnc, auth_flags, on_auth, this
 		);
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
