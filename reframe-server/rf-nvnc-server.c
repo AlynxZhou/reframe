@@ -139,12 +139,36 @@ static void on_new_client(struct nvnc_client *client)
 		rf_vnc_server_handle_first_client(super);
 }
 
+#ifndef NEATVNC_UNSTABLE_API
+static bool authenticate_user(RfNVNCServer *this, const struct nvnc_auth_creds *credentials)
+{
+	const char* password = nvnc_auth_creds_get_password(credentials);
+
+	if (!password)
+		return nvnc_auth_creds_verify(credentials, this->password);
+	if (strcmp(password, this->password) != 0)
+		return false;
+
+	return true;
+}
+
+void on_auth(struct nvnc_auth_creds *credentials, void *data)
+{
+	RfNVNCServer *this = data;
+
+	if (authenticate_user(this, credentials))
+		nvnc_auth_creds_accept(credentials);
+	else
+		nvnc_auth_creds_reject(credentials, "Invalid password");
+}
+#else
 static bool on_auth(const char *username, const char *password, void *data)
 {
 	RfNVNCServer *this = data;
 
 	return g_strcmp0(password, this->password) == 0;
 }
+#endif
 
 static int poll_aml(int fd, GIOCondition condition, void *data)
 {
@@ -287,7 +311,11 @@ static void stop(RfVNCServer *super)
 	g_clear_pointer(&this->nvnc, nvnc_close);
 #endif
 	aml_set_default(NULL);
+#ifndef AML_UNSTABLE_API
+	g_clear_pointer(&this->aml, aml_loop_unref);
+#else
 	g_clear_pointer(&this->aml, aml_unref);
+#endif
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->desktop_name, g_free);
 	g_clear_pointer(&this->password, g_free);
