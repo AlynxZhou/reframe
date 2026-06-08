@@ -10,6 +10,8 @@ G_DEFINE_TYPE(RfConfig, rf_config, G_TYPE_OBJECT)
 
 #define RF_CONFIG_GROUP_REFRAME "reframe"
 #define RF_CONFIG_GROUP_VNC "vnc"
+#define RF_CONFIG_GROUP_LIBVNCSERVER "libvncserver"
+#define RF_CONFIG_GROUP_NEATVNC "neatvnc"
 
 static void finalize(GObject *o)
 {
@@ -321,4 +323,17 @@ char *rf_config_get_vnc_type(RfConfig *this)
 	if (error != NULL || type == NULL || type[0] == '\0')
 		return NULL;
 	return type;
+}
+
+bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), true);
+
+	g_autoptr(GError) error = NULL;
+	int allow_broken_crypto = g_key_file_get_boolean(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "allow-broken-crypto", &error
+	);
+	if (error != NULL)
+		return false;
+	return allow_broken_crypto;
 }

@@ -24,6 +24,7 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	bool allow_broken_crypto;
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
@@ -139,12 +140,36 @@ static void on_new_client(struct nvnc_client *client)
 		rf_vnc_server_handle_first_client(super);
 }
 
+#ifndef NEATVNC_UNSTABLE_API
+static bool authenticate_user(RfNVNCServer *this, const struct nvnc_auth_creds *credentials)
+{
+	const char* password = nvnc_auth_creds_get_password(credentials);
+
+	if (!password)
+		return nvnc_auth_creds_verify(credentials, this->password);
+	if (strcmp(password, this->password) != 0)
+		return false;
+
+	return true;
+}
+
+void on_auth(struct nvnc_auth_creds *credentials, void *data)
+{
+	RfNVNCServer *this = data;
+
+	if (authenticate_user(this, credentials))
+		nvnc_auth_creds_accept(credentials);
+	else
+		nvnc_auth_creds_reject(credentials, "Invalid password");
+}
+#else
 static bool on_auth(const char *username, const char *password, void *data)
 {
 	RfNVNCServer *this = data;
 
 	return g_strcmp0(password, this->password) == 0;
 }
+#endif
 
 static int poll_aml(int fd, GIOCondition condition, void *data)
 {
@@ -189,6 +214,8 @@ static void start(RfVNCServer *super)
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
 	);
+	this->allow_broken_crypto =
+		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 
 	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
@@ -221,9 +248,14 @@ static void start(RfVNCServer *super)
 	nvnc_set_cut_text_fn(this->nvnc, on_clipboard_text);
 	nvnc_set_desktop_layout_fn(this->nvnc, on_resize_event);
 	nvnc_set_new_client_fn(this->nvnc, on_new_client);
+	enum nvnc_auth_flags auth_flags = NVNC_AUTH_REQUIRE_AUTH;
+#ifndef NEATVNC_UNSTABLE_API
+	if (this->allow_broken_crypto)
+		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
+#endif
 	if (this->password != NULL && this->password[0] != '\0')
 		nvnc_enable_auth(
-			this->nvnc, NVNC_AUTH_REQUIRE_AUTH, on_auth, this
+			this->nvnc, auth_flags, on_auth, this
 		);
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
@@ -287,7 +319,11 @@ static void stop(RfVNCServer *super)
 	g_clear_pointer(&this->nvnc, nvnc_close);
 #endif
 	aml_set_default(NULL);
+#ifndef AML_UNSTABLE_API
+	g_clear_pointer(&this->aml, aml_loop_unref);
+#else
 	g_clear_pointer(&this->aml, aml_unref);
+#endif
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->desktop_name, g_free);
 	g_clear_pointer(&this->password, g_free);

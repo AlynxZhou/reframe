@@ -112,7 +112,7 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 
 # Usage
 
-> **Security Suggestion**: VNC data streams are not encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
+> **Security Suggestion**: VNC data streams may not be encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
 
 1. Run `systemctl start reframe-server@example.service`.
 2. Try connecting to it with a VNC client via port `5933`.
