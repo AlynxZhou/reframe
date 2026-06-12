@@ -78,6 +78,44 @@ Packages can be found in [my OBS project](https://build.opensuse.org/package/sho
 
 Leap users please replace URL for Tumbleweed with URL for your Leap version.
 
+## NixOS
+
+Use the NixOS module for reframe, created by [@bitbloxhub](https://github.com/bitbloxhub).
+
+Exmple configuraton:
+
+```nix
+{
+  services.reframe = {
+    enable = true;
+    configs.main = {
+      reframe = {
+        card = "card0";
+        connector = "eDP-1";
+        rotation = 0;
+        desktop-width = 1920;
+        desktop-height = 1080;
+        monitor-x = 0;
+        monitor-y = 0;
+        default-width = 1920;
+        default-height = 1080;
+        resize = true;
+        cursor = true;
+        wakeup = true;
+        damage = "cpu";
+        fps = 30;
+      };
+      vnc = {
+        ip = "0.0.0.0";
+        port = 5933;
+        password = "password";
+        type = "libvncserver";
+      };
+    };
+  };
+}
+```
+
 ## Build from Source
 
 ### Dependencies
