@@ -184,6 +184,42 @@ static void finalize(GObject *o)
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->finalize(o);
 }
 
+static void
+listen_tcp(RfLVNCServer *this, const char *ip, const unsigned int port)
+{
+	// NULL is valid, but empty string will be ignored.
+	if (ip != NULL && ip[0] == '\0')
+		return;
+
+	g_message("VNC: Listening on %s:%u.", ip, port);
+	g_autoptr(GError) error = NULL;
+	if (ip != NULL) {
+		g_autoptr(GSocketAddress) address =
+			g_inet_socket_address_new_from_string(ip, port);
+		g_socket_listener_add_address(
+			G_SOCKET_LISTENER(this->service),
+			address,
+			G_SOCKET_TYPE_STREAM,
+			G_SOCKET_PROTOCOL_TCP,
+			NULL,
+			NULL,
+			&error
+		);
+	} else {
+		g_socket_listener_add_inet_port(
+			G_SOCKET_LISTENER(this->service), port, NULL, &error
+		);
+	}
+	// It would be acceptable if we failed to listen to some addresses.
+	if (error != NULL)
+		g_warning(
+			"VNC: Failed to listen on %s:%u:%s.",
+			ip,
+			port,
+			error->message
+		);
+}
+
 static void start(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
@@ -215,33 +251,16 @@ static void start(RfVNCServer *super)
 		this->resize ? "allowed" : "prohibited"
 	);
 
-	g_autoptr(GError) error = NULL;
-	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
+	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
-	g_message("VNC: Listening on %s:%u.", ip, port);
 	this->service = g_socket_service_new();
-	if (ip != NULL) {
-		g_autoptr(GSocketAddress) address =
-			g_inet_socket_address_new_from_string(ip, port);
-		g_socket_listener_add_address(
-			G_SOCKET_LISTENER(this->service),
-			address,
-			G_SOCKET_TYPE_STREAM,
-			G_SOCKET_PROTOCOL_TCP,
-			NULL,
-			NULL,
-			&error
-		);
+	if (ips != NULL) {
+		for (int i = 0; ips[i] != NULL; ++i)
+			listen_tcp(this, ips[i], port);
 	} else {
-		g_socket_listener_add_inet_port(
-			G_SOCKET_LISTENER(this->service), port, NULL, &error
-		);
+		listen_tcp(this, NULL, port);
 	}
-	if (error != NULL)
-		g_error("VNC: Failed to listen on %s:%u:%s.",
-			ip,
-			port,
-			error->message);
+
 	g_signal_connect(
 		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);

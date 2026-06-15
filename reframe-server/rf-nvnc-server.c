@@ -182,6 +182,21 @@ static int poll_aml(int fd, GIOCondition condition, void *data)
 	return G_SOURCE_CONTINUE;
 }
 
+#ifndef NEATVNC_UNSTABLE_API
+static void
+listen_tcp(RfNVNCServer *this, const char *ip, const unsigned int port)
+{
+	// NULL is valid, but empty string will be ignored.
+	if (ip != NULL && ip[0] == '\0')
+		return;
+
+	g_message("VNC: Listening on %s:%u.", ip, port);
+	// It would be acceptable if we failed to listen to some addresses.
+	if (nvnc_listen_tcp(this->nvnc, ip, port, NVNC_STREAM_NORMAL) != 0)
+		g_warning("VNC: Failed to listen on %s:%u.", ip, port);
+}
+#endif
+
 static void start(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
@@ -215,20 +230,29 @@ static void start(RfVNCServer *super)
 	this->allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 
-	g_autofree char *ip = rf_config_get_vnc_ip(this->config);
-	const unsigned int port = rf_config_get_vnc_port(this->config);
-	g_message("VNC: Listening on %s:%u.", ip, port);
-
 	this->clients = 0;
 
 	this->aml = aml_new();
 	aml_set_default(this->aml);
 
+	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);
+	const unsigned int port = rf_config_get_vnc_port(this->config);
 #ifndef NEATVNC_UNSTABLE_API
 	this->nvnc = nvnc_new();
-	if (nvnc_listen_tcp(this->nvnc, ip, port, NVNC_STREAM_NORMAL) != 0)
-		g_error("VNC: Failed to listen on %s:%u.", ip, port);
+	if (ips != NULL) {
+		for (int i = 0; ips[i] != NULL; ++i)
+			listen_tcp(this, ips[i], port);
+	} else {
+		listen_tcp(this, NULL, port);
+	}
 #else
+	g_warning("VNC: We only support 1 IP to listen with neatvnc unstable.");
+	char *ip = NULL;
+	if (ips != NULL)
+		ip = ips[0];
+	if (ip != NULL && ip[0] == '\0')
+		ip = NULL;
+	g_message("VNC: Listening on %s:%u.", ip, port);
 	this->nvnc = nvnc_open(ip, port);
 	if (this->nvnc == NULL)
 		g_error("VNC: Failed to listen on %s:%u.", ip, port);

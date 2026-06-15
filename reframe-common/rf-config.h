@@ -30,7 +30,7 @@ bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
 enum rf_damage_type rf_config_get_damage(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
-char *rf_config_get_vnc_ip(RfConfig *this);
+char **rf_config_get_vnc_ip_list(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);
 char *rf_config_get_vnc_type(RfConfig *this);

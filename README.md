@@ -167,6 +167,18 @@ You need to keep the same multi-monitor layout for **both user session and displ
 # cp /home/YOURUSER/.config/monitors.xml /etc/xdg/monitors.xml
 ```
 
+## Specific IP Addresses
+
+If you don't want to accpet incoming connections from all IP addresses, for example, you want to only accept incoming connections from your LAN or VPN, you can set the value of `ip` to a `;` seperated list like this:
+
+```
+ip=192.168.1.3;10.10.10.3
+```
+
+This is supported with libvncserver and neatvnc stable (`>=1.0.0`), with neatvnc unstable we only support to listen the first given IP address.
+
+Leaving it empty will accept all incoming connections from all IP addresses.
+
 ## Headless Setup
 
 This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.

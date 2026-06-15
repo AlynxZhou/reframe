@@ -248,19 +248,24 @@ unsigned int rf_config_get_fps(RfConfig *this)
 	return fps;
 }
 
-char *rf_config_get_vnc_ip(RfConfig *this)
+char **rf_config_get_vnc_ip_list(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
 	g_autoptr(GError) error = NULL;
-	char *ip = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_VNC, "ip", &error
+	char **ips = g_key_file_get_string_list(
+		this->f, RF_CONFIG_GROUP_VNC, "ip", NULL, &error
 	);
-	if (error != NULL || ip == NULL || ip[0] == '\0') {
-		g_clear_pointer(&ip, g_free);
+	if (error != NULL || ips == NULL || ips[0] == NULL) {
+		g_clear_pointer(&ips, g_strfreev);
 		return NULL;
 	}
-	return ip;
+	for (int i = 0; ips[i] != NULL; ++i) {
+		// GKeyFile uses `;` as seperator and does not handle spaces.
+		g_strstrip(ips[i]);
+		g_debug("VNC: ips[%d]='%s'", i, ips[i]);
+	}
+	return ips;
 }
 
 unsigned int rf_config_get_vnc_port(RfConfig *this)
