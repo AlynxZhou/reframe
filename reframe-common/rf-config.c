@@ -355,3 +355,29 @@ char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this)
 		return NULL;
 	return key_file;
 }
+
+char *rf_config_get_neatvnc_tls_private_key_file(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *key_file = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-private-key-file", &error
+	);
+	if (error != NULL || key_file == NULL || key_file[0] == '\0')
+		return NULL;
+	return key_file;
+}
+
+char *rf_config_get_neatvnc_tls_certificate_file(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *certificate_file = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-certificate-file", &error
+	);
+	if (error != NULL || certificate_file == NULL || certificate_file[0] == '\0')
+		return NULL;
+	return certificate_file;
+}

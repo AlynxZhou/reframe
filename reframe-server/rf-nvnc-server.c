@@ -26,6 +26,8 @@ struct _RfNVNCServer {
 	bool resize;
 	bool allow_broken_crypto;
 	char *rsa_private_key_file;
+	char *tls_private_key_file;
+	char *tls_certificate_file;
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
@@ -232,6 +234,10 @@ static void start(RfVNCServer *super)
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 	this->rsa_private_key_file =
 		rf_config_get_neatvnc_rsa_private_key_file(this->config);
+	this->tls_private_key_file =
+		rf_config_get_neatvnc_tls_private_key_file(this->config);
+	this->tls_certificate_file =
+		rf_config_get_neatvnc_tls_certificate_file(this->config);
 
 	this->clients = 0;
 
@@ -282,6 +288,11 @@ static void start(RfVNCServer *super)
 		nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
 	if (this->rsa_private_key_file != NULL)
 		nvnc_set_rsa_creds(this->nvnc, this->rsa_private_key_file);
+	if (this->tls_private_key_file != NULL &&
+	    this->tls_certificate_file != NULL) {
+		nvnc_set_tls_creds(this->nvnc, this->tls_private_key_file,
+		                   this->tls_certificate_file);
+	}
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 #ifndef NEATVNC_UNSTABLE_API
