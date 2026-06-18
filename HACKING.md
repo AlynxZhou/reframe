@@ -94,6 +94,12 @@ Use `g_autofree`, `g_autoptr` and `g_auto` whenever is possible, because they re
 
 When you are writing new functions, follow existing name and coding style. Use `static` for private methods, you don't need to add prefix for private methods, including underline, but like most GObject projects, add reasonable prefix for public methods. Put private methods at the top of a file, then GObject methods (`class_init` and `init`), then public methods. Use `this` as the first parameter name for methods and use `klass` as the first parameter name for class methods.
 
+While most C programmers don't, I prefer to comparing with `0` or `NULL` explicitly, which means use `i != 0` and `p != NULL`, instead of `!i` and `!p`, implicitly comparing should only be used with boolean variables.
+
+When you are adding new configuration keys, use `-` as word sperator. It is suggested to keep key short and simple, but easy to understand is more important, for example, `private-key` is better than `privkey`, unless the short word is more common, like `crypto`, at least I don't know how to spell its full word. If the key is only used by VNC, add it to `[vnc]` group. If it is a feature of a implementation, add it to the implementation group. If there is already a key/name in the implementation code/doc, reusing it is better than creating a new name for it.
+
+If there are still something you are not sure, follow the existing code is always the best.
+
 # Debugging
 
 This program will load/link against libraries under installation prefix, so you may need to `meson install` them before running it, otherwise it may still load old files.
