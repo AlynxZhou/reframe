@@ -720,14 +720,15 @@ void rf_streamer_send_pointer_event(
 	ies[length].value = right;
 	++length;
 
-	// FIXME: BTN_BACK/FORWARD or BTN_4/5?
+	// The back/forward side buttons on mouse are neither BTN_BACK/FORWARD or
+	// BTN_4/5, they actually send BTN_SIDE and BTN_EXTRA.
 	ies[length].type = EV_KEY;
-	ies[length].code = BTN_BACK;
+	ies[length].code = BTN_SIDE;
 	ies[length].value = back;
 	++length;
 
 	ies[length].type = EV_KEY;
-	ies[length].code = BTN_FORWARD;
+	ies[length].code = BTN_EXTRA;
 	ies[length].value = forward;
 	++length;
 

@@ -713,12 +713,21 @@ static void setup_uinput(struct this *this)
 	if (this->ufd < 0)
 		g_error("Input: Failed to open uinput: %s.", strerror(errno));
 
-	ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
 	ioctl_must(this->ufd, UI_SET_EVBIT, EV_SYN);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_KEY);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_ABS);
+	ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+
 	for (int i = 0; i < RF_KEYBOARD_MAX; ++i)
 		ioctl_must(this->ufd, UI_SET_KEYBIT, i);
 
-	ioctl_must(this->ufd, UI_SET_EVBIT, EV_ABS);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_RIGHT);
+	// The back/forward side buttons on mouse.
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_SIDE);
+	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_EXTRA);
+
 	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_X);
 	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_Y);
 
@@ -726,16 +735,11 @@ static void setup_uinput(struct this *this)
 	// anyway, we only send absolute coordinates.
 	//
 	// See <https://github.com/AlynxZhou/reframe/issues/36>.
-	// ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
 	// ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
 	// ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
 
-	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
-	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
-	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_RIGHT);
-
-	ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
 	ioctl_must(this->ufd, UI_SET_RELBIT, REL_WHEEL);
+	ioctl_must(this->ufd, UI_SET_RELBIT, REL_HWHEEL);
 
 	struct uinput_abs_setup abs = { 0 };
 	abs.absinfo.maximum = RF_POINTER_MAX;
