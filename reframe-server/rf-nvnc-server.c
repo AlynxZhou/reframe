@@ -286,12 +286,19 @@ static void start(RfVNCServer *super)
 #endif
 	if (this->password != NULL && this->password[0] != '\0')
 		nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
-	if (this->rsa_private_key_file != NULL)
-		nvnc_set_rsa_creds(this->nvnc, this->rsa_private_key_file);
+	if (this->rsa_private_key_file != NULL) {
+		if (nvnc_set_rsa_creds(this->nvnc,
+		                       this->rsa_private_key_file) < 0) {
+			g_error("VNC: Failed to set RSA credentials.");
+		};
+	}
 	if (this->tls_private_key_file != NULL &&
 	    this->tls_certificate_file != NULL) {
-		nvnc_set_tls_creds(this->nvnc, this->tls_private_key_file,
-		                   this->tls_certificate_file);
+		if (nvnc_set_tls_creds(this->nvnc,
+		                       this->tls_private_key_file,
+		                       this->tls_certificate_file) < 0) {
+			g_error("VNC: Failed to set TLS credentials.");
+		}
 	}
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
