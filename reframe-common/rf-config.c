@@ -342,3 +342,16 @@ bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this)
 		return false;
 	return allow_broken_crypto;
 }
+
+char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *key_file = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "rsa-private-key-file", &error
+	);
+	if (error != NULL || key_file == NULL || key_file[0] == '\0')
+		return NULL;
+	return key_file;
+}

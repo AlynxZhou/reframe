@@ -35,6 +35,7 @@ unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);
 char *rf_config_get_vnc_type(RfConfig *this);
 bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this);
+char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this);
 
 G_END_DECLS
 
