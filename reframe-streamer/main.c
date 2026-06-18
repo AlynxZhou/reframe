@@ -722,9 +722,13 @@ static void setup_uinput(struct this *this)
 	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_X);
 	ioctl_must(this->ufd, UI_SET_ABSBIT, ABS_Y);
 
-	ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
-	ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
-	ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
+	// It seems trying to be both touchscreen and mouse leads into bugs,
+	// anyway, we only send absolute coordinates.
+	//
+	// See <https://github.com/AlynxZhou/reframe/issues/36>.
+	// ioctl_must(this->ufd, UI_SET_EVBIT, EV_REL);
+	// ioctl_must(this->ufd, UI_SET_RELBIT, REL_X);
+	// ioctl_must(this->ufd, UI_SET_RELBIT, REL_Y);
 
 	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_LEFT);
 	ioctl_must(this->ufd, UI_SET_KEYBIT, BTN_MIDDLE);
