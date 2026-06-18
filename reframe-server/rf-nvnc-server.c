@@ -24,6 +24,7 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	char *username;
 	bool allow_broken_crypto;
 	char *rsa_private_key_file;
 	char *tls_private_key_file;
@@ -144,24 +145,31 @@ static void on_new_client(struct nvnc_client *client)
 }
 
 #ifndef NEATVNC_UNSTABLE_API
-static bool check_password(RfNVNCServer *this, struct nvnc_auth_creds *creds)
+static bool check_credentials(RfNVNCServer *this, struct nvnc_auth_creds *creds)
 {
+	const char *username = nvnc_auth_creds_get_username(creds);
 	const char *password = nvnc_auth_creds_get_password(creds);
 
 	if (password == NULL)
 		return nvnc_auth_creds_verify(creds, this->password);
+	if (username == NULL)
+		return false;
+	if (g_strcmp0(username, this->username ? this->username : "") != 0)
+		return false;
+	if (g_strcmp0(password, this->password) != 0)
+		return false;
 
-	return g_strcmp0(password, this->password) == 0;
+	return true;
 }
 
 static void on_auth(struct nvnc_auth_creds *creds, void *data)
 {
 	RfNVNCServer *this = data;
 
-	if (check_password(this, creds))
+	if (check_credentials(this, creds))
 		nvnc_auth_creds_accept(creds);
 	else
-		nvnc_auth_creds_reject(creds, "Invalid Password");
+		nvnc_auth_creds_reject(creds, "Invalid username or password");
 }
 #else
 static bool on_auth(const char *username, const char *password, void *data)
@@ -230,6 +238,8 @@ static void start(RfVNCServer *super)
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
 	);
+	this->username =
+		rf_config_get_neatvnc_username(this->config);
 	this->allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 	this->rsa_private_key_file =

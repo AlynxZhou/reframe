@@ -330,6 +330,19 @@ char *rf_config_get_vnc_type(RfConfig *this)
 	return type;
 }
 
+char *rf_config_get_neatvnc_username(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *username = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "username", &error
+	);
+	if (error != NULL || username == NULL || username[0] == '\0')
+		return NULL;
+	return username;
+}
+
 bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
