@@ -1,5 +1,7 @@
 #include <stdbool.h>
+#include <gio/gunixsocketaddress.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <glib-unix.h>
 
 #include "rf-common.h"
