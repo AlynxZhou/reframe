@@ -3,6 +3,35 @@
 #include "rf-common.h"
 #include "rf-vnc-server.h"
 
+#if !GLIB_CHECK_VERSION(2, 74, 0)
+typedef void (*GSourceOnceFunc)(gpointer user_data);
+
+typedef struct {
+    GSourceOnceFunc func;
+    gpointer data;
+} IdleOnceData;
+
+static gboolean idle_once_cb(gpointer user_data)
+{
+    IdleOnceData *d = user_data;
+
+    d->func(d->data);
+    g_free(d);
+
+    return G_SOURCE_REMOVE;
+}
+
+static guint g_idle_add_once(GSourceOnceFunc func, gpointer data)
+{
+    IdleOnceData *d = g_new(IdleOnceData, 1);
+
+    d->func = func;
+    d->data = data;
+
+    return g_idle_add(idle_once_cb, d);
+}
+#endif
+
 typedef struct _RfVNCServerPrivate {
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;

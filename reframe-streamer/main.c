@@ -3,8 +3,10 @@
 #include <locale.h>
 #include <glib.h>
 #include <glib-unix.h>
+#include <glib/gstdio.h>
 #include <gio/gio.h>
 #include <gio/gunixfdmessage.h>
+#include <gio/gunixsocketaddress.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <libdrm/drm_fourcc.h>

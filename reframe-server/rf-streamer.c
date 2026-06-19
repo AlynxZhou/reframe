@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <gio/gio.h>
 #include <gio/gunixfdmessage.h>
+#include <gio/gunixsocketaddress.h>
 #include <linux/uinput.h>
 
 #include "rf-common.h"

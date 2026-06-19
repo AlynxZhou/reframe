@@ -2,6 +2,7 @@
 #include <glib.h>
 #include <glib-unix.h>
 #include <gio/gio.h>
+#include <gio/gunixsocketaddress.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 

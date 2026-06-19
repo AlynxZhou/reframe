@@ -1,5 +1,6 @@
 #include <locale.h>
 #include <glib-unix.h>
+#include <glib/gstdio.h>
 #include <gmodule.h>
 
 #include "config.h"
