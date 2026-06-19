@@ -843,13 +843,42 @@ static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
 	// EGL_NO_CONTEXT must be used here according to the docs.
 	//
 	// See <https://registry.khronos.org/EGL/extensions/EXT/EGL_EXT_image_dma_buf_import.txt>.
-	EGLImage image = eglCreateImage(
-		display,
-		EGL_NO_CONTEXT,
-		EGL_LINUX_DMA_BUF_EXT,
-		(EGLClientBuffer)NULL,
-		(EGLAttrib *)image_attribs->data
-	);
+	EGLImage image;
+	if (epoxy_egl_version(display) >= 15) {
+		image = eglCreateImage(
+			display,
+			EGL_NO_CONTEXT,
+			EGL_LINUX_DMA_BUF_EXT,
+			(EGLClientBuffer)NULL,
+			(EGLAttrib *)image_attribs->data
+		);
+	} else {
+		// EGL < 1.5: eglCreateImageKHR takes EGLint (32-bit).
+		// Convert in-place by narrowing each EGLAttrib element to
+		// EGLint; a separate array is needed because the element sizes
+		// differ on 64-bit platforms.
+		GArray *image_attribs_int = g_array_new(
+			false,
+			false,
+			sizeof(EGLint)
+		);
+		for (unsigned int i = 0; i < image_attribs->len; ++i) {
+			EGLint v = (EGLint)g_array_index(
+				image_attribs,
+				EGLAttrib,
+				i
+			);
+			g_array_append_val(image_attribs_int, v);
+		}
+		image = eglCreateImageKHR(
+			display,
+			EGL_NO_CONTEXT,
+			EGL_LINUX_DMA_BUF_EXT,
+			(EGLClientBuffer)NULL,
+			(EGLint *)image_attribs_int->data
+		);
+		g_array_free(image_attribs_int, true);
+	}
 	g_array_free(image_attribs, true);
 	return image;
 }
