@@ -294,8 +294,12 @@ static void start(RfVNCServer *super)
 	if (this->allow_broken_crypto)
 		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
 #endif
-	if (this->password != NULL && this->password[0] != '\0')
-		nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
+	if (this->password != NULL && this->password[0] != '\0') {
+		if (nvnc_enable_auth(this->nvnc, auth_flags, on_auth,
+		                     this) < 0) {
+			g_error("VNC: Failed to enable authentication.");
+		}
+	}
 	if (this->rsa_private_key_file != NULL) {
 		if (nvnc_set_rsa_creds(this->nvnc,
 		                       this->rsa_private_key_file) < 0) {
