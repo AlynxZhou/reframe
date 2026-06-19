@@ -791,7 +791,7 @@ static inline void append_attrib(GArray *a, EGLAttrib k, EGLAttrib v)
 	g_array_append_val(a, v);
 }
 
-static EGLImage make_image(EGLDisplay *display, const struct rf_buffer *b)
+static EGLImage make_image(EGLDisplay display, const struct rf_buffer *b)
 {
 	EGLAttrib fd_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_FD_EXT,
 					  EGL_DMA_BUF_PLANE1_FD_EXT,
