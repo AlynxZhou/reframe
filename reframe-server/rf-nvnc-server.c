@@ -24,8 +24,11 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	char *username;
 	bool allow_broken_crypto;
 	char *rsa_private_key_file;
+	char *tls_private_key_file;
+	char *tls_certificate_file;
 	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
@@ -142,24 +145,31 @@ static void on_new_client(struct nvnc_client *client)
 }
 
 #ifndef NEATVNC_UNSTABLE_API
-static bool check_password(RfNVNCServer *this, struct nvnc_auth_creds *creds)
+static bool check_credentials(RfNVNCServer *this, struct nvnc_auth_creds *creds)
 {
+	const char *username = nvnc_auth_creds_get_username(creds);
 	const char *password = nvnc_auth_creds_get_password(creds);
 
 	if (password == NULL)
 		return nvnc_auth_creds_verify(creds, this->password);
+	if (username == NULL)
+		return false;
+	if (g_strcmp0(username, this->username ? this->username : "") != 0)
+		return false;
+	if (g_strcmp0(password, this->password) != 0)
+		return false;
 
-	return g_strcmp0(password, this->password) == 0;
+	return true;
 }
 
 static void on_auth(struct nvnc_auth_creds *creds, void *data)
 {
 	RfNVNCServer *this = data;
 
-	if (check_password(this, creds))
+	if (check_credentials(this, creds))
 		nvnc_auth_creds_accept(creds);
 	else
-		nvnc_auth_creds_reject(creds, "Invalid Password");
+		nvnc_auth_creds_reject(creds, "Invalid username or password");
 }
 #else
 static bool on_auth(const char *username, const char *password, void *data)
@@ -228,10 +238,16 @@ static void start(RfVNCServer *super)
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
 	);
+	this->username =
+		rf_config_get_neatvnc_username(this->config);
 	this->allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 	this->rsa_private_key_file =
 		rf_config_get_neatvnc_rsa_private_key_file(this->config);
+	this->tls_private_key_file =
+		rf_config_get_neatvnc_tls_private_key_file(this->config);
+	this->tls_certificate_file =
+		rf_config_get_neatvnc_tls_certificate_file(this->config);
 
 	this->clients = 0;
 
@@ -278,10 +294,26 @@ static void start(RfVNCServer *super)
 	if (this->allow_broken_crypto)
 		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
 #endif
-	if (this->password != NULL && this->password[0] != '\0')
-		nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
-	if (this->rsa_private_key_file != NULL)
-		nvnc_set_rsa_creds(this->nvnc, this->rsa_private_key_file);
+	if (this->password != NULL && this->password[0] != '\0') {
+		if (nvnc_enable_auth(this->nvnc, auth_flags, on_auth,
+		                     this) < 0) {
+			g_error("VNC: Failed to enable authentication.");
+		}
+	}
+	if (this->rsa_private_key_file != NULL) {
+		if (nvnc_set_rsa_creds(this->nvnc,
+		                       this->rsa_private_key_file) < 0) {
+			g_error("VNC: Failed to set RSA credentials.");
+		};
+	}
+	if (this->tls_private_key_file != NULL &&
+	    this->tls_certificate_file != NULL) {
+		if (nvnc_set_tls_creds(this->nvnc,
+		                       this->tls_private_key_file,
+		                       this->tls_certificate_file) < 0) {
+			g_error("VNC: Failed to set TLS credentials.");
+		}
+	}
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 #ifndef NEATVNC_UNSTABLE_API
