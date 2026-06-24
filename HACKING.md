@@ -100,6 +100,8 @@ When you are adding new configuration keys, use `-` as word sperator. It is sugg
 
 If there are still something you are not sure, follow the existing code is always the best.
 
+**Do NOT submit AI/LLM generated code, unless you really understand what they are doing!** They make mistakes, and waste time for maintainers. For example, <https://github.com/AlynxZhou/reframe/pull/31> by AI/LLM adds incomplete code to fix and test a non-existent bug. I'll only accept PRs from a responsible human, and refuse PRs if I seem to talk with an AI/LLM agent that acts like a human, as far as I could run an AI/LLM locally for myself, why I have to spend time talking with them on GitHub?
+
 # Debugging
 
 This program will load/link against libraries under installation prefix, so you may need to `meson install` them before running it, otherwise it may still load old files.
