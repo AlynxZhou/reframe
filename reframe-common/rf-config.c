@@ -390,7 +390,8 @@ char *rf_config_get_neatvnc_tls_certificate_file(RfConfig *this)
 	char *certificate_file = g_key_file_get_string(
 		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-certificate-file", &error
 	);
-	if (error != NULL || certificate_file == NULL || certificate_file[0] == '\0')
+	if (error != NULL || certificate_file == NULL ||
+	    certificate_file[0] == '\0')
 		return NULL;
 	return certificate_file;
 }

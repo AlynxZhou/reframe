@@ -853,20 +853,15 @@ static EGLImage make_image(EGLDisplay display, const struct rf_buffer *b)
 			(EGLAttrib *)image_attribs->data
 		);
 	} else {
-		// EGL < 1.5: eglCreateImageKHR takes EGLint (32-bit).
-		// Convert in-place by narrowing each EGLAttrib element to
-		// EGLint; a separate array is needed because the element sizes
-		// differ on 64-bit platforms.
-		GArray *image_attribs_int = g_array_new(
-			false,
-			false,
-			sizeof(EGLint)
-		);
+		// For EGL < 1.5: `eglCreateImageKHR()` takes EGLint (32-bit).
+		// Convert it in-place by narrowing each EGLAttrib element to
+		// EGLint. A separate array is needed because the element sizes
+		// are different on 64-bit platforms.
+		GArray *image_attribs_int =
+			g_array_new(false, false, sizeof(EGLint));
 		for (unsigned int i = 0; i < image_attribs->len; ++i) {
 			EGLint v = (EGLint)g_array_index(
-				image_attribs,
-				EGLAttrib,
-				i
+				image_attribs, EGLAttrib, i
 			);
 			g_array_append_val(image_attribs_int, v);
 		}

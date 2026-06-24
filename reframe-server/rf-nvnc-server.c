@@ -238,8 +238,7 @@ static void start(RfVNCServer *super)
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
 	);
-	this->username =
-		rf_config_get_neatvnc_username(this->config);
+	this->username = rf_config_get_neatvnc_username(this->config);
 	this->allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
 	this->rsa_private_key_file =
@@ -294,25 +293,26 @@ static void start(RfVNCServer *super)
 	if (this->allow_broken_crypto)
 		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
 #endif
+	int res = 0;
 	if (this->password != NULL && this->password[0] != '\0') {
-		if (nvnc_enable_auth(this->nvnc, auth_flags, on_auth,
-		                     this) < 0) {
+		res = nvnc_enable_auth(this->nvnc, auth_flags, on_auth, this);
+		if (res < 0)
 			g_error("VNC: Failed to enable authentication.");
-		}
 	}
 	if (this->rsa_private_key_file != NULL) {
-		if (nvnc_set_rsa_creds(this->nvnc,
-		                       this->rsa_private_key_file) < 0) {
+		res = nvnc_set_rsa_creds(this->nvnc, this->rsa_private_key_file);
+		if (res < 0)
 			g_error("VNC: Failed to set RSA credentials.");
-		};
 	}
 	if (this->tls_private_key_file != NULL &&
 	    this->tls_certificate_file != NULL) {
-		if (nvnc_set_tls_creds(this->nvnc,
-		                       this->tls_private_key_file,
-		                       this->tls_certificate_file) < 0) {
+		res = nvnc_set_tls_creds(
+			this->nvnc,
+			this->tls_private_key_file,
+			this->tls_certificate_file
+		);
+		if (res < 0)
 			g_error("VNC: Failed to set TLS credentials.");
-		}
 	}
 	struct pixman_region16 region;
 	pixman_region_init_rect(&region, 0, 0, this->width, this->height);
