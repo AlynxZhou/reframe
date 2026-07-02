@@ -1266,14 +1266,14 @@ unsigned int rf_rdp_core_rdpgfx_ack_limited_fps(
 	if (base_fps == 0)
 		return 0;
 
-	if (ack_queue_depth_valid && ack_queue_depth > 0) {
-		fps = base_fps / (ack_queue_depth + 1);
+	if (ack_queue_depth_valid && ack_queue_depth >= 8) {
+		fps = base_fps / 2;
 
 		if (fps == 0)
 			fps = 1;
 	}
 
-	if (inflight_frames > 8) {
+	if (inflight_frames >= 18) {
 		unsigned int inflight_fps = base_fps / 2;
 
 		if (inflight_fps == 0)

@@ -1114,11 +1114,13 @@ static void test_adaptive_bitmap_fps_policy(void)
 static void test_rdpgfx_ack_fps_policy_prefers_queue_depth(void)
 {
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 4) == 60);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 12) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 3, true, 0) == 15);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 3, true, 12) == 15);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, false, 12) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 12) == 0);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 12) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 18) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 3, true, 0) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 0) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 18) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, false, 18) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 18) == 0);
 }
 
 static void test_avc444_delta_policy_skips_large_damage(void)
