@@ -1263,7 +1263,7 @@ static void test_write_zgfx_compresses_repeated_payload(void)
 	uint8_t payload[512] = { 0 };
 	uint8_t out[1024] = { 0 };
 	uint8_t decoded[sizeof(payload)] = { 0 };
-	bool compressed = false;
+	bool compressed = true;
 
 	memset(payload, 0xff, sizeof(payload));
 	for (size_t i = 0; i < sizeof(payload); i += 4) {
@@ -1313,6 +1313,61 @@ static void test_write_zgfx_falls_back_when_not_smaller(void)
 	assert(memcmp(out + 2, payload, sizeof(payload)) == 0);
 }
 
+static void test_write_zgfx_payload_respects_compression_policy(void)
+{
+	uint8_t payload[4096] = { 0 };
+	uint8_t compressed_out[8192] = { 0 };
+	uint8_t raw_out[8192] = { 0 };
+	uint8_t decoded[sizeof(payload)] = { 0 };
+	bool compressed = true;
+
+	for (size_t i = 0; i < sizeof(payload); ++i)
+		payload[i] = (uint8_t)(i % 4);
+
+	const size_t raw_length = rf_rdp_gfx_write_zgfx_payload(
+		raw_out,
+		sizeof(raw_out),
+		payload,
+		sizeof(payload),
+		false,
+		&compressed
+	);
+	assert(raw_length > 0);
+	assert(!compressed);
+	assert(raw_out[0] == RF_RDP_GFX_ZGFX_SEGMENTED_SINGLE);
+	assert(raw_out[1] == RF_RDP_GFX_ZGFX_PACKET_COMPR_TYPE_RDP8);
+
+	const size_t compressed_length = rf_rdp_gfx_write_zgfx_payload(
+		compressed_out,
+		sizeof(compressed_out),
+		payload,
+		sizeof(payload),
+		true,
+		&compressed
+	);
+	assert(compressed_length > 0);
+	assert(compressed);
+	assert(compressed_length < raw_length);
+	assert(decode_zgfx(
+		       compressed_out,
+		       compressed_length,
+		       decoded,
+		       sizeof(decoded)
+	       ) == sizeof(payload));
+	assert(memcmp(decoded, payload, sizeof(payload)) == 0);
+}
+
+static void test_codec_payload_zgfx_policy_skips_video_codecs(void)
+{
+	assert(rf_rdp_gfx_codec_payload_allows_zgfx(
+		       RF_RDP_GFX_CODECID_UNCOMPRESSED
+	       ));
+	assert(rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_PLANAR));
+	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AVC420));
+	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AVC444));
+	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AV1));
+}
+
 int main(void)
 {
 	test_write_caps_confirm();
@@ -1348,5 +1403,7 @@ int main(void)
 	test_write_zgfx_multipart_uncompressed();
 	test_write_zgfx_compresses_repeated_payload();
 	test_write_zgfx_falls_back_when_not_smaller();
+	test_write_zgfx_payload_respects_compression_policy();
+	test_codec_payload_zgfx_policy_skips_video_codecs();
 	return 0;
 }

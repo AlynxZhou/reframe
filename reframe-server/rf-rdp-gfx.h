@@ -127,6 +127,7 @@ enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec_policy(
 	bool under_pressure
 );
 const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec);
+bool rf_rdp_gfx_codec_payload_allows_zgfx(uint16_t codec_id);
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
 	size_t length,
@@ -238,6 +239,14 @@ size_t rf_rdp_gfx_write_zgfx(
 	size_t capacity,
 	const uint8_t *payload,
 	size_t payload_length,
+	bool *compressed
+);
+size_t rf_rdp_gfx_write_zgfx_payload(
+	uint8_t *data,
+	size_t capacity,
+	const uint8_t *payload,
+	size_t payload_length,
+	bool allow_compression,
 	bool *compressed
 );
 

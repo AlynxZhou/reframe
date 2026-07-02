@@ -578,6 +578,17 @@ const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec)
 	}
 }
 
+bool rf_rdp_gfx_codec_payload_allows_zgfx(uint16_t codec_id)
+{
+	switch (codec_id) {
+	case RF_RDP_GFX_CODECID_UNCOMPRESSED:
+	case RF_RDP_GFX_CODECID_PLANAR:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
 	size_t length,
@@ -1077,4 +1088,33 @@ size_t rf_rdp_gfx_write_zgfx(
 	if (compressed != NULL)
 		*compressed = any_compressed;
 	return out;
+}
+
+size_t rf_rdp_gfx_write_zgfx_payload(
+	uint8_t *data,
+	size_t capacity,
+	const uint8_t *payload,
+	size_t payload_length,
+	bool allow_compression,
+	bool *compressed
+)
+{
+	if (!allow_compression) {
+		if (compressed != NULL)
+			*compressed = false;
+		return rf_rdp_gfx_write_zgfx_uncompressed(
+			data,
+			capacity,
+			payload,
+			payload_length
+		);
+	}
+
+	return rf_rdp_gfx_write_zgfx(
+		data,
+		capacity,
+		payload,
+		payload_length,
+		compressed
+	);
 }

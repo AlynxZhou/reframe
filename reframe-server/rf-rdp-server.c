@@ -95,6 +95,8 @@ struct _RfRDPServer {
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
 	uint16_t stats_max_rdpgfx_qoe_time_diff_se;
 	uint16_t stats_max_rdpgfx_qoe_time_diff_edr;
+	uint64_t stats_rdpgfx_zgfx_payloads;
+	uint64_t stats_rdpgfx_zgfx_saved_bytes;
 	bool nla;
 	bool clipboard;
 	bool running;
@@ -475,6 +477,8 @@ static void add_client(struct client *client)
 				this->stats_min_target_fps = 0;
 				this->stats_max_rdpgfx_inflight = 0;
 				this->stats_max_rdpgfx_ack_queue_depth = 0;
+				this->stats_rdpgfx_zgfx_payloads = 0;
+				this->stats_rdpgfx_zgfx_saved_bytes = 0;
 			} else if (this->last_frame != NULL &&
 			 this->last_frame_width == client->desktop_width &&
 			 this->last_frame_height == client->desktop_height) {
@@ -845,23 +849,42 @@ static bool send_rdpgfx_gfx_payload(
 	struct client *client,
 	const uint8_t *payload,
 	size_t payload_length,
-	size_t *bytes_sent
+	size_t *bytes_sent,
+	bool allow_compression
 )
 {
+	bool compressed = false;
 	const size_t zgfx_capacity = rdpgfx_zgfx_capacity(payload_length);
 	if (zgfx_capacity == 0)
 		return false;
 
 	g_autofree uint8_t *zgfx = g_malloc(zgfx_capacity);
-	const size_t zgfx_length = rf_rdp_gfx_write_zgfx_uncompressed(
+	const size_t zgfx_length = rf_rdp_gfx_write_zgfx_payload(
 		zgfx,
 		zgfx_capacity,
 		payload,
-		payload_length
+		payload_length,
+		allow_compression,
+		&compressed
 	);
 
-	return zgfx_length > 0 &&
-	       send_rdpgfx_dvc_payload(client, zgfx, zgfx_length, bytes_sent);
+	if (zgfx_length == 0 ||
+	    !send_rdpgfx_dvc_payload(client, zgfx, zgfx_length, bytes_sent))
+		return false;
+
+	if (compressed) {
+		client->server->stats_rdpgfx_zgfx_payloads++;
+		if (payload_length > zgfx_length)
+			client->server->stats_rdpgfx_zgfx_saved_bytes +=
+				payload_length - zgfx_length;
+		if (!client->rdpgfx_zgfx_compressed_logged) {
+			g_message(
+				"RDP: RDPGFX ZGFX compression active for bitmap/PLANAR fallback payloads."
+			);
+			client->rdpgfx_zgfx_compressed_logged = true;
+		}
+	}
+	return true;
 }
 
 static bool send_rdpgfx_create_request(struct client *client)
@@ -942,7 +965,8 @@ static bool send_rdpgfx_caps_confirm(
 		confirm_flags
 	);
 
-	if (length == 0 || !send_rdpgfx_gfx_payload(client, gfx, length, NULL))
+	if (length == 0 ||
+	    !send_rdpgfx_gfx_payload(client, gfx, length, NULL, false))
 		return false;
 
 	client->rdpgfx_caps_confirmed = true;
@@ -1772,7 +1796,8 @@ static bool send_rdpgfx_surface_setup(
 	size_t length = 0;
 
 	length = rf_rdp_gfx_write_reset_graphics(gfx, sizeof(gfx), width, height);
-	if (length == 0 || !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent))
+	if (length == 0 ||
+	    !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent, false))
 		return false;
 
 	memset(gfx, 0, sizeof(gfx));
@@ -1784,7 +1809,8 @@ static bool send_rdpgfx_surface_setup(
 		height,
 		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888
 	);
-	if (length == 0 || !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent))
+	if (length == 0 ||
+	    !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent, false))
 		return false;
 
 	memset(gfx, 0, sizeof(gfx));
@@ -1795,7 +1821,8 @@ static bool send_rdpgfx_surface_setup(
 		0,
 		0
 	);
-	if (length == 0 || !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent))
+	if (length == 0 ||
+	    !send_rdpgfx_gfx_payload(client, gfx, length, bytes_sent, false))
 		return false;
 
 	client->rdpgfx_surface_ready = true;
@@ -2024,7 +2051,7 @@ static bool send_rdpgfx_av1_update(
 		return false;
 	offset += length;
 
-	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
+	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent, false))
 		return false;
 
 	if (!client->rdpgfx_update_logged) {
@@ -2368,7 +2395,7 @@ static bool send_rdpgfx_avc444_update(
 		return false;
 	offset += length;
 
-	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
+	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent, false))
 		return false;
 	if (rf_rdp_core_rdpgfx_avc444_lc_index(lc, &lc_index))
 		client->server->stats_avc444_lc[lc_index]++;
@@ -2610,7 +2637,7 @@ static bool send_rdpgfx_avc420_update(
 		return false;
 	offset += length;
 
-	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
+	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent, false))
 		return false;
 
 	if (!client->rdpgfx_update_logged) {
@@ -2841,7 +2868,13 @@ static bool send_rdpgfx_update(
 		return false;
 	offset += length;
 
-	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
+	if (!send_rdpgfx_gfx_payload(
+		    client,
+		    gfx,
+		    offset,
+		    bytes_sent,
+		    rf_rdp_gfx_codec_payload_allows_zgfx(codec_id)
+	    ))
 		return false;
 
 	if (!client->rdpgfx_update_logged) {
@@ -3423,7 +3456,7 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
@@ -3439,6 +3472,8 @@ static void maybe_log_stats(
 		this->stats_max_rdpgfx_ack_queue_depth,
 		this->stats_max_rdpgfx_qoe_time_diff_se,
 		this->stats_max_rdpgfx_qoe_time_diff_edr,
+		this->stats_rdpgfx_zgfx_payloads,
+		this->stats_rdpgfx_zgfx_saved_bytes,
 		avg_send_time_us / 1000,
 		this->stats_avc444_lc[0],
 		this->stats_avc444_lc[1],
@@ -3456,6 +3491,8 @@ static void maybe_log_stats(
 	this->stats_max_rdpgfx_ack_queue_depth = 0;
 	this->stats_max_rdpgfx_qoe_time_diff_se = 0;
 	this->stats_max_rdpgfx_qoe_time_diff_edr = 0;
+	this->stats_rdpgfx_zgfx_payloads = 0;
+	this->stats_rdpgfx_zgfx_saved_bytes = 0;
 }
 
 static bool should_render_frame(RfRemoteServer *super)
