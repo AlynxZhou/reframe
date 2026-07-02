@@ -9,7 +9,7 @@ G_BEGIN_DECLS
 #define RF_TYPE_NVNC_SERVER rf_nvnc_server_get_type()
 G_DECLARE_FINAL_TYPE(RfNVNCServer, rf_nvnc_server, RF, NVNC_SERVER, RfVNCServer)
 
-G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config);
+G_MODULE_EXPORT RfRemoteServer *rf_vnc_server_new(RfConfig *config);
 
 G_END_DECLS
 

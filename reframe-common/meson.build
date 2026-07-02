@@ -1,11 +1,13 @@
 sources = files(
   'rf-common.c',
-  'rf-config.c'
+  'rf-config.c',
+  'rf-resize.c'
 )
 
 headers = files(
   'rf-common.h',
-  'rf-config.h'
+  'rf-config.h',
+  'rf-resize.h'
 )
 
 dependencies = []

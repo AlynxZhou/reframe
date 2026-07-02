@@ -16,10 +16,14 @@ struct _RfStreamer {
 	RfConfig *config;
 	GSocketAddress *address;
 	GSocketConnection *connection;
+	GMutex write_lock;
+	GMutex frame_lock;
+	GCond frame_cond;
 	GIOCondition io_flags;
 	GSource *source;
-	unsigned int timer_id;
+	GThread *frame_thread;
 	int64_t last_frame_time;
+	int64_t next_frame_request_time;
 	int64_t max_interval;
 	unsigned int desktop_width;
 	unsigned int desktop_height;
@@ -29,6 +33,8 @@ struct _RfStreamer {
 	// These are the real size of monitor and have nothing with VNC.
 	uint32_t frame_width;
 	uint32_t frame_height;
+	bool frame_thread_running;
+	bool frame_request_pending;
 	bool running;
 };
 G_DEFINE_TYPE(RfStreamer, rf_streamer, G_TYPE_SOCKET_CLIENT)
@@ -45,19 +51,47 @@ enum {
 
 static unsigned int sigs[N_SIGS] = { 0 };
 
+static bool streamer_has_connection(RfStreamer *this)
+{
+	return this->running && this->connection != NULL;
+}
+
+static ssize_t
+write_header_locked(RfStreamer *this, char type, size_t length, GError **error)
+{
+	if (!streamer_has_connection(this))
+		return 0;
+	return rf_send_header(this->connection, type, length, error);
+}
+
+static ssize_t write_data_locked(
+	RfStreamer *this,
+	const void *data,
+	size_t length,
+	GError **error
+)
+{
+	if (!streamer_has_connection(this))
+		return 0;
+
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+	return g_output_stream_write(os, data, length, NULL, error);
+}
+
 static void send_auth_msg(RfStreamer *this, pid_t pid)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
-	GOutputStream *os =
-		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
 
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_AUTH, 1, &error);
+	g_mutex_lock(&this->write_lock);
+	ret = write_header_locked(this, RF_MSG_TYPE_AUTH, 1, &error);
 	if (ret <= 0)
 		goto out;
-	ret = g_output_stream_write(os, &pid, sizeof(pid), NULL, &error);
+	ret = write_data_locked(this, &pid, sizeof(pid), &error);
 
 out:
+	g_mutex_unlock(&this->write_lock);
 	if (ret < 0) {
 		g_warning("Auth: Failed to send auth PID: %s.", error->message);
 		rf_streamer_stop(this);
@@ -74,19 +108,15 @@ send_input_msg(RfStreamer *this, struct input_event *ies, const size_t length)
 {
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
-	GOutputStream *os =
-		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
 
-	ret = rf_send_header(
-		this->connection, RF_MSG_TYPE_INPUT, length, &error
-	);
+	g_mutex_lock(&this->write_lock);
+	ret = write_header_locked(this, RF_MSG_TYPE_INPUT, length, &error);
 	if (ret <= 0)
 		goto out;
-	ret = g_output_stream_write(
-		os, ies, length * sizeof(*ies), NULL, &error
-	);
+	ret = write_data_locked(this, ies, length * sizeof(*ies), &error);
 
 out:
+	g_mutex_unlock(&this->write_lock);
 	if (ret < 0) {
 		g_warning(
 			"Input: Failed to send input events: %s.",
@@ -103,55 +133,94 @@ out:
 	}
 }
 
-static int send_frame_msg(void *data)
+static ssize_t send_frame_request(RfStreamer *this, GError **error)
+{
+	ssize_t ret = 0;
+
+	g_mutex_lock(&this->write_lock);
+	ret = write_header_locked(this, RF_MSG_TYPE_FRAME, 0, error);
+	g_mutex_unlock(&this->write_lock);
+	if (ret > 0)
+		this->last_frame_time = g_get_monotonic_time();
+	return ret;
+}
+
+static gboolean stop_streamer_idle(void *data)
 {
 	RfStreamer *this = data;
-	ssize_t ret = 0;
-	g_autoptr(GError) error = NULL;
-	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, 0, &error);
-	if (ret < 0) {
-		g_warning(
-			"Frame: Failed to send frame message: %s.",
-			error->message
-		);
-		rf_streamer_stop(this);
-	} else if (ret > 0) {
-		this->last_frame_time = g_get_monotonic_time();
-		this->timer_id = 0;
-	} else {
-		g_warning("ReFrame Streamer disconnected.");
-		rf_streamer_stop(this);
-	}
+
+	rf_streamer_stop(this);
+	g_object_unref(this);
 	return G_SOURCE_REMOVE;
 }
 
-static void schedule_frame_msg(RfStreamer *this)
+static void stop_streamer_from_thread(RfStreamer *this)
 {
-	if (this->timer_id != 0)
-		return;
+	g_idle_add(stop_streamer_idle, g_object_ref(this));
+}
 
-	const int64_t current = g_get_monotonic_time();
-	const int64_t delta = current - this->last_frame_time;
-	// Give this highest priority to prevent lag.
-	if (delta < this->max_interval) {
-		this->timer_id = g_timeout_add_full(
-			G_PRIORITY_HIGH,
-			(this->max_interval - delta) / 1000,
-			send_frame_msg,
-			this,
-			NULL
-		);
-	} else {
-		if (this->last_frame_time != -1)
-			g_warning(
-				"Frame: Converted frame too slow, expected %ldms, used %ldms.",
-				this->max_interval / 1000,
-				delta / 1000
+static gpointer frame_request_thread(void *data)
+{
+	RfStreamer *this = data;
+
+	g_mutex_lock(&this->frame_lock);
+	while (this->frame_thread_running) {
+		while (this->frame_thread_running && this->frame_request_pending)
+			g_cond_wait(&this->frame_cond, &this->frame_lock);
+		if (!this->frame_thread_running)
+			break;
+
+		const int64_t now = g_get_monotonic_time();
+		if (this->next_frame_request_time < 0)
+			this->next_frame_request_time = now;
+		if (now < this->next_frame_request_time) {
+			g_cond_wait_until(
+				&this->frame_cond,
+				&this->frame_lock,
+				this->next_frame_request_time
 			);
-		this->timer_id = g_timeout_add_full(
-			G_PRIORITY_HIGH, 1, send_frame_msg, this, NULL
-		);
+			continue;
+		}
+
+		this->frame_request_pending = true;
+		if (this->next_frame_request_time < now - this->max_interval)
+			this->next_frame_request_time = now + this->max_interval;
+		else
+			this->next_frame_request_time += this->max_interval;
+		g_mutex_unlock(&this->frame_lock);
+
+		g_autoptr(GError) error = NULL;
+		const ssize_t ret = send_frame_request(this, &error);
+
+		g_mutex_lock(&this->frame_lock);
+		if (ret <= 0) {
+			this->frame_request_pending = false;
+			this->frame_thread_running = false;
+			g_cond_signal(&this->frame_cond);
+			g_mutex_unlock(&this->frame_lock);
+			if (ret < 0)
+				g_warning(
+					"Frame: Failed to send frame message: %s.",
+					error != NULL ? error->message : "unknown error"
+				);
+			else
+				g_warning("ReFrame Streamer disconnected.");
+			stop_streamer_from_thread(this);
+			return NULL;
+		}
 	}
+	g_mutex_unlock(&this->frame_lock);
+	return NULL;
+}
+
+static void complete_frame_request(RfStreamer *this)
+{
+	g_mutex_lock(&this->frame_lock);
+	if (this->frame_request_pending) {
+		this->frame_request_pending = false;
+		g_cond_signal(&this->frame_cond);
+	}
+	g_mutex_unlock(&this->frame_lock);
 }
 
 static ssize_t
@@ -246,6 +315,7 @@ static ssize_t on_frame_msg(RfStreamer *this)
 		length = 0;
 		goto out;
 	}
+	complete_frame_request(this);
 	// Empty buffer, maybe locked screen and turned monitor off, skip it.
 	if (length == 0) {
 		g_debug("Frame: Got empty buffer for primary plane.");
@@ -284,8 +354,6 @@ out:
 
 	if (ret < 0)
 		g_warning("Frame: Failed to receive frame: %s.", error->message);
-	else if (ret > 0)
-		schedule_frame_msg(this);
 	return ret;
 }
 
@@ -440,11 +508,23 @@ static void dispose(GObject *o)
 	G_OBJECT_CLASS(rf_streamer_parent_class)->dispose(o);
 }
 
+static void finalize(GObject *o)
+{
+	RfStreamer *this = RF_STREAMER(o);
+
+	g_mutex_clear(&this->write_lock);
+	g_mutex_clear(&this->frame_lock);
+	g_cond_clear(&this->frame_cond);
+
+	G_OBJECT_CLASS(rf_streamer_parent_class)->finalize(o);
+}
+
 static void rf_streamer_class_init(RfStreamerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
 
 	o_class->dispose = dispose;
+	o_class->finalize = finalize;
 
 	sigs[SIG_START] = g_signal_new(
 		"start", RF_TYPE_STREAMER, 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0
@@ -511,8 +591,9 @@ static void rf_streamer_init(RfStreamer *this)
 	this->connection = NULL;
 	this->io_flags = G_IO_IN | G_IO_PRI;
 	this->source = NULL;
-	this->timer_id = 0;
+	this->frame_thread = NULL;
 	this->last_frame_time = -1;
+	this->next_frame_request_time = -1;
 	this->max_interval = 1000000 / 30;
 	this->desktop_width = 0;
 	this->desktop_height = 0;
@@ -521,7 +602,12 @@ static void rf_streamer_init(RfStreamer *this)
 	this->rotation = 0;
 	this->frame_width = 0;
 	this->frame_height = 0;
+	this->frame_thread_running = false;
+	this->frame_request_pending = false;
 	this->running = false;
+	g_mutex_init(&this->write_lock);
+	g_mutex_init(&this->frame_lock);
+	g_cond_init(&this->frame_cond);
 }
 
 RfStreamer *rf_streamer_new(RfConfig *config)
@@ -569,6 +655,7 @@ int rf_streamer_start(RfStreamer *this)
 	g_message("Frame: Got screen rotation %u.", this->rotation);
 	this->frame_width = 0;
 	this->frame_height = 0;
+	this->next_frame_request_time = -1;
 
 	g_autoptr(GError) error = NULL;
 	this->connection = g_socket_client_connect(
@@ -584,15 +671,24 @@ int rf_streamer_start(RfStreamer *this)
 		);
 		return -2;
 	}
+	this->running = true;
 	GSocket *socket = g_socket_connection_get_socket(this->connection);
 	this->source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(
 		this->source, G_SOURCE_FUNC(on_socket_in), this, NULL
 	);
 	g_source_attach(this->source, NULL);
-	schedule_frame_msg(this);
+	g_mutex_lock(&this->frame_lock);
+	this->frame_thread_running = true;
+	this->frame_request_pending = false;
+	this->next_frame_request_time = g_get_monotonic_time();
+	g_mutex_unlock(&this->frame_lock);
+	this->frame_thread = g_thread_new(
+		"rf-frame-request",
+		frame_request_thread,
+		this
+	);
 
-	this->running = true;
 	g_debug("Signal: Emitting ReFrame Streamer start signal.");
 	g_signal_emit(this, sigs[SIG_START], 0);
 	return 0;
@@ -614,18 +710,26 @@ void rf_streamer_stop(RfStreamer *this)
 
 	g_debug("Signal: Emitting ReFrame Streamer stop signal.");
 	g_signal_emit(this, sigs[SIG_STOP], 0);
-	this->running = false;
+
+	g_mutex_lock(&this->frame_lock);
+	this->frame_thread_running = false;
+	this->frame_request_pending = false;
+	g_cond_signal(&this->frame_cond);
+	g_mutex_unlock(&this->frame_lock);
+	if (this->frame_thread != NULL) {
+		g_thread_join(this->frame_thread);
+		this->frame_thread = NULL;
+	}
 
 	if (this->source != NULL)
 		g_source_destroy(this->source);
 	g_clear_pointer(&this->source, g_source_unref);
-	if (this->timer_id != 0) {
-		g_source_remove(this->timer_id);
-		this->timer_id = 0;
-	}
 	// Dropping the last reference of it will automatically close IO streams
 	// and socket.
+	g_mutex_lock(&this->write_lock);
+	this->running = false;
 	g_clear_object(&this->connection);
+	g_mutex_unlock(&this->write_lock);
 }
 
 void rf_streamer_send_keyboard_event(

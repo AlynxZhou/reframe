@@ -21,6 +21,7 @@ struct _RfConverter {
 	GByteArray *prev;
 	unsigned int width;
 	unsigned int height;
+	struct rf_viewport viewport;
 	unsigned int prev_width;
 	unsigned int prev_height;
 	unsigned int damage_width;
@@ -38,6 +39,7 @@ struct _RfConverter {
 	unsigned int tile_size;
 	unsigned int rotation;
 	enum rf_damage_type damage_type;
+	bool force_full_damage;
 	bool running;
 };
 G_DEFINE_TYPE(RfConverter, rf_converter, G_TYPE_OBJECT)
@@ -551,6 +553,7 @@ static void rf_converter_init(RfConverter *this)
 	this->prev = NULL;
 	this->width = 0;
 	this->height = 0;
+	this->viewport = (struct rf_viewport){ 0 };
 	this->prev_width = 0;
 	this->prev_height = 0;
 	this->damage_width = 0;
@@ -570,6 +573,7 @@ static void rf_converter_init(RfConverter *this)
 	this->tile_size = 4;
 	this->rotation = 0;
 	this->damage_type = RF_DAMAGE_TYPE_CPU;
+	this->force_full_damage = false;
 	this->running = false;
 }
 
@@ -587,6 +591,24 @@ void rf_converter_set_card_path(RfConverter *this, const char *card_path)
 
 	g_clear_pointer(&this->card_path, g_free);
 	this->card_path = g_strdup(card_path);
+}
+
+void rf_converter_set_viewport(
+	RfConverter *this,
+	const struct rf_viewport *viewport
+)
+{
+	g_return_if_fail(RF_IS_CONVERTER(this));
+	g_return_if_fail(viewport != NULL);
+
+	if (this->viewport.x == viewport->x &&
+	    this->viewport.y == viewport->y &&
+	    this->viewport.w == viewport->w &&
+	    this->viewport.h == viewport->h)
+		return;
+
+	this->viewport = *viewport;
+	this->force_full_damage = true;
 }
 
 int rf_converter_start(RfConverter *this)
@@ -778,9 +800,11 @@ static void gen_buffers(RfConverter *this)
 
 	g_clear_pointer(&this->curr, g_byte_array_unref);
 	this->curr = g_byte_array_sized_new(size);
+	g_byte_array_set_size(this->curr, size);
 
 	g_clear_pointer(&this->prev, g_byte_array_unref);
 	this->prev = g_byte_array_sized_new(size);
+	g_byte_array_set_size(this->prev, size);
 	// Clear prev buffer so we will get a full update.
 	memset(this->prev->data, 0, size);
 }
@@ -880,6 +904,20 @@ static EGLImage make_image(EGLDisplay display, const struct rf_buffer *b)
 
 static void draw_begin(RfConverter *this)
 {
+	unsigned int viewport_x = this->viewport.x;
+	unsigned int viewport_y = this->viewport.y;
+	unsigned int viewport_w = this->viewport.w;
+	unsigned int viewport_h = this->viewport.h;
+
+	if (viewport_w == 0 || viewport_h == 0 ||
+	    viewport_x + viewport_w > this->width ||
+	    viewport_y + viewport_h > this->height) {
+		viewport_x = 0;
+		viewport_y = 0;
+		viewport_w = this->width;
+		viewport_h = this->height;
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, this->draw_framebuffer);
 	// We always rebind texture to framebuffer because we swap current and
 	// previous textures.
@@ -890,7 +928,12 @@ static void draw_begin(RfConverter *this)
 		this->curr_texture,
 		0
 	);
-	glViewport(0, 0, this->width, this->height);
+	if (viewport_x != 0 || viewport_y != 0 ||
+	    viewport_w != this->width || viewport_h != this->height) {
+		glViewport(0, 0, this->width, this->height);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	}
+	glViewport(viewport_x, viewport_y, viewport_w, viewport_h);
 
 	glUseProgram(this->draw_program);
 	if (this->gles_major >= 3)
@@ -1333,9 +1376,11 @@ GByteArray *rf_converter_convert(
 	const int64_t begin = g_get_monotonic_time();
 #endif
 
-	if (this->width != width || this->height != height) {
+	const bool resized = this->width != width || this->height != height;
+	if (resized) {
 		this->width = width;
 		this->height = height;
+		this->force_full_damage = true;
 		update_damage_size(this);
 		gen_textures(this);
 		gen_buffers(this);
@@ -1344,6 +1389,10 @@ GByteArray *rf_converter_convert(
 	int res = convert_buffers(this, length, bufs);
 	if (res >= 0 && damage != NULL)
 		detect_damage(this, damage);
+	if (res >= 0 && damage != NULL && this->force_full_damage)
+		damage_full(this, damage);
+	if (res >= 0)
+		this->force_full_damage = false;
 
 #ifdef __DEBUG__
 	const int64_t end = g_get_monotonic_time();

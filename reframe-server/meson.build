@@ -4,6 +4,7 @@ sources = files(
   'rf-streamer.c',
   'rf-session.c',
   'rf-converter.c',
+  'rf-remote-server.c',
   'rf-vnc-server.c'
 )
 
@@ -11,6 +12,7 @@ headers = files(
   'rf-streamer.h',
   'rf-session.h',
   'rf-converter.h',
+  'rf-remote-server.h',
   'rf-vnc-server.h'
 )
 
@@ -72,6 +74,176 @@ shared_module(
   install: true,
   install_dir: moduledir / 'vnc'
 )
+
+if get_option('rdp')
+  avcodec = dependency('libavcodec', required: false)
+  avutil = dependency('libavutil', required: false)
+  swscale = dependency('libswscale', required: false)
+  rdp_avc_c_args = []
+  rdp_avc_dependencies = []
+  if avcodec.found() and avutil.found() and swscale.found()
+    rdp_avc_c_args += ['-DRF_HAVE_RDP_AVC=1']
+    rdp_avc_dependencies += [avcodec, avutil, swscale]
+  endif
+
+  rdp_sources = files(
+    'rf-rdp-server.c',
+	    'rf-rdp-proto.c',
+    'rf-rdp-mcs.c',
+    'rf-rdp-core.c',
+    'rf-rdp-input.c',
+    'rf-rdp-nsc.c',
+    'rf-rdp-dvc.c',
+    'rf-rdp-gfx.c',
+    'rf-rdp-planar.c',
+    'rf-rdp-avc.c'
+	  )
+
+	  rdp_headers = files(
+    'rf-rdp-server.h',
+    'rf-rdp-proto.h',
+    'rf-rdp-mcs.h',
+    'rf-rdp-core.h',
+    'rf-rdp-input.h',
+    'rf-rdp-nsc.h',
+    'rf-rdp-dvc.h',
+    'rf-rdp-gfx.h',
+    'rf-rdp-planar.h',
+    'rf-rdp-avc.h'
+	  )
+
+  rdp_dependencies = []
+  rdp_dependencies += [
+    glib,
+    gio,
+    gmodule,
+    gobject,
+    reframe_common_dep
+  ]
+  rdp_dependencies += rdp_avc_dependencies
+
+  shared_module(
+    meson.project_name() + '-rdp',
+    sources: rdp_sources,
+    dependencies: rdp_dependencies,
+    include_directories: include_directories,
+    c_args: rdp_avc_c_args,
+    install: true,
+    install_dir: moduledir / 'rdp'
+  )
+
+  rdp_test_include_directories = []
+  rdp_test_include_directories += include_directories
+  rdp_test_include_directories += include_directories('.')
+
+  test_rdp_proto = executable(
+    'test-rdp-proto',
+    sources: files('../tests/test-rdp-proto.c', 'rf-rdp-proto.c'),
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-proto', test_rdp_proto)
+
+  test_rdp_input = executable(
+    'test-rdp-input',
+    sources: files('../tests/test-rdp-input.c', 'rf-rdp-input.c'),
+    dependencies: [m],
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-input', test_rdp_input)
+
+  test_rdp_mcs = executable(
+    'test-rdp-mcs',
+    sources: files(
+      '../tests/test-rdp-mcs.c',
+      'rf-rdp-mcs.c',
+      'rf-rdp-proto.c'
+    ),
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-mcs', test_rdp_mcs)
+
+  test_rdp_core = executable(
+    'test-rdp-core',
+    sources: files(
+      '../tests/test-rdp-core.c',
+      'rf-rdp-core.c',
+      'rf-rdp-mcs.c',
+      'rf-rdp-proto.c'
+    ),
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+	  test('rdp-core', test_rdp_core)
+
+  test_rdp_dvc = executable(
+    'test-rdp-dvc',
+    sources: files(
+      '../tests/test-rdp-dvc.c',
+      'rf-rdp-dvc.c'
+    ),
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-dvc', test_rdp_dvc)
+
+  test_rdp_gfx = executable(
+    'test-rdp-gfx',
+    sources: files(
+      '../tests/test-rdp-gfx.c',
+      'rf-rdp-gfx.c',
+      'rf-rdp-planar.c'
+    ),
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-gfx', test_rdp_gfx)
+
+  if rdp_avc_dependencies.length() == 3
+    test_rdp_avc = executable(
+      'test-rdp-avc',
+      sources: files(
+        '../tests/test-rdp-avc.c',
+        'rf-rdp-avc.c'
+      ),
+      dependencies: rdp_avc_dependencies,
+      include_directories: rdp_test_include_directories,
+      c_args: rdp_avc_c_args,
+      install: false
+    )
+    test('rdp-avc', test_rdp_avc)
+  endif
+
+	  test_rdp_nsc = executable(
+	    'test-rdp-nsc',
+	    sources: files(
+	      '../tests/test-rdp-nsc.c',
+	      'rf-rdp-nsc.c'
+	    ),
+	    dependencies: [glib],
+	    include_directories: rdp_test_include_directories,
+	    install: false
+	  )
+	  test('rdp-nsc', test_rdp_nsc)
+
+	  test_resize = executable(
+	    'test-resize',
+    sources: files('../tests/test-resize.c', '../reframe-common/rf-resize.c'),
+    include_directories: include_directories('../reframe-common'),
+    install: false
+  )
+  test('resize', test_resize)
+
+  test_config = executable(
+    'test-config',
+    sources: files('../tests/test-config.c'),
+    dependencies: [glib, gio, gobject, reframe_common_dep],
+    install: false
+  )
+  test('config', test_config)
+endif
 
 if get_option('neatvnc') and neatvnc.found()
   nvnc_sources = files('rf-nvnc-server.c')

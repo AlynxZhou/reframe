@@ -71,6 +71,7 @@ conf_data.set_quoted('LIBDIR', libdir)
 conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
 conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
 conf_data.set('NEATVNC_UNSTABLE_API', get_option('neatvnc') and neatvnc.found() and neatvnc_unstable_api)
+conf_data.set('HAVE_RDP', get_option('rdp'))
 
 configure_file(
   input: 'reframe-common' / 'config.h.in',
@@ -92,6 +93,7 @@ summary({
   'libdir': libdir,
   'moduledir': moduledir,
   'confdir': confdir,
+  'native rdp': get_option('rdp'),
 }, section: 'Configuration')
 if get_option('systemd') and systemd.found()
   summary({

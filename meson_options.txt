@@ -53,3 +53,10 @@ option(
   value: false,
   description: 'Enable experimental neatvnc implementation.'
 )
+
+option(
+  'rdp',
+  type: 'boolean',
+  value: false,
+  description: 'Enable native RDP server module.'
+)

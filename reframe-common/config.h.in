@@ -8,6 +8,7 @@
 #mesondefine LIBDIR
 #mesondefine HAVE_LIBSYSTEMD
 #mesondefine HAVE_NEATVNC
+#mesondefine HAVE_RDP
 #mesondefine NEATVNC_UNSTABLE_API
 
 #endif
