@@ -1112,17 +1112,23 @@ static void test_adaptive_bitmap_fps_policy(void)
 	) == 0);
 }
 
-static void test_rdpgfx_ack_fps_policy_prefers_queue_depth(void)
+static void test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical(void)
 {
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 4) == 60);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 12) == 60);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 18) == 60);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 24) == 45);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 32) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 24) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 32) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 48) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 64) == 30);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 3, true, 0) == 60);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 0) == 45);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 16, true, 0) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 18) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 0) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 16, true, 0) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 32, true, 0) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 48, true, 0) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 18) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(45, 32, true, 0) == 33);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(45, 48, true, 0) == 22);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, false, 18) == 60);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 32) == 0);
 }
@@ -1407,7 +1413,7 @@ int main(void)
 	test_frame_pacing_accepts_small_source_jitter();
 	test_frame_pacing_limits_fast_source();
 	test_adaptive_bitmap_fps_policy();
-	test_rdpgfx_ack_fps_policy_prefers_queue_depth();
+	test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical();
 	test_avc444_delta_policy_skips_large_damage();
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();

@@ -1400,15 +1400,15 @@ unsigned int rf_rdp_core_rdpgfx_ack_limited_fps(
 		severe_fps = 1;
 
 	if (ack_queue_depth_valid) {
-		if (ack_queue_depth >= 16)
+		if (ack_queue_depth >= 48)
 			fps = severe_fps;
-		else if (ack_queue_depth >= 8 && moderate_fps < fps)
+		else if (ack_queue_depth >= 32 && moderate_fps < fps)
 			fps = moderate_fps;
 	}
 
-	if (inflight_frames >= 32 && severe_fps < fps)
+	if (inflight_frames >= 64 && severe_fps < fps)
 		fps = severe_fps;
-	else if (inflight_frames >= 24 && moderate_fps < fps)
+	else if (inflight_frames >= 48 && moderate_fps < fps)
 		fps = moderate_fps;
 
 	return fps;
