@@ -283,10 +283,59 @@ static void test_encode_damage_rect_uses_surface_relative_message_coords(void)
 	assert_region_and_first_tile_are_surface_relative(message);
 }
 
+static void test_parallel_encoding_matches_single_thread_output(void)
+{
+	g_autoptr(RfRdpRfxContext) single = rf_rdp_rfx_context_new();
+	g_autoptr(RfRdpRfxContext) parallel = rf_rdp_rfx_context_new();
+	uint8_t rgba[130 * 130 * 4] = { 0 };
+
+	assert(single != NULL);
+	assert(parallel != NULL);
+	fill_frame(rgba, 130, 130);
+
+	rf_rdp_rfx_context_set_thread_count(single, 1);
+	rf_rdp_rfx_context_set_thread_count(parallel, 4);
+
+	g_autoptr(GByteArray) single_message = rf_rdp_rfx_encode_rgba(
+		single,
+		rgba,
+		sizeof(rgba),
+		130 * 4,
+		130,
+		130,
+		0,
+		0,
+		130,
+		130
+	);
+	g_autoptr(GByteArray) parallel_message = rf_rdp_rfx_encode_rgba(
+		parallel,
+		rgba,
+		sizeof(rgba),
+		130 * 4,
+		130,
+		130,
+		0,
+		0,
+		130,
+		130
+	);
+
+	assert(single_message != NULL);
+	assert(parallel_message != NULL);
+	assert(single_message->len == parallel_message->len);
+	assert(memcmp(
+		       single_message->data,
+		       parallel_message->data,
+		       single_message->len
+	       ) == 0);
+}
+
 int main(void)
 {
 	test_encode_first_frame_writes_headers_and_tiles();
 	test_encode_second_frame_omits_headers();
 	test_encode_damage_rect_uses_surface_relative_message_coords();
+	test_parallel_encoding_matches_single_thread_output();
 	return 0;
 }

@@ -2795,11 +2795,12 @@ static bool send_rdpgfx_rfx_update(
 
 	if (!client->rdpgfx_update_logged) {
 		g_message(
-			"RDP: RDPGFX RemoteFX updates active, rect %u,%u %ux%u.",
+			"RDP: RDPGFX RemoteFX updates active, rect %u,%u %ux%u, tile-threads=%u.",
 			x,
 			y,
 			width,
-			height
+			height,
+			rf_rdp_rfx_context_get_thread_count(client->rfx)
 		);
 		client->rdpgfx_update_logged = true;
 	}

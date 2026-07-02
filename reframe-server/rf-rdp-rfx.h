@@ -11,6 +11,11 @@ typedef struct rf_rdp_rfx_context RfRdpRfxContext;
 RfRdpRfxContext *rf_rdp_rfx_context_new(void);
 void rf_rdp_rfx_context_free(RfRdpRfxContext *context);
 void rf_rdp_rfx_context_reset(RfRdpRfxContext *context);
+void rf_rdp_rfx_context_set_thread_count(
+	RfRdpRfxContext *context,
+	unsigned int thread_count
+);
+unsigned int rf_rdp_rfx_context_get_thread_count(const RfRdpRfxContext *context);
 
 GByteArray *rf_rdp_rfx_encode_rgba(
 	RfRdpRfxContext *context,

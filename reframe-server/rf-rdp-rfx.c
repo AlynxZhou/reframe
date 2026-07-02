@@ -33,8 +33,12 @@
 #define RF_RFX_DN_GR 6
 #define RF_RFX_UQ_GR 3
 #define RF_RFX_DQ_GR 3
+#define RF_RFX_PARALLEL_MIN_TILES 8u
+#define RF_RFX_MAX_THREADS 16u
 
 struct rf_rdp_rfx_context {
+	GThreadPool *thread_pool;
+	unsigned int thread_count;
 	bool send_headers;
 	uint16_t width;
 	uint16_t height;
@@ -47,6 +51,25 @@ struct rfx_bit_writer {
 	size_t byte_pos;
 	uint8_t bits_left;
 	bool failed;
+};
+
+struct rfx_tile_job_group {
+	GMutex mutex;
+	GCond cond;
+	unsigned int pending;
+};
+
+struct rfx_tile_job {
+	struct rfx_tile_job_group *group;
+	const uint8_t *rgba;
+	size_t rgba_stride;
+	uint16_t frame_width;
+	uint16_t frame_height;
+	uint16_t source_x;
+	uint16_t source_y;
+	uint16_t tile_x_idx;
+	uint16_t tile_y_idx;
+	GByteArray *encoded;
 };
 
 static const uint32_t RFX_QUANTS[10] = {
@@ -457,8 +480,7 @@ static void extract_tile(
 	}
 }
 
-static bool append_tile(
-	GByteArray *array,
+static GByteArray *encode_tile(
 	const uint8_t *rgba,
 	size_t rgba_stride,
 	uint16_t frame_width,
@@ -494,12 +516,13 @@ static bool append_tile(
 	if (!encode_component(y, y_data, &y_length) ||
 	    !encode_component(cb, cb_data, &cb_length) ||
 	    !encode_component(cr, cr_data, &cr_length))
-		return false;
+		return NULL;
 
 	const size_t block_len =
 		19u + (size_t)y_length + cb_length + cr_length;
 	if (block_len > UINT32_MAX)
-		return false;
+		return NULL;
+	GByteArray *array = g_byte_array_sized_new(block_len);
 	append_u16_le(array, RF_RFX_CBT_TILE);
 	append_u32_le(array, (uint32_t)block_len);
 	append_u8(array, 0);
@@ -513,7 +536,39 @@ static bool append_tile(
 	g_byte_array_append(array, y_data, y_length);
 	g_byte_array_append(array, cb_data, cb_length);
 	g_byte_array_append(array, cr_data, cr_length);
-	return true;
+	return array;
+}
+
+static void encode_tile_job_sync(struct rfx_tile_job *job)
+{
+	job->encoded = encode_tile(
+		job->rgba,
+		job->rgba_stride,
+		job->frame_width,
+		job->frame_height,
+		job->source_x,
+		job->source_y,
+		job->tile_x_idx,
+		job->tile_y_idx
+	);
+}
+
+static void rfx_tile_job_complete(struct rfx_tile_job_group *group)
+{
+	g_mutex_lock(&group->mutex);
+	group->pending--;
+	if (group->pending == 0)
+		g_cond_signal(&group->cond);
+	g_mutex_unlock(&group->mutex);
+}
+
+static void encode_tile_job(gpointer data, gpointer user_data)
+{
+	(void)user_data;
+
+	struct rfx_tile_job *job = data;
+	encode_tile_job_sync(job);
+	rfx_tile_job_complete(job->group);
 }
 
 static void append_sync(GByteArray *array)
@@ -611,7 +666,150 @@ static void append_frame_end(GByteArray *array)
 	append_u8(array, 0);
 }
 
+static void free_tile_jobs(struct rfx_tile_job *jobs, uint16_t tile_count)
+{
+	for (uint16_t i = 0; i < tile_count; ++i)
+		g_clear_pointer(&jobs[i].encoded, g_byte_array_unref);
+	g_free(jobs);
+}
+
+static bool append_encoded_tiles(
+	GByteArray *array,
+	struct rfx_tile_job *jobs,
+	uint16_t tile_count
+)
+{
+	for (uint16_t i = 0; i < tile_count; ++i) {
+		if (jobs[i].encoded == NULL)
+			return false;
+		g_byte_array_append(
+			array,
+			jobs[i].encoded->data,
+			jobs[i].encoded->len
+		);
+	}
+	return true;
+}
+
+static void prepare_tile_jobs(
+	struct rfx_tile_job *jobs,
+	const uint8_t *rgba,
+	size_t rgba_stride,
+	uint16_t frame_width,
+	uint16_t frame_height,
+	uint16_t x,
+	uint16_t y,
+	uint16_t end_x,
+	uint16_t end_y
+)
+{
+	uint16_t index = 0;
+
+	for (uint16_t tile_y = 0; tile_y <= end_y; ++tile_y) {
+		for (uint16_t tile_x = 0; tile_x <= end_x; ++tile_x) {
+			struct rfx_tile_job *job = jobs + index++;
+
+			job->rgba = rgba;
+			job->rgba_stride = rgba_stride;
+			job->frame_width = frame_width;
+			job->frame_height = frame_height;
+			job->source_x = (uint16_t)(
+				(uint32_t)x + tile_x * RF_RFX_TILE_SIZE
+			);
+			job->source_y = (uint16_t)(
+				(uint32_t)y + tile_y * RF_RFX_TILE_SIZE
+			);
+			job->tile_x_idx = tile_x;
+			job->tile_y_idx = tile_y;
+		}
+	}
+}
+
+static bool encode_tiles_serial(
+	GByteArray *array,
+	struct rfx_tile_job *jobs,
+	uint16_t tile_count
+)
+{
+	for (uint16_t i = 0; i < tile_count; ++i)
+		encode_tile_job_sync(jobs + i);
+	return append_encoded_tiles(array, jobs, tile_count);
+}
+
+static bool encode_tiles_parallel(
+	RfRdpRfxContext *context,
+	GByteArray *array,
+	struct rfx_tile_job *jobs,
+	uint16_t tile_count
+)
+{
+	struct rfx_tile_job_group group = { 0 };
+
+	g_mutex_init(&group.mutex);
+	g_cond_init(&group.cond);
+	group.pending = tile_count;
+
+	for (uint16_t i = 0; i < tile_count; ++i) {
+		g_autoptr(GError) error = NULL;
+
+		jobs[i].group = &group;
+		if (!g_thread_pool_push(context->thread_pool, jobs + i, &error)) {
+			encode_tile_job_sync(jobs + i);
+			rfx_tile_job_complete(&group);
+		}
+	}
+
+	g_mutex_lock(&group.mutex);
+	while (group.pending > 0)
+		g_cond_wait(&group.cond, &group.mutex);
+	g_mutex_unlock(&group.mutex);
+
+	g_cond_clear(&group.cond);
+	g_mutex_clear(&group.mutex);
+	return append_encoded_tiles(array, jobs, tile_count);
+}
+
+static bool append_tiles(
+	RfRdpRfxContext *context,
+	GByteArray *array,
+	const uint8_t *rgba,
+	size_t rgba_stride,
+	uint16_t frame_width,
+	uint16_t frame_height,
+	uint16_t x,
+	uint16_t y,
+	uint16_t end_x,
+	uint16_t end_y,
+	uint16_t tile_count
+)
+{
+	struct rfx_tile_job *jobs = g_new0(struct rfx_tile_job, tile_count);
+	bool ok = false;
+
+	prepare_tile_jobs(
+		jobs,
+		rgba,
+		rgba_stride,
+		frame_width,
+		frame_height,
+		x,
+		y,
+		end_x,
+		end_y
+	);
+
+	if (context->thread_pool != NULL &&
+	    tile_count >= RF_RFX_PARALLEL_MIN_TILES)
+		ok = encode_tiles_parallel(context, array, jobs, tile_count);
+	else
+		ok = encode_tiles_serial(array, jobs, tile_count);
+
+	free_tile_jobs(jobs, tile_count);
+	return ok;
+}
+
 static bool append_tileset(
+	RfRdpRfxContext *context,
 	GByteArray *array,
 	const uint8_t *rgba,
 	size_t rgba_stride,
@@ -623,12 +821,13 @@ static bool append_tileset(
 	uint16_t height
 )
 {
-	const uint16_t start_x = 0;
-	const uint16_t start_y = 0;
 	const uint16_t end_x = (width - 1) / RF_RFX_TILE_SIZE;
 	const uint16_t end_y = (height - 1) / RF_RFX_TILE_SIZE;
-	const uint16_t tile_count =
-		(uint16_t)((end_x - start_x + 1) * (end_y - start_y + 1));
+	const uint32_t tile_count_32 =
+		((uint32_t)end_x + 1) * ((uint32_t)end_y + 1);
+	if (tile_count_32 == 0 || tile_count_32 > UINT16_MAX)
+		return false;
+	const uint16_t tile_count = (uint16_t)tile_count_32;
 	const size_t block = begin_block(array, RF_RFX_WBT_EXTENSION);
 
 	append_u8(array, 1);
@@ -645,27 +844,20 @@ static bool append_tileset(
 		append_u8(array, (uint8_t)(RFX_QUANTS[i] | (RFX_QUANTS[i + 1] << 4)));
 
 	const size_t tiles_start = array->len;
-	for (uint16_t tile_y = start_y; tile_y <= end_y; ++tile_y) {
-		for (uint16_t tile_x = start_x; tile_x <= end_x; ++tile_x) {
-			const uint32_t source_x =
-				(uint32_t)x + tile_x * RF_RFX_TILE_SIZE;
-			const uint32_t source_y =
-				(uint32_t)y + tile_y * RF_RFX_TILE_SIZE;
-
-			if (!append_tile(
-				    array,
-				    rgba,
-				    rgba_stride,
-				    frame_width,
-				    frame_height,
-				    (uint16_t)source_x,
-				    (uint16_t)source_y,
-				    tile_x,
-				    tile_y
-			    ))
-				return false;
-		}
-	}
+	if (!append_tiles(
+		    context,
+		    array,
+		    rgba,
+		    rgba_stride,
+		    frame_width,
+		    frame_height,
+		    x,
+		    y,
+		    end_x,
+		    end_y,
+		    tile_count
+	    ))
+		return false;
 
 	const size_t tiles_size = array->len - tiles_start;
 	if (tiles_size > UINT32_MAX)
@@ -674,16 +866,79 @@ static bool append_tileset(
 	return end_block(array, block);
 }
 
+static unsigned int clamp_thread_count(unsigned int thread_count)
+{
+	if (thread_count == 0)
+		return 1;
+	if (thread_count > RF_RFX_MAX_THREADS)
+		return RF_RFX_MAX_THREADS;
+	return thread_count;
+}
+
+static unsigned int default_thread_count(void)
+{
+	const char *env = g_getenv("RF_RDP_RFX_THREADS");
+	if (env != NULL && env[0] != '\0') {
+		char *end = NULL;
+		const guint64 value = g_ascii_strtoull(env, &end, 10);
+
+		if (end != env)
+			return clamp_thread_count((unsigned int)value);
+	}
+
+	return clamp_thread_count((unsigned int)g_get_num_processors());
+}
+
+void rf_rdp_rfx_context_set_thread_count(
+	RfRdpRfxContext *context,
+	unsigned int thread_count
+)
+{
+	g_autoptr(GError) error = NULL;
+	GThreadPool *thread_pool = NULL;
+
+	if (context == NULL)
+		return;
+
+	thread_count = clamp_thread_count(thread_count);
+	if (thread_count > 1) {
+		thread_pool = g_thread_pool_new(
+			encode_tile_job,
+			NULL,
+			(int)thread_count,
+			false,
+			&error
+		);
+		if (thread_pool == NULL)
+			thread_count = 1;
+	}
+
+	if (context->thread_pool != NULL)
+		g_thread_pool_free(context->thread_pool, false, true);
+	context->thread_pool = thread_pool;
+	context->thread_count = thread_count;
+}
+
+unsigned int rf_rdp_rfx_context_get_thread_count(const RfRdpRfxContext *context)
+{
+	return context != NULL ? context->thread_count : 0;
+}
+
 RfRdpRfxContext *rf_rdp_rfx_context_new(void)
 {
 	RfRdpRfxContext *context = g_new0(RfRdpRfxContext, 1);
 
 	context->send_headers = true;
+	rf_rdp_rfx_context_set_thread_count(context, default_thread_count());
 	return context;
 }
 
 void rf_rdp_rfx_context_free(RfRdpRfxContext *context)
 {
+	if (context == NULL)
+		return;
+	if (context->thread_pool != NULL)
+		g_thread_pool_free(context->thread_pool, false, true);
 	g_free(context);
 }
 
@@ -742,6 +997,7 @@ GByteArray *rf_rdp_rfx_encode_rgba(
 	append_frame_begin(array, frame_idx);
 	append_region(array, 0, 0, width, height);
 	if (!append_tileset(
+		    context,
 		    array,
 		    rgba,
 		    rgba_stride,
