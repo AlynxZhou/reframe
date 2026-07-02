@@ -32,14 +32,13 @@ struct rf_rdp_avc_encoder {
 	AVCodecContext *codec;
 	AVFrame *frame;
 	AVFrame *hw_frame;
+	AVFrame *avc444_yuv444_frame;
 	AVPacket *packet;
 	AVBufferRef *hw_device_ctx;
 	AVBufferRef *hw_frames_ctx;
 	struct SwsContext *sws;
+	struct SwsContext *avc444_sws;
 	enum AVPixelFormat sw_pix_fmt;
-	uint8_t *avc444_u_cache;
-	uint8_t *avc444_v_cache;
-	size_t avc444_cache_pixels;
 	bool hardware_frames;
 #endif
 	char *name;
@@ -113,20 +112,18 @@ static void close_encoder_state(RfRdpAvcEncoder *encoder)
 		return;
 
 	sws_freeContext(encoder->sws);
+	sws_freeContext(encoder->avc444_sws);
 	encoder->sws = NULL;
+	encoder->avc444_sws = NULL;
 	av_packet_free(&encoder->packet);
+	av_frame_free(&encoder->avc444_yuv444_frame);
 	av_frame_free(&encoder->hw_frame);
 	av_frame_free(&encoder->frame);
 	avcodec_free_context(&encoder->codec);
 	av_buffer_unref(&encoder->hw_frames_ctx);
 	av_buffer_unref(&encoder->hw_device_ctx);
-	free(encoder->avc444_u_cache);
-	free(encoder->avc444_v_cache);
 	free(encoder->name);
 	encoder->name = NULL;
-	encoder->avc444_u_cache = NULL;
-	encoder->avc444_v_cache = NULL;
-	encoder->avc444_cache_pixels = 0;
 	encoder->sw_pix_fmt = AV_PIX_FMT_NONE;
 	encoder->hardware_frames = false;
 }
@@ -280,6 +277,33 @@ static bool open_encoder(RfRdpAvcEncoder *encoder, const char *name)
 	if (encoder->sws == NULL)
 		goto fail;
 
+	encoder->avc444_yuv444_frame = av_frame_alloc();
+	if (encoder->avc444_yuv444_frame == NULL)
+		goto fail;
+	encoder->avc444_yuv444_frame->format = AV_PIX_FMT_YUV444P;
+	encoder->avc444_yuv444_frame->width = encoder->width;
+	encoder->avc444_yuv444_frame->height = encoder->height;
+	rc = av_frame_get_buffer(encoder->avc444_yuv444_frame, 32);
+	if (rc < 0) {
+		trace_av_error("av_frame_get_buffer(avc444)", rc);
+		goto fail;
+	}
+
+	encoder->avc444_sws = sws_getContext(
+		encoder->width,
+		encoder->height,
+		AV_PIX_FMT_RGBA,
+		encoder->width,
+		encoder->height,
+		AV_PIX_FMT_YUV444P,
+		SWS_FAST_BILINEAR,
+		NULL,
+		NULL,
+		NULL
+	);
+	if (encoder->avc444_sws == NULL)
+		goto fail;
+
 	encoder->name = strdup(name);
 	if (encoder->name == NULL)
 		goto fail;
@@ -381,78 +405,28 @@ static void read_rgba_yuv(
 	*out_v = rgb_to_v(r, g, b);
 }
 
-static void read_rgba_uv(
-	const uint8_t *rgba,
-	size_t rgba_stride,
-	uint16_t x,
-	uint16_t y,
-	uint8_t *out_u,
-	uint8_t *out_v
-)
-{
-	const uint8_t *pixel = rgba + (size_t)y * rgba_stride + (size_t)x * 4;
-	const uint8_t r = pixel[0];
-	const uint8_t g = pixel[1];
-	const uint8_t b = pixel[2];
-
-	*out_u = rgb_to_u(r, g, b);
-	*out_v = rgb_to_v(r, g, b);
-}
-
-static bool ensure_avc444_cache(RfRdpAvcEncoder *encoder)
-{
-	if (encoder->width == 0 || encoder->height == 0)
-		return false;
-	if ((size_t)encoder->height > SIZE_MAX / encoder->width)
-		return false;
-
-	const size_t pixels = (size_t)encoder->width * encoder->height;
-	if (encoder->avc444_cache_pixels == pixels &&
-	    encoder->avc444_u_cache != NULL &&
-	    encoder->avc444_v_cache != NULL)
-		return true;
-
-	uint8_t *u = malloc(pixels);
-	uint8_t *v = malloc(pixels);
-	if (u == NULL || v == NULL) {
-		free(u);
-		free(v);
-		return false;
-	}
-
-	free(encoder->avc444_u_cache);
-	free(encoder->avc444_v_cache);
-	encoder->avc444_u_cache = u;
-	encoder->avc444_v_cache = v;
-	encoder->avc444_cache_pixels = pixels;
-	return true;
-}
-
-static bool prepare_avc444_uv_cache(
+static bool prepare_avc444_yuv444_frame(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,
 	size_t rgba_stride
 )
 {
-	if (!ensure_avc444_cache(encoder))
+	if (rgba_stride > INT_MAX ||
+	    av_frame_make_writable(encoder->avc444_yuv444_frame) < 0)
 		return false;
 
-	for (uint16_t y = 0; y < encoder->height; ++y) {
-		const uint8_t *src = rgba + (size_t)y * rgba_stride;
-		const size_t row = (size_t)y * encoder->width;
-
-		for (uint16_t x = 0; x < encoder->width; ++x) {
-			const uint8_t *pixel = src + (size_t)x * 4;
-			const uint8_t r = pixel[0];
-			const uint8_t g = pixel[1];
-			const uint8_t b = pixel[2];
-			const size_t offset = row + x;
-
-			encoder->avc444_u_cache[offset] = rgb_to_u(r, g, b);
-			encoder->avc444_v_cache[offset] = rgb_to_v(r, g, b);
-		}
-	}
-
+	const uint8_t *src_slices[1] = { rgba };
+	const int src_strides[1] = { (int)rgba_stride };
+	if (sws_scale(
+		    encoder->avc444_sws,
+		    src_slices,
+		    src_strides,
+		    0,
+		    encoder->height,
+		    encoder->avc444_yuv444_frame->data,
+		    encoder->avc444_yuv444_frame->linesize
+	    ) != encoder->height)
+		return false;
 	encoder->avc444_prepare_count++;
 	return true;
 }
@@ -544,15 +518,22 @@ static bool fill_avc444_luma_nv12(
 	       ) == encoder->height;
 }
 
-static void fill_avc444_chroma_nv12(
-	RfRdpAvcEncoder *encoder,
-	const uint8_t *rgba,
-	size_t rgba_stride
-)
+static bool fill_avc444_chroma_nv12_from_yuv444(RfRdpAvcEncoder *encoder)
 {
 	AVFrame *frame = encoder->frame;
+	AVFrame *yuv = encoder->avc444_yuv444_frame;
+
+	if (yuv->linesize[1] < encoder->width ||
+	    yuv->linesize[2] < encoder->width)
+		return false;
 
 	for (uint16_t y = 0; y < encoder->height; y += 2) {
+		const uint8_t *u_even = yuv->data[1] + (size_t)y * yuv->linesize[1];
+		const uint8_t *u_odd = yuv->data[1] +
+			(size_t)(y + 1) * yuv->linesize[1];
+		const uint8_t *v_even = yuv->data[2] + (size_t)y * yuv->linesize[2];
+		const uint8_t *v_odd = yuv->data[2] +
+			(size_t)(y + 1) * yuv->linesize[2];
 		const size_t i = y / 2;
 		const size_t n = (i & (size_t)~7) + i;
 		uint8_t *b4 = frame->data[0] + n * frame->linesize[0];
@@ -561,52 +542,15 @@ static void fill_avc444_chroma_nv12(
 			(size_t)(y / 2) * frame->linesize[1];
 
 		for (uint16_t x = 0; x < encoder->width; x += 2) {
-			uint8_t u1e = 0, v1e = 0;
-			uint8_t u2e = 0, v2e = 0;
-			uint8_t u1o = 0, v1o = 0;
-			uint8_t u2o = 0, v2o = 0;
-
-			read_rgba_uv(rgba, rgba_stride, x, y, &u1e, &v1e);
-			read_rgba_uv(rgba, rgba_stride, x + 1, y, &u2e, &v2e);
-			read_rgba_uv(rgba, rgba_stride, x, y + 1, &u1o, &v1o);
-			read_rgba_uv(rgba, rgba_stride, x + 1, y + 1, &u2o, &v2o);
-
-			b4[x] = u1o;
-			b4[x + 1] = u2o;
-			b5[x] = v1o;
-			b5[x + 1] = v2o;
-			uv[x] = u2e;
-			uv[x + 1] = v2e;
+			b4[x] = u_odd[x];
+			b4[x + 1] = u_odd[x + 1];
+			b5[x] = v_odd[x];
+			b5[x + 1] = v_odd[x + 1];
+			uv[x] = u_even[x + 1];
+			uv[x + 1] = v_even[x + 1];
 		}
 	}
-}
-
-static void fill_avc444_chroma_nv12_from_cache(RfRdpAvcEncoder *encoder)
-{
-	AVFrame *frame = encoder->frame;
-
-	for (uint16_t y = 0; y < encoder->height; y += 2) {
-		const size_t even_row = (size_t)y * encoder->width;
-		const size_t odd_row = (size_t)(y + 1) * encoder->width;
-		const size_t i = y / 2;
-		const size_t n = (i & (size_t)~7) + i;
-		uint8_t *b4 = frame->data[0] + n * frame->linesize[0];
-		uint8_t *b5 = frame->data[0] + (n + 8) * frame->linesize[0];
-		uint8_t *uv = frame->data[1] +
-			(size_t)(y / 2) * frame->linesize[1];
-
-		for (uint16_t x = 0; x < encoder->width; x += 2) {
-			const size_t even = even_row + x;
-			const size_t odd = odd_row + x;
-
-			b4[x] = encoder->avc444_u_cache[odd];
-			b4[x + 1] = encoder->avc444_u_cache[odd + 1];
-			b5[x] = encoder->avc444_v_cache[odd];
-			b5[x + 1] = encoder->avc444_v_cache[odd + 1];
-			uv[x] = encoder->avc444_u_cache[even + 1];
-			uv[x + 1] = encoder->avc444_v_cache[even + 1];
-		}
-	}
+	return true;
 }
 #endif
 
@@ -1018,12 +962,16 @@ static bool encode_avc444_plane_rgba(
 		src_stride = row_bytes;
 	}
 
+	if (chroma && !prepare_avc444_yuv444_frame(encoder, src_rgba, src_stride))
+		goto out;
 	if (av_frame_make_writable(encoder->frame) < 0)
 		goto out;
-	if (chroma)
-		fill_avc444_chroma_nv12(encoder, src_rgba, src_stride);
-	else if (!fill_avc444_luma_nv12(encoder, src_rgba, src_stride))
+	if (chroma) {
+		if (!fill_avc444_chroma_nv12_from_yuv444(encoder))
+			goto out;
+	} else if (!fill_avc444_luma_nv12(encoder, src_rgba, src_stride)) {
 		goto out;
+	}
 	ok = encode_current_frame(
 		encoder,
 		force_keyframe,
@@ -1107,7 +1055,7 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 		src_stride = row_bytes;
 	}
 
-	if (!prepare_avc444_uv_cache(encoder, src_rgba, src_stride))
+	if (!prepare_avc444_yuv444_frame(encoder, src_rgba, src_stride))
 		goto out;
 	if (av_frame_make_writable(encoder->frame) < 0)
 		goto out;
@@ -1123,7 +1071,8 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 
 	if (av_frame_make_writable(encoder->frame) < 0)
 		goto out;
-	fill_avc444_chroma_nv12_from_cache(encoder);
+	if (!fill_avc444_chroma_nv12_from_yuv444(encoder))
+		goto out;
 	if (!encode_current_frame(
 		    encoder,
 		    false,

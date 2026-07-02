@@ -520,6 +520,49 @@ static void test_avc444_combined_encode_prepares_source_once(void)
 #endif
 }
 
+static void test_avc444_chroma_encode_prepares_source_once(void)
+{
+#ifdef RF_HAVE_RDP_AVC
+	const uint16_t width = 320;
+	const uint16_t height = 240;
+	uint8_t *rgba = calloc((size_t)width * height, 4);
+	uint8_t *chroma = NULL;
+	size_t chroma_length = 0;
+
+	assert(rgba != NULL);
+	for (uint16_t y = 0; y < height; ++y) {
+		for (uint16_t x = 0; x < width; ++x) {
+			const size_t offset = ((size_t)y * width + x) * 4;
+			rgba[offset] = (uint8_t)(0x40u + x);
+			rgba[offset + 1] = (uint8_t)(0x20u + y);
+			rgba[offset + 2] = (uint8_t)(x * 5u + y * 3u);
+			rgba[offset + 3] = 0xff;
+		}
+	}
+
+	RfRdpAvcEncoder *encoder = new_test_encoder(width, height, 30);
+	const uint64_t before = rf_rdp_avc_encoder_avc444_prepare_count(encoder);
+
+	assert(rf_rdp_avc_encoder_encode_avc444_chroma_rgba(
+		encoder,
+		rgba,
+		(size_t)width * height * 4,
+		(size_t)width * 4,
+		true,
+		&chroma,
+		&chroma_length
+	));
+	assert(chroma != NULL);
+	assert(chroma_length > 4);
+	assert(rf_rdp_avc_encoder_avc444_prepare_count(encoder) == before + 1);
+	assert(decode_h264_packet(chroma, chroma_length, width, height));
+
+	free(chroma);
+	free(rgba);
+	rf_rdp_avc_encoder_free(encoder);
+#endif
+}
+
 int main(void)
 {
 	test_avc_auto_candidates_prefer_hardware_before_software();
@@ -532,5 +575,6 @@ int main(void)
 	test_avc444_delta_ignores_changes_outside_damage();
 	test_avc444_encoder_outputs_luma_and_chroma_h264();
 	test_avc444_combined_encode_prepares_source_once();
+	test_avc444_chroma_encode_prepares_source_once();
 	return 0;
 }
