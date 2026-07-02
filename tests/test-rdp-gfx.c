@@ -864,6 +864,40 @@ static void test_write_wire_to_surface_planar_codec_id(void)
 	assert(memcmp(out + 25, planar, sizeof(planar)) == 0);
 }
 
+static void test_write_wire_to_surface_remotefx_codec_id(void)
+{
+	uint8_t out[128] = { 0 };
+	const uint8_t rfx[] = {
+		0xc0, 0xcc, 0x0c, 0x00, 0x00, 0x00,
+		0xca, 0xac, 0xcc, 0xca, 0x00, 0x01
+	};
+
+	const size_t length = rf_rdp_gfx_write_wire_to_surface_1(
+		out,
+		sizeof(out),
+		1,
+		RF_RDP_GFX_CODECID_CAVIDEO,
+		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888,
+		70,
+		65,
+		87,
+		84,
+		rfx,
+		sizeof(rfx)
+	);
+
+	assert(length == RF_RDP_GFX_HEADER_SIZE + 17 + sizeof(rfx));
+	assert_header(out, length, RF_RDP_GFX_CMDID_WIRETOSURFACE_1);
+	assert(read_u16_le(out + 10) == RF_RDP_GFX_CODECID_CAVIDEO);
+	assert(out[12] == RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888);
+	assert(read_u16_le(out + 13) == 70);
+	assert(read_u16_le(out + 15) == 65);
+	assert(read_u16_le(out + 17) == 87);
+	assert(read_u16_le(out + 19) == 84);
+	assert(read_u32_le(out + 21) == sizeof(rfx));
+	assert(memcmp(out + 25, rfx, sizeof(rfx)) == 0);
+}
+
 static void test_write_avc420_bitmap_stream(void)
 {
 	uint8_t out[64] = { 0 };
@@ -1366,6 +1400,7 @@ static void test_codec_payload_zgfx_policy_skips_video_codecs(void)
 	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AVC420));
 	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AVC444));
 	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AV1));
+	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_CAVIDEO));
 }
 
 static void test_codec_video_policy_matches_qoe_tunable_codecs(void)
@@ -1403,6 +1438,7 @@ int main(void)
 	test_write_start_and_end_frame();
 	test_write_wire_to_surface_uncompressed();
 	test_write_wire_to_surface_planar_codec_id();
+	test_write_wire_to_surface_remotefx_codec_id();
 	test_write_avc420_bitmap_stream();
 	test_write_wire_to_surface_avc420();
 	test_write_avc444_bitmap_stream_single_bitstream();
