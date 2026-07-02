@@ -27,6 +27,7 @@
 #define RDP_RDPGFX_SURFACE_ID 1u
 #define RDP_RDPGFX_PLANAR_RLE_MAX_PIXELS (64u * 1024u)
 #define RDP_RDPGFX_SUSPEND_FRAME_ACKNOWLEDGEMENT 0xffffffffu
+#define RDP_RDPGFX_AVC444_LC_STAT_COUNT 3u
 
 static unsigned int align16(unsigned int value)
 {
@@ -64,6 +65,7 @@ struct _RfRDPServer {
 	uint64_t stats_frames_skipped;
 	uint64_t stats_bytes_sent;
 	uint64_t stats_send_time_us;
+	uint64_t stats_avc444_lc[RDP_RDPGFX_AVC444_LC_STAT_COUNT];
 	unsigned int stats_min_target_fps;
 	unsigned int rdpgfx_video_quality_level;
 	int configured_video_quality;
@@ -1656,6 +1658,7 @@ static bool send_rdpgfx_avc444_update(
 	size_t rgba_available_length = 0;
 	size_t rgba_stride = 0;
 	uint8_t lc = RF_RDP_GFX_AVC444_LC_BOTH;
+	unsigned int lc_index = 0;
 	size_t luma_h264_length = 0;
 	size_t chroma_h264_length = 0;
 	size_t avc_length = 0;
@@ -1944,6 +1947,8 @@ static bool send_rdpgfx_avc444_update(
 
 	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
 		return false;
+	if (rf_rdp_core_rdpgfx_avc444_lc_index(lc, &lc_index))
+		client->server->stats_avc444_lc[lc_index]++;
 
 	if (!client->rdpgfx_update_logged) {
 		g_message(
@@ -2973,7 +2978,7 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, avg-send=%" G_GUINT64_FORMAT "ms.",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
@@ -2987,13 +2992,18 @@ static void maybe_log_stats(
 		full_clients,
 		this->stats_max_rdpgfx_inflight,
 		this->stats_max_rdpgfx_ack_queue_depth,
-		avg_send_time_us / 1000
+		avg_send_time_us / 1000,
+		this->stats_avc444_lc[0],
+		this->stats_avc444_lc[1],
+		this->stats_avc444_lc[2]
 	);
 	this->stats_last_log_time_us = now;
 	this->stats_frames_sent = 0;
 	this->stats_frames_skipped = 0;
 	this->stats_bytes_sent = 0;
 	this->stats_send_time_us = 0;
+	for (unsigned int i = 0; i < RDP_RDPGFX_AVC444_LC_STAT_COUNT; ++i)
+		this->stats_avc444_lc[i] = 0;
 	this->stats_min_target_fps = 0;
 	this->stats_max_rdpgfx_inflight = 0;
 	this->stats_max_rdpgfx_ack_queue_depth = 0;

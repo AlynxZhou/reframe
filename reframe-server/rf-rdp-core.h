@@ -234,6 +234,7 @@ bool rf_rdp_core_should_skip_avc444_delta_for_quality(
 	unsigned int damage_height,
 	unsigned int quality_level
 );
+bool rf_rdp_core_rdpgfx_avc444_lc_index(uint8_t lc, unsigned int *index);
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 	unsigned int width,
 	unsigned int height,

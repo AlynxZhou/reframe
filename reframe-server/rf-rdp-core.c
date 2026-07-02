@@ -1274,6 +1274,22 @@ bool rf_rdp_core_should_skip_avc444_delta_for_quality(
 	return damage_pixels >= threshold;
 }
 
+bool rf_rdp_core_rdpgfx_avc444_lc_index(uint8_t lc, unsigned int *index)
+{
+	if (index == NULL)
+		return false;
+
+	switch (lc) {
+	case 0:
+	case 1:
+	case 2:
+		*index = lc;
+		return true;
+	default:
+		return false;
+	}
+}
+
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 	unsigned int width,
 	unsigned int height,

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "rf-rdp-core.h"
+#include "rf-rdp-gfx.h"
 #include "rf-rdp-mcs.h"
 #include "rf-rdp-proto.h"
 
@@ -1338,6 +1339,34 @@ static void test_rdpgfx_avc444_only_used_without_avc420_fallback(void)
 	assert(!rf_rdp_core_should_use_avc444(false, false, 3));
 }
 
+static void test_rdpgfx_avc444_lc_stats_index(void)
+{
+	unsigned int index = 99;
+
+	assert(rf_rdp_core_rdpgfx_avc444_lc_index(
+		RF_RDP_GFX_AVC444_LC_BOTH,
+		&index
+	));
+	assert(index == 0);
+	assert(rf_rdp_core_rdpgfx_avc444_lc_index(
+		RF_RDP_GFX_AVC444_LC_SINGLE,
+		&index
+	));
+	assert(index == 1);
+	assert(rf_rdp_core_rdpgfx_avc444_lc_index(
+		RF_RDP_GFX_AVC444_LC_CHROMA,
+		&index
+	));
+	assert(index == 2);
+	index = 99;
+	assert(!rf_rdp_core_rdpgfx_avc444_lc_index(3, &index));
+	assert(index == 99);
+	assert(!rf_rdp_core_rdpgfx_avc444_lc_index(
+		RF_RDP_GFX_AVC444_LC_BOTH,
+		NULL
+	));
+}
+
 int main(void)
 {
 	test_parse_client_info_shape();
@@ -1367,5 +1396,6 @@ int main(void)
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
+	test_rdpgfx_avc444_lc_stats_index();
 	return 0;
 }
