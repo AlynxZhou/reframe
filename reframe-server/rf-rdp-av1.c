@@ -44,6 +44,7 @@ struct rf_rdp_av1_encoder {
 	int64_t bit_rate;
 	uint8_t qp;
 	unsigned int gop_size;
+	enum rf_rdp_av1_mode mode;
 	int64_t pts;
 };
 
@@ -159,6 +160,8 @@ static bool open_vaapi_device(AVBufferRef **device_ctx)
 
 static bool setup_vaapi_frames(RfRdpAv1Encoder *encoder)
 {
+	if (encoder->mode != RF_RDP_AV1_MODE_I420)
+		return false;
 	if (!open_vaapi_device(&encoder->hw_device_ctx))
 		return false;
 
@@ -197,7 +200,9 @@ static bool configure_encoder_context(RfRdpAv1Encoder *encoder, const char *name
 	encoder->codec->qmax =
 		(int)(encoder->qp > 55 ? 63 : (unsigned int)encoder->qp + 8u);
 	encoder->codec->flags |= AV_CODEC_FLAG_LOW_DELAY;
-	encoder->sw_pix_fmt = AV_PIX_FMT_NV12;
+	encoder->sw_pix_fmt = encoder->mode == RF_RDP_AV1_MODE_I444 ?
+		AV_PIX_FMT_YUV444P :
+		AV_PIX_FMT_NV12;
 
 	if (strcmp(name, "av1_vaapi") == 0) {
 		encoder->hardware_frames = true;
@@ -206,7 +211,8 @@ static bool configure_encoder_context(RfRdpAv1Encoder *encoder, const char *name
 			return false;
 	} else {
 		encoder->hardware_frames = false;
-		if (strcmp(name, "libaom-av1") == 0)
+		if (strcmp(name, "libaom-av1") == 0 &&
+		    encoder->mode == RF_RDP_AV1_MODE_I420)
 			encoder->sw_pix_fmt = AV_PIX_FMT_YUV420P;
 		encoder->codec->pix_fmt = encoder->sw_pix_fmt;
 	}
@@ -411,17 +417,19 @@ void rf_rdp_av1_encoder_free(RfRdpAv1Encoder *encoder)
 	free(encoder);
 }
 
-RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(
+RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	uint16_t width,
 	uint16_t height,
 	unsigned int fps,
 	int64_t bit_rate,
 	uint8_t qp,
 	unsigned int gop_size,
+	enum rf_rdp_av1_mode mode,
 	const char *preferred_encoder
 )
 {
-	if (width == 0 || height == 0 || fps == 0 || qp > 63)
+	if (width == 0 || height == 0 || fps == 0 || qp > 63 ||
+	    (mode != RF_RDP_AV1_MODE_I420 && mode != RF_RDP_AV1_MODE_I444))
 		return NULL;
 
 	RfRdpAv1Encoder *encoder = calloc(1, sizeof(*encoder));
@@ -438,6 +446,7 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(
 	encoder->gop_size = gop_size > 0 ? gop_size : fps;
 	if (encoder->gop_size > INT_MAX)
 		encoder->gop_size = INT_MAX;
+	encoder->mode = mode;
 
 #ifdef RF_HAVE_RDP_AVC
 	const bool prefer_auto = preferred_encoder == NULL ||
@@ -464,6 +473,28 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(
 	return NULL;
 }
 
+RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	const char *preferred_encoder
+)
+{
+	return rf_rdp_av1_encoder_new_with_rate_and_mode(
+		width,
+		height,
+		fps,
+		bit_rate,
+		qp,
+		gop_size,
+		RF_RDP_AV1_MODE_I420,
+		preferred_encoder
+	);
+}
+
 RfRdpAv1Encoder *rf_rdp_av1_encoder_new(
 	uint16_t width,
 	uint16_t height,
@@ -485,6 +516,11 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new(
 const char *rf_rdp_av1_encoder_name(const RfRdpAv1Encoder *encoder)
 {
 	return encoder != NULL ? encoder->name : NULL;
+}
+
+enum rf_rdp_av1_mode rf_rdp_av1_encoder_mode(const RfRdpAv1Encoder *encoder)
+{
+	return encoder != NULL ? encoder->mode : RF_RDP_AV1_MODE_I420;
 }
 
 int64_t rf_rdp_av1_encoder_bit_rate(const RfRdpAv1Encoder *encoder)

@@ -29,6 +29,8 @@
 #define RDP_RDPGFX_PLANAR_RLE_MAX_PIXELS (64u * 1024u)
 #define RDP_RDPGFX_SUSPEND_FRAME_ACKNOWLEDGEMENT 0xffffffffu
 #define RDP_RDPGFX_AVC444_LC_STAT_COUNT 3u
+#define RDP_RDPGFX_AV1_PROBE_WIDTH 320u
+#define RDP_RDPGFX_AV1_PROBE_HEIGHT 240u
 
 static unsigned int align16(unsigned int value)
 {
@@ -38,6 +40,17 @@ static unsigned int align16(unsigned int value)
 static const char *yes_no(bool value)
 {
 	return value ? "yes" : "no";
+}
+
+static const char *av1_mode_name(enum rf_rdp_av1_mode mode)
+{
+	switch (mode) {
+	case RF_RDP_AV1_MODE_I444:
+		return "i444";
+	case RF_RDP_AV1_MODE_I420:
+	default:
+		return "i420";
+	}
 }
 
 struct _RfRDPServer {
@@ -122,6 +135,7 @@ struct client {
 	int64_t avc_bit_rate;
 	unsigned int av1_gop_size;
 	unsigned int avc_gop_size;
+	enum rf_rdp_av1_mode av1_mode;
 	uint8_t av1_qp;
 	uint8_t avc_qp;
 	uint16_t av1_width;
@@ -190,6 +204,32 @@ static void log_rdpgfx_caps_advertise(const struct rf_rdp_gfx_caps *caps)
 		yes_no(caps->av1),
 		yes_no(caps->av1_i444)
 	);
+}
+
+static bool rdpgfx_av1_mode_supported(
+	RfRDPServer *this,
+	enum rf_rdp_av1_mode mode
+)
+{
+	RfRdpAv1Encoder *probe = NULL;
+	bool supported = false;
+
+	if (mode == RF_RDP_AV1_MODE_I420)
+		return true;
+
+	probe = rf_rdp_av1_encoder_new_with_rate_and_mode(
+		RDP_RDPGFX_AV1_PROBE_WIDTH,
+		RDP_RDPGFX_AV1_PROBE_HEIGHT,
+		30,
+		2000000,
+		28,
+		60,
+		mode,
+		this->avc_encoder
+	);
+	supported = probe != NULL && rf_rdp_av1_encoder_mode(probe) == mode;
+	rf_rdp_av1_encoder_free(probe);
+	return supported;
 }
 
 static void log_rdpgfx_codec_policy(
@@ -860,12 +900,18 @@ static bool send_rdpgfx_caps_confirm(
 	const enum rf_rdp_gfx_codec policy_codec =
 		rf_rdp_gfx_select_codec(caps, &codecs, prefer_avc444);
 	const bool use_av1 = policy_codec == RF_RDP_GFX_CODEC_AV1;
+	const enum rf_rdp_av1_mode av1_mode =
+		use_av1 && caps->av1_i444 &&
+			rdpgfx_av1_mode_supported(this, RF_RDP_AV1_MODE_I444) ?
+			RF_RDP_AV1_MODE_I444 :
+			RF_RDP_AV1_MODE_I420;
 	const uint32_t confirm_version = use_av1 ?
 		RF_RDP_GFX_CAPVERSION_FRDP_1 :
 		caps->selected_version;
 	const uint32_t confirm_flags = use_av1 ?
-		((caps->av1_flags & ~RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED) |
-		 RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED) :
+		(av1_mode == RF_RDP_AV1_MODE_I444 ?
+		 (caps->av1_flags & ~RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED) :
+		 (caps->av1_flags | RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED)) :
 		caps->selected_flags;
 	struct rf_rdp_gfx_caps confirmed_caps = *caps;
 	uint8_t gfx[64] = { 0 };
@@ -883,10 +929,20 @@ static bool send_rdpgfx_caps_confirm(
 	client->rdpgfx_caps_version = confirm_version;
 	client->rdpgfx_caps_flags = confirm_flags;
 	client->rdpgfx_av1_available = use_av1;
+	client->av1_mode = av1_mode;
 	client->rdpgfx_avc420_available = caps->avc420;
 	confirmed_caps.selected_version = confirm_version;
 	confirmed_caps.selected_flags = confirm_flags;
+	confirmed_caps.av1_i444 =
+		use_av1 && av1_mode == RF_RDP_AV1_MODE_I444;
 	log_rdpgfx_codec_policy(&confirmed_caps, &codecs, policy_codec);
+	if (use_av1)
+		g_message(
+			"RDP: RDPGFX AV1 negotiated mode=%s client-i444=%s flags=0x%08x.",
+			av1_mode_name(client->av1_mode),
+			yes_no(caps->av1_i444),
+			confirm_flags
+		);
 	return true;
 }
 
@@ -1805,18 +1861,20 @@ static bool send_rdpgfx_av1_update(
 	}
 
 	if (client->av1 == NULL ||
+	    rf_rdp_av1_encoder_mode(client->av1) != client->av1_mode ||
 	    client->av1_width != coded_width ||
 	    client->av1_height != coded_height ||
 	    client->av1_bit_rate != bit_rate ||
 	    client->av1_gop_size != gop_size || client->av1_qp != qp) {
 		client_reset_avc(client);
-		client->av1 = rf_rdp_av1_encoder_new_with_rate(
+		client->av1 = rf_rdp_av1_encoder_new_with_rate_and_mode(
 			(uint16_t)coded_width,
 			(uint16_t)coded_height,
 			MAX(client->server->adaptive_fps, 1),
 			bit_rate,
 			qp,
 			gop_size,
+			client->av1_mode,
 			client->server->avc_encoder
 		);
 		client->av1_width = client->av1 != NULL ? coded_width : 0;
@@ -1943,8 +2001,9 @@ static bool send_rdpgfx_av1_update(
 
 	if (!client->rdpgfx_update_logged) {
 		g_message(
-			"RDP: RDPGFX AV1 updates active using %s, rect %u,%u %ux%u, coded %ux%u, bitrate=%" G_GINT64_FORMAT ", qp=%u, gop=%u.",
+			"RDP: RDPGFX AV1 updates active using %s, mode=%s, rect %u,%u %ux%u, coded %ux%u, bitrate=%" G_GINT64_FORMAT ", qp=%u, gop=%u.",
 			rf_rdp_av1_encoder_name(client->av1),
+			av1_mode_name(rf_rdp_av1_encoder_mode(client->av1)),
 			x,
 			y,
 			width,

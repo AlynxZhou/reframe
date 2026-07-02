@@ -9,10 +9,11 @@
 #ifdef RF_HAVE_RDP_AVC
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
 #endif
 
 #ifdef RF_HAVE_RDP_AVC
-static bool decode_av1_packet(
+static enum AVPixelFormat decode_av1_packet(
 	const uint8_t *av1,
 	size_t av1_length,
 	uint16_t width,
@@ -23,7 +24,7 @@ static bool decode_av1_packet(
 	AVCodecContext *context = NULL;
 	AVPacket *packet = NULL;
 	AVFrame *frame = NULL;
-	bool decoded = false;
+	enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
 
 	assert(codec != NULL);
 	context = avcodec_alloc_context3(codec);
@@ -39,14 +40,27 @@ static bool decode_av1_packet(
 	assert(avcodec_send_packet(context, packet) == 0);
 
 	const int rc = avcodec_receive_frame(context, frame);
-	decoded = rc == 0 &&
-		  frame->width >= width &&
-		  frame->height >= height;
+	if (rc == 0 && frame->width >= width && frame->height >= height)
+		pix_fmt = frame->format;
 
 	av_frame_free(&frame);
 	av_packet_free(&packet);
 	avcodec_free_context(&context);
-	return decoded;
+	return pix_fmt;
+}
+
+static bool is_av1_i420_format(enum AVPixelFormat pix_fmt)
+{
+	return pix_fmt == AV_PIX_FMT_YUV420P ||
+	       pix_fmt == AV_PIX_FMT_NV12 ||
+	       pix_fmt == AV_PIX_FMT_CUDA;
+}
+
+static bool is_av1_i444_format(enum AVPixelFormat pix_fmt)
+{
+	return pix_fmt == AV_PIX_FMT_YUV444P ||
+	       pix_fmt == AV_PIX_FMT_GBRP ||
+	       pix_fmt == AV_PIX_FMT_CUDA;
 }
 #endif
 
@@ -103,8 +117,8 @@ static RfRdpAv1Encoder *new_test_encoder(
 
 static void test_av1_encoder_outputs_av1(void)
 {
-	const uint16_t width = 128;
-	const uint16_t height = 96;
+	const uint16_t width = 320;
+	const uint16_t height = 240;
 	uint8_t *rgba = calloc((size_t)width * height, 4);
 	uint8_t *av1 = NULL;
 	size_t av1_length = 0;
@@ -134,7 +148,68 @@ static void test_av1_encoder_outputs_av1(void)
 	assert(av1 != NULL);
 	assert(av1_length > 4);
 #ifdef RF_HAVE_RDP_AVC
-	assert(decode_av1_packet(av1, av1_length, width, height));
+	assert(is_av1_i420_format(
+		decode_av1_packet(av1, av1_length, width, height)
+	));
+#endif
+
+	free(av1);
+	free(rgba);
+	rf_rdp_av1_encoder_free(encoder);
+}
+
+static void test_av1_encoder_outputs_i444_when_requested(void)
+{
+	const uint16_t width = 320;
+	const uint16_t height = 240;
+	uint8_t *rgba = calloc((size_t)width * height, 4);
+	uint8_t *av1 = NULL;
+	size_t av1_length = 0;
+	const char *forced_encoder = getenv("RF_RDP_AV1_TEST_ENCODER");
+	const char *preferred_encoder =
+		forced_encoder != NULL && forced_encoder[0] != '\0' ?
+			forced_encoder :
+			"av1_nvenc";
+
+	assert(rgba != NULL);
+	for (uint16_t y = 0; y < height; ++y) {
+		for (uint16_t x = 0; x < width; ++x) {
+			const size_t offset = ((size_t)y * width + x) * 4;
+			rgba[offset] = (uint8_t)(x * 2u);
+			rgba[offset + 1] = (uint8_t)(y * 5u);
+			rgba[offset + 2] = (uint8_t)(0xffu - x - y);
+			rgba[offset + 3] = 0xff;
+		}
+	}
+
+	RfRdpAv1Encoder *encoder = rf_rdp_av1_encoder_new_with_rate_and_mode(
+		width,
+		height,
+		30,
+		2000000,
+		28,
+		60,
+		RF_RDP_AV1_MODE_I444,
+		preferred_encoder
+	);
+	assert(encoder != NULL);
+	assert(rf_rdp_av1_encoder_mode(encoder) == RF_RDP_AV1_MODE_I444);
+
+	assert(rf_rdp_av1_encoder_encode_rgba(
+		encoder,
+		rgba,
+		(size_t)width * height * 4,
+		(size_t)width * 4,
+		true,
+		&av1,
+		&av1_length
+	));
+	assert(av1 != NULL);
+	assert(av1_length > 4);
+#ifdef RF_HAVE_RDP_AVC
+	assert(is_av1_i444_format(
+		decode_av1_packet(av1, av1_length, width, height)
+	));
 #endif
 
 	free(av1);
@@ -147,5 +222,6 @@ int main(void)
 	test_av1_auto_candidates_prefer_hardware_before_software();
 	test_av1_encoder_name_hardware_detection();
 	test_av1_encoder_outputs_av1();
+	test_av1_encoder_outputs_i444_when_requested();
 	return 0;
 }

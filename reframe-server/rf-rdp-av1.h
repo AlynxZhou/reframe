@@ -7,6 +7,11 @@
 
 typedef struct rf_rdp_av1_encoder RfRdpAv1Encoder;
 
+enum rf_rdp_av1_mode {
+	RF_RDP_AV1_MODE_I420,
+	RF_RDP_AV1_MODE_I444
+};
+
 RfRdpAv1Encoder *rf_rdp_av1_encoder_new(
 	uint16_t width,
 	uint16_t height,
@@ -22,8 +27,19 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(
 	unsigned int gop_size,
 	const char *preferred_encoder
 );
+RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	enum rf_rdp_av1_mode mode,
+	const char *preferred_encoder
+);
 void rf_rdp_av1_encoder_free(RfRdpAv1Encoder *encoder);
 const char *rf_rdp_av1_encoder_name(const RfRdpAv1Encoder *encoder);
+enum rf_rdp_av1_mode rf_rdp_av1_encoder_mode(const RfRdpAv1Encoder *encoder);
 bool rf_rdp_av1_encoder_is_hardware(const RfRdpAv1Encoder *encoder);
 bool rf_rdp_av1_encoder_name_is_hardware(const char *name);
 const char *const *rf_rdp_av1_encoder_auto_candidates(void);
