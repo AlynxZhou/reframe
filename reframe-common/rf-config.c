@@ -655,3 +655,23 @@ unsigned int rf_config_get_rdp_video_quality_max(RfConfig *this)
 	}
 	return (unsigned int)quality;
 }
+
+unsigned int rf_config_get_rdp_target_bandwidth_mbps(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 20);
+
+	g_autoptr(GError) error = NULL;
+	const int bandwidth = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_RDP, "target-bandwidth-mbps", &error
+	);
+	if (error != NULL)
+		return 20;
+	if (bandwidth <= 0) {
+		g_warning(
+			"RDP: Invalid target-bandwidth-mbps %d, using 20.",
+			bandwidth
+		);
+		return 20;
+	}
+	return (unsigned int)bandwidth;
+}

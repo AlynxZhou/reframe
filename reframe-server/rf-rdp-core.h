@@ -211,6 +211,9 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	uint64_t target_bytes_per_second,
 	unsigned int target_fps,
 	uint64_t avg_send_time_us,
+	uint64_t frames_sent,
+	uint64_t frames_skipped,
+	uint32_t max_inflight_frames,
 	bool video_clients
 );
 bool rf_rdp_core_should_use_avc444(

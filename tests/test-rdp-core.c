@@ -1143,6 +1143,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		26000,
+		60,
+		0,
+		0,
 		true
 	) == 1);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1153,6 +1156,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		20000,
+		60,
+		0,
+		0,
 		true
 	) == 1);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1163,6 +1169,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		42000,
+		60,
+		0,
+		0,
 		true
 	) == 1);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1173,6 +1182,9 @@ static void test_rdpgfx_video_quality_policy(void)
 			three_mb_per_second,
 				30,
 				42000,
+				60,
+				0,
+				0,
 				true
 			) == 3);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1183,6 +1195,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		12000,
+		60,
+		0,
+		0,
 		true
 	) == 3);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1193,6 +1208,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		7000,
+		60,
+		0,
+		0,
 		true
 	) == 0);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1203,6 +1221,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		14000,
+		60,
+		0,
+		0,
 		true
 	) == 1);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1213,6 +1234,9 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		30,
 		14000,
+		60,
+		0,
+		0,
 		true
 	) == 0);
 	assert(rf_rdp_core_update_video_quality_level(
@@ -1223,8 +1247,50 @@ static void test_rdpgfx_video_quality_policy(void)
 		three_mb_per_second,
 		60,
 		26000,
+		60,
+		0,
+		0,
 		false
 	) == 0);
+	assert(rf_rdp_core_update_video_quality_level(
+		0,
+		3,
+		2 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		8,
+		4,
+		true
+	) == 1);
+	assert(rf_rdp_core_update_video_quality_level(
+		1,
+		3,
+		2 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		10,
+		true
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level(
+		1,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		8,
+		10,
+		true
+	) == 2);
 }
 
 static void test_rdpgfx_avc444_only_used_without_avc420_fallback(void)

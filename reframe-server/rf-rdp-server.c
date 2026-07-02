@@ -18,7 +18,7 @@
 #define RDP_BITMAP_PACKET_CAPACITY (15u + RDP_MAX_MCS_PAYLOAD)
 #define RDP_STATS_INTERVAL_US (5 * G_USEC_PER_SEC)
 #define RDP_BITMAP_TARGET_BYTES_PER_SECOND (6ull * 1024ull * 1024ull)
-#define RDP_RDPGFX_TARGET_BYTES_PER_SECOND (3ull * 1024ull * 1024ull)
+#define RDP_RDPGFX_DEFAULT_TARGET_BANDWIDTH_MBPS 20u
 #define RDP_BITMAP_MIN_FPS 3u
 #define RDP_RDPGFX_MAX_VIDEO_QUALITY_LEVEL 3u
 #define RDP_RDPGFX_AVC_MIN_CODED_WIDTH 160u
@@ -124,6 +124,8 @@ struct _RfRDPServer {
 	unsigned int rdpgfx_video_quality_level;
 	int configured_video_quality;
 	unsigned int max_video_quality_level;
+	unsigned int rdpgfx_target_bandwidth_mbps;
+	uint64_t rdpgfx_target_bytes_per_second;
 	uint32_t stats_max_rdpgfx_inflight;
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
 	bool nla;
@@ -2994,9 +2996,12 @@ static void maybe_log_stats(
 				this->max_video_quality_level,
 				this->stats_bytes_sent,
 				interval_us,
-				RDP_RDPGFX_TARGET_BYTES_PER_SECOND,
+				this->rdpgfx_target_bytes_per_second,
 				video_quality_target_fps,
 				avg_send_time_us,
+				this->stats_frames_sent,
+				this->stats_frames_skipped,
+				this->stats_max_rdpgfx_inflight,
 				video_clients > 0
 			);
 	} else {
@@ -3019,11 +3024,12 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, avg-send=%" G_GUINT64_FORMAT "ms.",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, avg-send=%" G_GUINT64_FORMAT "ms.",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
 		this->rdpgfx_video_quality_level,
+		this->rdpgfx_target_bandwidth_mbps,
 		this->stats_frames_sent,
 		this->stats_frames_skipped,
 		this->stats_bytes_sent,
@@ -3314,6 +3320,10 @@ static void rf_rdp_server_init(RfRDPServer *this)
 	this->clipboard = true;
 	this->configured_video_quality = RF_CONFIG_RDP_VIDEO_QUALITY_AUTO;
 	this->max_video_quality_level = RDP_RDPGFX_MAX_VIDEO_QUALITY_LEVEL;
+	this->rdpgfx_target_bandwidth_mbps =
+		RDP_RDPGFX_DEFAULT_TARGET_BANDWIDTH_MBPS;
+	this->rdpgfx_target_bytes_per_second =
+		(uint64_t)this->rdpgfx_target_bandwidth_mbps * 1000000ull / 8ull;
 }
 
 G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
@@ -3339,6 +3349,10 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 	this->configured_video_quality = rf_config_get_rdp_video_quality(config);
 	this->max_video_quality_level =
 		rf_config_get_rdp_video_quality_max(config);
+	this->rdpgfx_target_bandwidth_mbps =
+		rf_config_get_rdp_target_bandwidth_mbps(config);
+	this->rdpgfx_target_bytes_per_second =
+		(uint64_t)this->rdpgfx_target_bandwidth_mbps * 1000000ull / 8ull;
 	if (this->configured_video_quality != RF_CONFIG_RDP_VIDEO_QUALITY_AUTO)
 		this->rdpgfx_video_quality_level =
 			(unsigned int)this->configured_video_quality;
@@ -3352,19 +3366,21 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 		g_warning("RDP: Native NLA is not implemented yet.");
 	if (this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO)
 		g_message(
-			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is auto (max %u).",
+			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is auto (max %u, target %u Mbps).",
 			this->graphics,
 			this->max_fps,
 			this->avc_encoder,
-			this->max_video_quality_level
+			this->max_video_quality_level,
+			this->rdpgfx_target_bandwidth_mbps
 		);
 	else
 		g_message(
-			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is fixed %u.",
+			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is fixed %u, target is %u Mbps.",
 			this->graphics,
 			this->max_fps,
 			this->avc_encoder,
-			this->rdpgfx_video_quality_level
+			this->rdpgfx_video_quality_level,
+			this->rdpgfx_target_bandwidth_mbps
 		);
 	return RF_REMOTE_SERVER(this);
 }

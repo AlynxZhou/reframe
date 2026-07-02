@@ -91,6 +91,35 @@ static void test_rdp_video_quality_invalid_uses_defaults(void)
 	unlink(path);
 }
 
+static void test_rdp_target_bandwidth_default(void)
+{
+	g_autoptr(RfConfig) config = rf_config_new("/nonexistent/reframe.conf");
+
+	assert(rf_config_get_rdp_target_bandwidth_mbps(config) == 20);
+}
+
+static void test_rdp_target_bandwidth_custom(void)
+{
+	g_autofree char *path = write_temp_config(
+		"[rdp]\ntarget-bandwidth-mbps=12\n"
+	);
+	g_autoptr(RfConfig) config = rf_config_new(path);
+
+	assert(rf_config_get_rdp_target_bandwidth_mbps(config) == 12);
+	unlink(path);
+}
+
+static void test_rdp_target_bandwidth_invalid_uses_default(void)
+{
+	g_autofree char *path = write_temp_config(
+		"[rdp]\ntarget-bandwidth-mbps=0\n"
+	);
+	g_autoptr(RfConfig) config = rf_config_new(path);
+
+	assert(rf_config_get_rdp_target_bandwidth_mbps(config) == 20);
+	unlink(path);
+}
+
 int main(void)
 {
 	test_rdp_max_fps_default();
@@ -101,5 +130,8 @@ int main(void)
 	test_rdp_video_quality_default_auto();
 	test_rdp_video_quality_custom();
 	test_rdp_video_quality_invalid_uses_defaults();
+	test_rdp_target_bandwidth_default();
+	test_rdp_target_bandwidth_custom();
+	test_rdp_target_bandwidth_invalid_uses_default();
 	return 0;
 }

@@ -1169,6 +1169,9 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	uint64_t target_bytes_per_second,
 	unsigned int target_fps,
 	uint64_t avg_send_time_us,
+	uint64_t frames_sent,
+	uint64_t frames_skipped,
+	uint32_t max_inflight_frames,
 	bool video_clients
 )
 {
@@ -1189,8 +1192,15 @@ unsigned int rf_rdp_core_update_video_quality_level(
 		frame_budget_us / 2 > 0 ? frame_budget_us / 2 : 1;
 	const bool send_pressure =
 		avg_send_time_us > 0 && avg_send_time_us > frame_budget_us;
+	const bool skipped_pressure =
+		frames_skipped > 0 &&
+		(frames_sent == 0 || frames_skipped > frames_sent / 10);
+	const bool inflight_pressure = max_inflight_frames >= 10;
+	const bool queue_pressure =
+		inflight_pressure || (frames_skipped > 0 && max_inflight_frames >= 8);
 
-	if ((bandwidth_pressure || send_pressure) && current_level < max_level) {
+	if ((bandwidth_pressure || send_pressure || skipped_pressure ||
+	     queue_pressure) && current_level < max_level) {
 		if (bandwidth_pressure &&
 		    bytes_per_second > target_bytes_per_second * 2 &&
 		    current_level + 1 < max_level)
@@ -1199,6 +1209,8 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	}
 
 	if (current_level > 0 &&
+	    !skipped_pressure &&
+	    !queue_pressure &&
 	    bytes_per_second * 10 < target_bytes_per_second * 2 &&
 	    avg_send_time_us < recovery_threshold_us)
 		return current_level - 1;

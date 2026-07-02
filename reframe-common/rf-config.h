@@ -55,6 +55,7 @@ char *rf_config_get_rdp_avc_encoder(RfConfig *this);
 #define RF_CONFIG_RDP_VIDEO_QUALITY_AUTO (-1)
 int rf_config_get_rdp_video_quality(RfConfig *this);
 unsigned int rf_config_get_rdp_video_quality_max(RfConfig *this);
+unsigned int rf_config_get_rdp_target_bandwidth_mbps(RfConfig *this);
 
 G_END_DECLS
 
