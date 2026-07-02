@@ -417,7 +417,7 @@ void rf_rdp_av1_encoder_free(RfRdpAv1Encoder *encoder)
 	free(encoder);
 }
 
-RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
+static RfRdpAv1Encoder *av1_encoder_new_with_rate_and_mode_internal(
 	uint16_t width,
 	uint16_t height,
 	unsigned int fps,
@@ -425,7 +425,8 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	uint8_t qp,
 	unsigned int gop_size,
 	enum rf_rdp_av1_mode mode,
-	const char *preferred_encoder
+	const char *preferred_encoder,
+	bool hardware_only
 )
 {
 	if (width == 0 || height == 0 || fps == 0 || qp > 63 ||
@@ -452,6 +453,9 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	const bool prefer_auto = preferred_encoder == NULL ||
 		preferred_encoder[0] == '\0' ||
 		strcmp(preferred_encoder, "auto") == 0;
+	if (hardware_only && !prefer_auto &&
+	    !rf_rdp_av1_encoder_name_is_hardware(preferred_encoder))
+		goto fail;
 	if (!prefer_auto &&
 	    open_encoder(encoder, preferred_encoder))
 		return encoder;
@@ -459,6 +463,9 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	for (const char *const *candidate = av1_auto_candidates;
 	     *candidate != NULL;
 	     ++candidate) {
+		if (hardware_only &&
+		    !rf_rdp_av1_encoder_name_is_hardware(*candidate))
+			continue;
 		if (!prefer_auto &&
 		    strcmp(preferred_encoder, *candidate) == 0)
 			continue;
@@ -467,10 +474,60 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	}
 #else
 	(void)preferred_encoder;
+	(void)hardware_only;
 #endif
 
+fail:
 	rf_rdp_av1_encoder_free(encoder);
 	return NULL;
+}
+
+RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	enum rf_rdp_av1_mode mode,
+	const char *preferred_encoder
+)
+{
+	return av1_encoder_new_with_rate_and_mode_internal(
+		width,
+		height,
+		fps,
+		bit_rate,
+		qp,
+		gop_size,
+		mode,
+		preferred_encoder,
+		false
+	);
+}
+
+RfRdpAv1Encoder *rf_rdp_av1_hardware_encoder_new_with_rate_and_mode(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	enum rf_rdp_av1_mode mode,
+	const char *preferred_encoder
+)
+{
+	return av1_encoder_new_with_rate_and_mode_internal(
+		width,
+		height,
+		fps,
+		bit_rate,
+		qp,
+		gop_size,
+		mode,
+		preferred_encoder,
+		true
+	);
 }
 
 RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate(

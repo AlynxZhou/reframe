@@ -129,6 +129,21 @@ static void test_avc_encoder_name_hardware_detection(void)
 	assert(!rf_rdp_avc_encoder_name_is_hardware(NULL));
 }
 
+static void test_avc_hardware_encoder_rejects_software_encoder(void)
+{
+	RfRdpAvcEncoder *encoder = rf_rdp_avc_hardware_encoder_new_with_rate(
+		320,
+		240,
+		30,
+		2000000,
+		28,
+		60,
+		"libx264"
+	);
+
+	assert(encoder == NULL);
+}
+
 static RfRdpAvcEncoder *new_test_encoder(
 	uint16_t width,
 	uint16_t height,
@@ -567,6 +582,7 @@ int main(void)
 {
 	test_avc_auto_candidates_prefer_hardware_before_software();
 	test_avc_encoder_name_hardware_detection();
+	test_avc_hardware_encoder_rejects_software_encoder();
 	test_avc_encoder_outputs_h264();
 	test_avc_encoder_pads_short_rgba_source();
 	test_avc_encoder_accepts_rate_control_settings();

@@ -37,6 +37,16 @@ RfRdpAv1Encoder *rf_rdp_av1_encoder_new_with_rate_and_mode(
 	enum rf_rdp_av1_mode mode,
 	const char *preferred_encoder
 );
+RfRdpAv1Encoder *rf_rdp_av1_hardware_encoder_new_with_rate_and_mode(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	enum rf_rdp_av1_mode mode,
+	const char *preferred_encoder
+);
 void rf_rdp_av1_encoder_free(RfRdpAv1Encoder *encoder);
 const char *rf_rdp_av1_encoder_name(const RfRdpAv1Encoder *encoder);
 enum rf_rdp_av1_mode rf_rdp_av1_encoder_mode(const RfRdpAv1Encoder *encoder);

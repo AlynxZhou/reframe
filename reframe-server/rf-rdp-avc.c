@@ -565,14 +565,15 @@ void rf_rdp_avc_encoder_free(RfRdpAvcEncoder *encoder)
 	free(encoder);
 }
 
-RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
+static RfRdpAvcEncoder *avc_encoder_new_with_rate_internal(
 	uint16_t width,
 	uint16_t height,
 	unsigned int fps,
 	int64_t bit_rate,
 	uint8_t qp,
 	unsigned int gop_size,
-	const char *preferred_encoder
+	const char *preferred_encoder,
+	bool hardware_only
 )
 {
 	if (width == 0 || height == 0 || fps == 0 || qp > 63)
@@ -597,6 +598,9 @@ RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
 	const bool prefer_auto = preferred_encoder == NULL ||
 		preferred_encoder[0] == '\0' ||
 		strcmp(preferred_encoder, "auto") == 0;
+	if (hardware_only && !prefer_auto &&
+	    !rf_rdp_avc_encoder_name_is_hardware(preferred_encoder))
+		goto fail;
 	if (!prefer_auto &&
 	    open_encoder(encoder, preferred_encoder))
 		return encoder;
@@ -604,6 +608,9 @@ RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
 	for (const char *const *candidate = avc_auto_candidates;
 	     *candidate != NULL;
 	     ++candidate) {
+		if (hardware_only &&
+		    !rf_rdp_avc_encoder_name_is_hardware(*candidate))
+			continue;
 		if (!prefer_auto &&
 		    strcmp(preferred_encoder, *candidate) == 0)
 			continue;
@@ -612,10 +619,56 @@ RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
 	}
 #else
 	(void)preferred_encoder;
+	(void)hardware_only;
 #endif
 
+fail:
 	rf_rdp_avc_encoder_free(encoder);
 	return NULL;
+}
+
+RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	const char *preferred_encoder
+)
+{
+	return avc_encoder_new_with_rate_internal(
+		width,
+		height,
+		fps,
+		bit_rate,
+		qp,
+		gop_size,
+		preferred_encoder,
+		false
+	);
+}
+
+RfRdpAvcEncoder *rf_rdp_avc_hardware_encoder_new_with_rate(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	const char *preferred_encoder
+)
+{
+	return avc_encoder_new_with_rate_internal(
+		width,
+		height,
+		fps,
+		bit_rate,
+		qp,
+		gop_size,
+		preferred_encoder,
+		true
+	);
 }
 
 RfRdpAvcEncoder *rf_rdp_avc_encoder_new(

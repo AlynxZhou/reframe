@@ -22,6 +22,15 @@ RfRdpAvcEncoder *rf_rdp_avc_encoder_new_with_rate(
 	unsigned int gop_size,
 	const char *preferred_encoder
 );
+RfRdpAvcEncoder *rf_rdp_avc_hardware_encoder_new_with_rate(
+	uint16_t width,
+	uint16_t height,
+	unsigned int fps,
+	int64_t bit_rate,
+	uint8_t qp,
+	unsigned int gop_size,
+	const char *preferred_encoder
+);
 void rf_rdp_avc_encoder_free(RfRdpAvcEncoder *encoder);
 const char *rf_rdp_avc_encoder_name(const RfRdpAvcEncoder *encoder);
 bool rf_rdp_avc_encoder_is_hardware(const RfRdpAvcEncoder *encoder);

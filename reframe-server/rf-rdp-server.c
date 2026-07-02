@@ -29,8 +29,8 @@
 #define RDP_RDPGFX_PLANAR_RLE_MAX_PIXELS (64u * 1024u)
 #define RDP_RDPGFX_SUSPEND_FRAME_ACKNOWLEDGEMENT 0xffffffffu
 #define RDP_RDPGFX_AVC444_LC_STAT_COUNT 3u
-#define RDP_RDPGFX_AV1_PROBE_WIDTH 320u
-#define RDP_RDPGFX_AV1_PROBE_HEIGHT 240u
+#define RDP_RDPGFX_CODEC_PROBE_WIDTH 320u
+#define RDP_RDPGFX_CODEC_PROBE_HEIGHT 240u
 
 static unsigned int align16(unsigned int value)
 {
@@ -175,13 +175,32 @@ struct client {
 	bool rdpgfx_avc444_software_fallback_logged;
 };
 
-static struct rf_rdp_gfx_server_codecs rdpgfx_server_codecs(void)
+static bool rdpgfx_avc444_supported(RfRDPServer *this)
+{
+	RfRdpAvcEncoder *probe = NULL;
+	bool supported = false;
+
+	probe = rf_rdp_avc_hardware_encoder_new_with_rate(
+		RDP_RDPGFX_CODEC_PROBE_WIDTH,
+		RDP_RDPGFX_CODEC_PROBE_HEIGHT,
+		30,
+		2000000,
+		28,
+		60,
+		this->avc_encoder
+	);
+	supported = probe != NULL && rf_rdp_avc_encoder_is_hardware(probe);
+	rf_rdp_avc_encoder_free(probe);
+	return supported;
+}
+
+static struct rf_rdp_gfx_server_codecs rdpgfx_server_codecs(RfRDPServer *this)
 {
 	return (struct rf_rdp_gfx_server_codecs){
 	#ifdef RF_HAVE_RDP_AVC
 		.av1 = true,
 		.avc420 = true,
-		.avc444 = true,
+		.avc444 = rdpgfx_avc444_supported(this),
 	#endif
 		.planar = true
 	};
@@ -217,9 +236,9 @@ static bool rdpgfx_av1_mode_supported(
 	if (mode == RF_RDP_AV1_MODE_I420)
 		return true;
 
-	probe = rf_rdp_av1_encoder_new_with_rate_and_mode(
-		RDP_RDPGFX_AV1_PROBE_WIDTH,
-		RDP_RDPGFX_AV1_PROBE_HEIGHT,
+	probe = rf_rdp_av1_hardware_encoder_new_with_rate_and_mode(
+		RDP_RDPGFX_CODEC_PROBE_WIDTH,
+		RDP_RDPGFX_CODEC_PROBE_HEIGHT,
 		30,
 		2000000,
 		28,
@@ -891,7 +910,7 @@ static bool send_rdpgfx_caps_confirm(
 )
 {
 	RfRDPServer *this = client->server;
-	const struct rf_rdp_gfx_server_codecs codecs = rdpgfx_server_codecs();
+	const struct rf_rdp_gfx_server_codecs codecs = rdpgfx_server_codecs(this);
 	const bool prefer_avc444 = rf_rdp_core_should_use_avc444(
 		caps->avc444,
 		caps->avc420,
@@ -2125,7 +2144,7 @@ static bool send_rdpgfx_avc444_update(
 	    client->avc_bit_rate != bit_rate ||
 	    client->avc_gop_size != gop_size || client->avc_qp != qp) {
 		client_reset_avc(client);
-		client->avc = rf_rdp_avc_encoder_new_with_rate(
+		client->avc = rf_rdp_avc_hardware_encoder_new_with_rate(
 			(uint16_t)coded_width,
 			(uint16_t)coded_height,
 			MAX(client->server->adaptive_fps, 1),
@@ -2135,6 +2154,12 @@ static bool send_rdpgfx_avc444_update(
 			client->server->avc_encoder
 		);
 		if (client->avc == NULL) {
+			if (!client->rdpgfx_avc444_software_fallback_logged) {
+				g_message(
+					"RDP: AVC444 hardware encoder unavailable; falling back to AVC420."
+				);
+				client->rdpgfx_avc444_software_fallback_logged = true;
+			}
 			client_reset_avc(client);
 			return false;
 		}

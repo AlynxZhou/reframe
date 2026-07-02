@@ -91,6 +91,23 @@ static void test_av1_encoder_name_hardware_detection(void)
 	assert(!rf_rdp_av1_encoder_name_is_hardware(NULL));
 }
 
+static void test_av1_hardware_encoder_rejects_software_i444(void)
+{
+	RfRdpAv1Encoder *encoder =
+		rf_rdp_av1_hardware_encoder_new_with_rate_and_mode(
+			320,
+			240,
+			30,
+			2000000,
+			28,
+			60,
+			RF_RDP_AV1_MODE_I444,
+			"libaom-av1"
+		);
+
+	assert(encoder == NULL);
+}
+
 static RfRdpAv1Encoder *new_test_encoder(
 	uint16_t width,
 	uint16_t height,
@@ -221,6 +238,7 @@ int main(void)
 {
 	test_av1_auto_candidates_prefer_hardware_before_software();
 	test_av1_encoder_name_hardware_detection();
+	test_av1_hardware_encoder_rejects_software_i444();
 	test_av1_encoder_outputs_av1();
 	test_av1_encoder_outputs_i444_when_requested();
 	return 0;
