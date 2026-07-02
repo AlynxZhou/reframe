@@ -33,62 +33,6 @@ static unsigned int align16(unsigned int value)
 	return (value + 15u) & ~15u;
 }
 
-static int64_t rdpgfx_avc_bit_rate(
-	unsigned int width,
-	unsigned int height,
-	unsigned int fps,
-	unsigned int quality_level
-)
-{
-	static const unsigned int scale_percent[] = { 100, 75, 55, 40 };
-	const unsigned int level = MIN(
-		quality_level,
-		(unsigned int)G_N_ELEMENTS(scale_percent) - 1
-	);
-	int64_t bits = 0;
-
-	if (width == 0 || height == 0 || fps == 0)
-		return 2000000;
-	bits = (int64_t)width * height * fps / 10;
-	bits = bits * scale_percent[level] / 100;
-	if (bits < 1200000)
-		return 1200000;
-	if (bits > 16000000)
-		return 16000000;
-	return bits;
-}
-
-static uint8_t rdpgfx_avc_qp(unsigned int quality_level)
-{
-	static const uint8_t qp[] = { 26, 30, 34, 38 };
-	const unsigned int level =
-		MIN(quality_level, (unsigned int)G_N_ELEMENTS(qp) - 1);
-
-	return qp[level];
-}
-
-static uint8_t rdpgfx_avc_quality(unsigned int quality_level)
-{
-	static const uint8_t quality[] = { 100, 85, 70, 55 };
-	const unsigned int level =
-		MIN(quality_level, (unsigned int)G_N_ELEMENTS(quality) - 1);
-
-	return quality[level];
-}
-
-static unsigned int rdpgfx_avc_gop_size(
-	unsigned int fps,
-	unsigned int quality_level
-)
-{
-	const unsigned int multiplier = MIN(quality_level + 1, 4u);
-	uint64_t gop = (uint64_t)MAX(fps, 1u) * multiplier;
-
-	if (gop > 240)
-		gop = 240;
-	return (unsigned int)gop;
-}
-
 struct _RfRDPServer {
 	RfRemoteServer parent_instance;
 	RfConfig *config;
@@ -1754,17 +1698,19 @@ static bool send_rdpgfx_avc444_update(
 	rgba_available_length = buf->len;
 	rgba = buf->data;
 
-	bit_rate = rdpgfx_avc_bit_rate(
+	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
 		coded_width,
 		coded_height,
 		MAX(client->server->adaptive_fps, 1),
-		quality_level
+		quality_level,
+		true
 	);
-	qp = rdpgfx_avc_qp(quality_level);
-	quality = rdpgfx_avc_quality(quality_level);
-	gop_size = rdpgfx_avc_gop_size(
+	qp = rf_rdp_core_rdpgfx_avc_qp(quality_level, true);
+	quality = rf_rdp_core_rdpgfx_avc_quality(quality_level, true);
+	gop_size = rf_rdp_core_rdpgfx_avc_gop_size(
 		MAX(client->server->adaptive_fps, 1),
-		quality_level
+		quality_level,
+		true
 	);
 
 	if (!client->rdpgfx_surface_ready ||
@@ -1822,11 +1768,12 @@ static bool send_rdpgfx_avc444_update(
 		client->server->last_frame == NULL ||
 		client->server->last_frame_width != frame_width ||
 		client->server->last_frame_height != frame_height;
-	skip_avc444_delta = rf_rdp_core_should_skip_avc444_delta(
+	skip_avc444_delta = rf_rdp_core_should_skip_avc444_delta_for_quality(
 		frame_width,
 		frame_height,
 		damage_width,
-		damage_height
+		damage_height,
+		quality_level
 	);
 	if (full_avc444 || skip_avc444_delta) {
 		encode_luma = true;
@@ -2072,17 +2019,19 @@ static bool send_rdpgfx_avc420_update(
 	rgba_available_length = buf->len;
 	rgba = buf->data;
 
-	bit_rate = rdpgfx_avc_bit_rate(
+	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
 		coded_width,
 		coded_height,
 		MAX(client->server->adaptive_fps, 1),
-		quality_level
+		quality_level,
+		false
 	);
-	qp = rdpgfx_avc_qp(quality_level);
-	quality = rdpgfx_avc_quality(quality_level);
-	gop_size = rdpgfx_avc_gop_size(
+	qp = rf_rdp_core_rdpgfx_avc_qp(quality_level, false);
+	quality = rf_rdp_core_rdpgfx_avc_quality(quality_level, false);
+	gop_size = rf_rdp_core_rdpgfx_avc_gop_size(
 		MAX(client->server->adaptive_fps, 1),
-		quality_level
+		quality_level,
+		false
 	);
 
 	if (!client->rdpgfx_surface_ready ||

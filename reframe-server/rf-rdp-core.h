@@ -227,6 +227,33 @@ bool rf_rdp_core_should_skip_avc444_delta(
 	unsigned int damage_width,
 	unsigned int damage_height
 );
+bool rf_rdp_core_should_skip_avc444_delta_for_quality(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int damage_width,
+	unsigned int damage_height,
+	unsigned int quality_level
+);
+int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
+	unsigned int width,
+	unsigned int height,
+	unsigned int fps,
+	unsigned int quality_level,
+	bool avc444
+);
+uint8_t rf_rdp_core_rdpgfx_avc_qp(
+	unsigned int quality_level,
+	bool avc444
+);
+uint8_t rf_rdp_core_rdpgfx_avc_quality(
+	unsigned int quality_level,
+	bool avc444
+);
+unsigned int rf_rdp_core_rdpgfx_avc_gop_size(
+	unsigned int fps,
+	unsigned int quality_level,
+	bool avc444
+);
 unsigned int rf_rdp_core_rdpgfx_ack_limited_fps(
 	unsigned int base_fps,
 	uint32_t ack_queue_depth,

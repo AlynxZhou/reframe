@@ -16,6 +16,7 @@ struct rf_rect {
 #define LICENSE_ERROR_ALERT 0xff
 #define LICENSE_PREAMBLE_VERSION_3_0 0x03
 #define LICENSE_STATUS_VALID_CLIENT 0x00000007u
+#define ARRAY_LEN(array) (sizeof(array) / sizeof((array)[0]))
 #define LICENSE_ST_NO_TRANSITION 0x00000002u
 #define LICENSE_BB_ERROR_BLOB 0x0004u
 
@@ -1238,8 +1239,27 @@ bool rf_rdp_core_should_skip_avc444_delta(
 	unsigned int damage_height
 )
 {
+	return rf_rdp_core_should_skip_avc444_delta_for_quality(
+		frame_width,
+		frame_height,
+		damage_width,
+		damage_height,
+		0
+	);
+}
+
+bool rf_rdp_core_should_skip_avc444_delta_for_quality(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int damage_width,
+	unsigned int damage_height,
+	unsigned int quality_level
+)
+{
 	if (frame_width == 0 || frame_height == 0 ||
 	    damage_width == 0 || damage_height == 0)
+		return false;
+	if (quality_level >= 2)
 		return false;
 
 	const uint64_t frame_pixels = (uint64_t)frame_width * frame_height;
@@ -1252,6 +1272,94 @@ bool rf_rdp_core_should_skip_avc444_delta(
 	if (threshold > max_delta_pixels)
 		threshold = max_delta_pixels;
 	return damage_pixels >= threshold;
+}
+
+int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
+	unsigned int width,
+	unsigned int height,
+	unsigned int fps,
+	unsigned int quality_level,
+	bool avc444
+)
+{
+	static const unsigned int avc420_scale_percent[] = { 100, 75, 55, 40 };
+	static const unsigned int avc444_scale_percent[] = { 100, 70, 45, 25 };
+	const unsigned int *scale_percent =
+		avc444 ? avc444_scale_percent : avc420_scale_percent;
+	const size_t scale_count = avc444 ?
+		ARRAY_LEN(avc444_scale_percent) :
+		ARRAY_LEN(avc420_scale_percent);
+	const unsigned int level = quality_level < scale_count ?
+		quality_level :
+		(unsigned int)scale_count - 1;
+	int64_t bits = 0;
+
+	if (width == 0 || height == 0 || fps == 0)
+		return 2000000;
+	bits = (int64_t)width * height * fps / 10;
+	bits = bits * scale_percent[level] / 100;
+	if (bits < 1200000)
+		return 1200000;
+	if (bits > 16000000)
+		return 16000000;
+	return bits;
+}
+
+uint8_t rf_rdp_core_rdpgfx_avc_qp(unsigned int quality_level, bool avc444)
+{
+	static const uint8_t avc420_qp[] = { 26, 30, 34, 38 };
+	static const uint8_t avc444_qp[] = { 26, 31, 36, 42 };
+	const uint8_t *qp = avc444 ? avc444_qp : avc420_qp;
+	const size_t qp_count =
+		avc444 ? ARRAY_LEN(avc444_qp) : ARRAY_LEN(avc420_qp);
+	const unsigned int level = quality_level < qp_count ?
+		quality_level :
+		(unsigned int)qp_count - 1;
+
+	return qp[level];
+}
+
+uint8_t rf_rdp_core_rdpgfx_avc_quality(
+	unsigned int quality_level,
+	bool avc444
+)
+{
+	static const uint8_t avc420_quality[] = { 100, 85, 70, 55 };
+
+	if (avc444) {
+		const uint8_t qp =
+			rf_rdp_core_rdpgfx_avc_qp(quality_level, true);
+		return qp < 100 ? (uint8_t)(100 - qp) : 0;
+	}
+
+	const unsigned int level = quality_level < ARRAY_LEN(avc420_quality) ?
+		quality_level :
+		(unsigned int)ARRAY_LEN(avc420_quality) - 1;
+	return avc420_quality[level];
+}
+
+unsigned int rf_rdp_core_rdpgfx_avc_gop_size(
+	unsigned int fps,
+	unsigned int quality_level,
+	bool avc444
+)
+{
+	static const unsigned int avc420_multiplier[] = { 1, 2, 3, 4 };
+	static const unsigned int avc444_multiplier[] = { 1, 2, 4, 5 };
+	const unsigned int *multiplier =
+		avc444 ? avc444_multiplier : avc420_multiplier;
+	const size_t multiplier_count = avc444 ?
+		ARRAY_LEN(avc444_multiplier) :
+		ARRAY_LEN(avc420_multiplier);
+	const unsigned int level = quality_level < multiplier_count ?
+		quality_level :
+		(unsigned int)multiplier_count - 1;
+	uint64_t gop = (uint64_t)(fps > 0 ? fps : 1u) * multiplier[level];
+	const uint64_t max_gop = avc444 ? 300 : 240;
+
+	if (gop > max_gop)
+		gop = max_gop;
+	return (unsigned int)gop;
 }
 
 unsigned int rf_rdp_core_rdpgfx_ack_limited_fps(
