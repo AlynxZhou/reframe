@@ -65,6 +65,7 @@ struct rf_rdp_gfx_caps {
 	uint16_t count;
 	uint32_t selected_version;
 	uint32_t selected_flags;
+	uint32_t av1_flags;
 	bool avc420;
 	bool avc444;
 	bool avc444_v2;

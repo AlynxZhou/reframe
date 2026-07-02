@@ -480,6 +480,7 @@ static void test_parse_caps_advertise_detects_freerdp_av1_extension(void)
 	assert(caps.count == 2);
 	assert(caps.selected_version == RF_RDP_GFX_CAPVERSION_107);
 	assert(caps.av1);
+	assert(caps.av1_flags == RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED);
 	assert(caps.av1_i444);
 	assert(caps.avc420);
 	assert(caps.avc444);
@@ -530,6 +531,35 @@ static void test_select_codec_matrix_prefers_avc420_by_default(void)
 		&server,
 		true
 	) == RF_RDP_GFX_CODEC_AVC444_V2);
+}
+
+static void test_select_codec_matrix_prefers_av1_when_available(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.av1 = true,
+		.avc420 = true,
+		.avc444 = true,
+		.avc444_v2 = true,
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.av1 = true,
+		.avc420 = true,
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_AV1);
+	assert(strcmp(rf_rdp_gfx_codec_name(RF_RDP_GFX_CODEC_AV1), "AV1") == 0);
 }
 
 static void test_select_codec_matrix_falls_back_through_graphics_codecs(void)
@@ -1214,6 +1244,7 @@ int main(void)
 	test_parse_caps_advertise_detects_freerdp_av1_extension();
 	test_parse_caps_advertise_rejects_av1_without_standard_caps();
 	test_select_codec_matrix_prefers_avc420_by_default();
+	test_select_codec_matrix_prefers_av1_when_available();
 	test_select_codec_matrix_falls_back_through_graphics_codecs();
 	test_parse_frame_acknowledge();
 	test_parse_qoe_frame_acknowledge();

@@ -2,6 +2,7 @@
 
 #include <gio/gio.h>
 
+#include "rf-rdp-av1.h"
 #include "rf-rdp-avc.h"
 #include "rf-rdp-core.h"
 #include "rf-rdp-dvc.h"
@@ -114,11 +115,17 @@ struct client {
 	struct rf_rdp_core_capabilities caps;
 	enum rf_rdp_graphics_mode graphics_mode;
 	RfRdpNscContext *nsc;
+	RfRdpAv1Encoder *av1;
 	RfRdpAvcEncoder *avc;
 	RfRdpAvcEncoder *avc_chroma;
+	int64_t av1_bit_rate;
 	int64_t avc_bit_rate;
+	unsigned int av1_gop_size;
 	unsigned int avc_gop_size;
+	uint8_t av1_qp;
 	uint8_t avc_qp;
+	uint16_t av1_width;
+	uint16_t av1_height;
 	uint16_t avc_width;
 	uint16_t avc_height;
 	uint16_t avc444_signature_x;
@@ -139,6 +146,7 @@ struct client {
 	bool rdpgfx_caps_confirmed;
 	bool rdpgfx_surface_ready;
 	bool rdpgfx_disabled;
+	bool rdpgfx_av1_available;
 	bool rdpgfx_avc420_available;
 	bool rdpgfx_update_logged;
 	bool rdpgfx_wait_logged;
@@ -148,6 +156,7 @@ struct client {
 	bool rdpgfx_frame_ack_logged;
 	bool rdpgfx_qoe_ack_logged;
 	bool rdpgfx_avc_client_disabled_logged;
+	bool rdpgfx_av1_unavailable_logged;
 	bool rdpgfx_avc_unavailable_logged;
 	bool rdpgfx_avc444_software_fallback_logged;
 };
@@ -155,10 +164,11 @@ struct client {
 static struct rf_rdp_gfx_server_codecs rdpgfx_server_codecs(void)
 {
 	return (struct rf_rdp_gfx_server_codecs){
-#ifdef RF_HAVE_RDP_AVC
+	#ifdef RF_HAVE_RDP_AVC
+		.av1 = true,
 		.avc420 = true,
 		.avc444 = true,
-#endif
+	#endif
 		.planar = true
 	};
 }
@@ -231,8 +241,15 @@ static void client_reset_avc(struct client *client)
 
 	rf_rdp_avc_encoder_free(client->avc);
 	rf_rdp_avc_encoder_free(client->avc_chroma);
+	rf_rdp_av1_encoder_free(client->av1);
 	client->avc = NULL;
 	client->avc_chroma = NULL;
+	client->av1 = NULL;
+	client->av1_width = 0;
+	client->av1_height = 0;
+	client->av1_bit_rate = 0;
+	client->av1_gop_size = 0;
+	client->av1_qp = 0;
 	client->avc_width = 0;
 	client->avc_height = 0;
 	client->avc_bit_rate = 0;
@@ -842,22 +859,34 @@ static bool send_rdpgfx_caps_confirm(
 	);
 	const enum rf_rdp_gfx_codec policy_codec =
 		rf_rdp_gfx_select_codec(caps, &codecs, prefer_avc444);
+	const bool use_av1 = policy_codec == RF_RDP_GFX_CODEC_AV1;
+	const uint32_t confirm_version = use_av1 ?
+		RF_RDP_GFX_CAPVERSION_FRDP_1 :
+		caps->selected_version;
+	const uint32_t confirm_flags = use_av1 ?
+		((caps->av1_flags & ~RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED) |
+		 RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED) :
+		caps->selected_flags;
+	struct rf_rdp_gfx_caps confirmed_caps = *caps;
 	uint8_t gfx[64] = { 0 };
 	const size_t length = rf_rdp_gfx_write_caps_confirm(
 		gfx,
 		sizeof(gfx),
-		caps->selected_version,
-		caps->selected_flags
+		confirm_version,
+		confirm_flags
 	);
 
 	if (length == 0 || !send_rdpgfx_gfx_payload(client, gfx, length, NULL))
 		return false;
 
 	client->rdpgfx_caps_confirmed = true;
-	client->rdpgfx_caps_version = caps->selected_version;
-	client->rdpgfx_caps_flags = caps->selected_flags;
+	client->rdpgfx_caps_version = confirm_version;
+	client->rdpgfx_caps_flags = confirm_flags;
+	client->rdpgfx_av1_available = use_av1;
 	client->rdpgfx_avc420_available = caps->avc420;
-	log_rdpgfx_codec_policy(caps, &codecs, policy_codec);
+	confirmed_caps.selected_version = confirm_version;
+	confirmed_caps.selected_flags = confirm_flags;
+	log_rdpgfx_codec_policy(&confirmed_caps, &codecs, policy_codec);
 	return true;
 }
 
@@ -956,13 +985,22 @@ static bool client_can_use_rdpgfx(const struct client *client)
 static bool client_can_use_rdpgfx_avc420(const struct client *client)
 {
 	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
 	       client->rdpgfx_avc420_available &&
 	       (client->rdpgfx_caps_flags & RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED) == 0;
+}
+
+static bool client_can_use_rdpgfx_av1(const struct client *client)
+{
+	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_av1_available &&
+	       client->rdpgfx_caps_version == RF_RDP_GFX_CAPVERSION_FRDP_1;
 }
 
 static bool client_can_use_rdpgfx_avc444(const struct client *client)
 {
 	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
 	       client->rdpgfx_caps_version >= RF_RDP_GFX_CAPVERSION_10 &&
 	       (client->rdpgfx_caps_flags & RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED) == 0;
 }
@@ -1683,6 +1721,245 @@ static bool send_rdpgfx_surface_setup(
 	return true;
 }
 
+static bool send_rdpgfx_av1_update(
+	struct client *client,
+	const GByteArray *buf,
+	unsigned int frame_width,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height,
+	size_t *bytes_sent
+)
+{
+	const unsigned int frame_height = client->server->height;
+	const unsigned int quality_level =
+		client->server->rdpgfx_video_quality_level;
+	unsigned int coded_width = 0;
+	unsigned int coded_height = 0;
+	int64_t bit_rate = 0;
+	unsigned int gop_size = 0;
+	uint8_t qp = 0;
+	uint8_t quality = 0;
+	g_autofree uint8_t *av1_data = NULL;
+	g_autofree uint8_t *bitmap_stream = NULL;
+	g_autofree uint8_t *gfx = NULL;
+	const uint8_t *rgba = NULL;
+	size_t rgba_available_length = 0;
+	size_t rgba_stride = 0;
+	size_t av1_data_length = 0;
+	size_t bitmap_stream_length = 0;
+	size_t wire_length = 0;
+	size_t raw_capacity = 0;
+	size_t offset = 0;
+	size_t length = 0;
+	uint32_t frame_id = 0;
+	bool force_keyframe = false;
+
+	if (!client_can_use_rdpgfx_av1(client) || frame_width == 0 ||
+	    frame_height == 0 || width == 0 || height == 0 ||
+	    frame_width > UINT16_MAX || frame_height > UINT16_MAX)
+		return false;
+	if (buf == NULL || buf->data == NULL ||
+	    buf->len < (size_t)frame_width * frame_height * 4)
+		return false;
+	if (!rf_rdp_core_make_full_surface_rect(
+		    frame_width, frame_height, &x, &y, &width, &height
+	    ))
+		return false;
+	coded_width = align16(width);
+	coded_height = align16(height);
+	if (coded_width > UINT16_MAX || coded_height > UINT16_MAX)
+		return false;
+	rgba_stride = (size_t)frame_width * 4;
+	rgba_available_length = buf->len;
+	rgba = buf->data;
+
+	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
+		coded_width,
+		coded_height,
+		MAX(client->server->adaptive_fps, 1),
+		quality_level,
+		false
+	);
+	qp = rf_rdp_core_rdpgfx_avc_qp(quality_level, false);
+	quality = rf_rdp_core_rdpgfx_avc_quality(quality_level, false);
+	gop_size = rf_rdp_core_rdpgfx_avc_gop_size(
+		MAX(client->server->adaptive_fps, 1),
+		quality_level,
+		false
+	);
+
+	if (!client->rdpgfx_surface_ready ||
+	    client->rdpgfx_surface_width != frame_width ||
+	    client->rdpgfx_surface_height != frame_height) {
+		if (!send_rdpgfx_surface_setup(
+			    client,
+			    (uint16_t)frame_width,
+			    (uint16_t)frame_height,
+			    bytes_sent
+		    ))
+			return false;
+		client_reset_avc(client);
+		force_keyframe = true;
+	}
+
+	if (client->av1 == NULL ||
+	    client->av1_width != coded_width ||
+	    client->av1_height != coded_height ||
+	    client->av1_bit_rate != bit_rate ||
+	    client->av1_gop_size != gop_size || client->av1_qp != qp) {
+		client_reset_avc(client);
+		client->av1 = rf_rdp_av1_encoder_new_with_rate(
+			(uint16_t)coded_width,
+			(uint16_t)coded_height,
+			MAX(client->server->adaptive_fps, 1),
+			bit_rate,
+			qp,
+			gop_size,
+			client->server->avc_encoder
+		);
+		client->av1_width = client->av1 != NULL ? coded_width : 0;
+		client->av1_height = client->av1 != NULL ? coded_height : 0;
+		client->av1_bit_rate = client->av1 != NULL ? bit_rate : 0;
+		client->av1_gop_size = client->av1 != NULL ? gop_size : 0;
+		client->av1_qp = client->av1 != NULL ? qp : 0;
+		force_keyframe = true;
+	}
+	if (client->av1 == NULL) {
+		if (!client->rdpgfx_av1_unavailable_logged) {
+			g_message("RDP: AV1 encoder unavailable; disabling RDPGFX AV1.");
+			client->rdpgfx_av1_unavailable_logged = true;
+		}
+		return false;
+	}
+
+	if (!rf_rdp_av1_encoder_encode_rgba(
+		    client->av1,
+		    rgba,
+		    rgba_available_length,
+		    rgba_stride,
+		    force_keyframe || client->needs_full_frame,
+		    &av1_data,
+		    &av1_data_length
+	    )) {
+		client_reset_avc(client);
+		return false;
+	}
+	if (!client->rdpgfx_update_logged) {
+		const char *dump_path = g_getenv("RF_RDP_AV1_DUMP");
+		if (dump_path != NULL && dump_path[0] != '\0') {
+			GError *error = NULL;
+			if (g_file_set_contents(
+				    dump_path,
+				    (const char *)av1_data,
+				    av1_data_length,
+				    &error
+			    )) {
+				g_message(
+					"RDP: Dumped first live AV1 frame to %s (%zu bytes).",
+					dump_path,
+					av1_data_length
+				);
+			} else {
+				g_warning(
+					"RDP: Failed to dump first live AV1 frame: %s",
+					error != NULL ? error->message : "unknown error"
+				);
+				g_clear_error(&error);
+			}
+		}
+	}
+
+	if (av1_data_length > UINT32_MAX - 14)
+		return false;
+	bitmap_stream = g_malloc(14 + av1_data_length);
+	bitmap_stream_length = rf_rdp_gfx_write_avc420_bitmap_stream(
+		bitmap_stream,
+		14 + av1_data_length,
+		x,
+		y,
+		(uint16_t)(x + width),
+		(uint16_t)(y + height),
+		qp,
+		quality,
+		av1_data,
+		av1_data_length
+	);
+	if (bitmap_stream_length == 0)
+		return false;
+
+	wire_length = RF_RDP_GFX_HEADER_SIZE + 17 + bitmap_stream_length;
+	if (wire_length > SIZE_MAX - (RF_RDP_GFX_HEADER_SIZE + 8) -
+	    (RF_RDP_GFX_HEADER_SIZE + 4))
+		return false;
+	raw_capacity =
+		(RF_RDP_GFX_HEADER_SIZE + 8) + wire_length +
+		(RF_RDP_GFX_HEADER_SIZE + 4);
+	gfx = g_malloc(raw_capacity);
+
+	frame_id = ++client->rdpgfx_frame_id;
+	if (frame_id == 0)
+		frame_id = ++client->rdpgfx_frame_id;
+
+	length = rf_rdp_gfx_write_start_frame(
+		gfx + offset,
+		raw_capacity - offset,
+		frame_id,
+		(uint32_t)(g_get_monotonic_time() / 1000)
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	length = rf_rdp_gfx_write_wire_to_surface_1(
+		gfx + offset,
+		raw_capacity - offset,
+		RDP_RDPGFX_SURFACE_ID,
+		RF_RDP_GFX_CODECID_AV1,
+		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888,
+		x,
+		y,
+		(uint16_t)(x + width),
+		(uint16_t)(y + height),
+		bitmap_stream,
+		bitmap_stream_length
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	length = rf_rdp_gfx_write_end_frame(
+		gfx + offset,
+		raw_capacity - offset,
+		frame_id
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent))
+		return false;
+
+	if (!client->rdpgfx_update_logged) {
+		g_message(
+			"RDP: RDPGFX AV1 updates active using %s, rect %u,%u %ux%u, coded %ux%u, bitrate=%" G_GINT64_FORMAT ", qp=%u, gop=%u.",
+			rf_rdp_av1_encoder_name(client->av1),
+			x,
+			y,
+			width,
+			height,
+			coded_width,
+			coded_height,
+			bit_rate,
+			qp,
+			gop_size
+		);
+		client->rdpgfx_update_logged = true;
+	}
+	return true;
+}
+
 static bool send_rdpgfx_avc444_update(
 	struct client *client,
 	const GByteArray *buf,
@@ -2297,6 +2574,26 @@ static bool send_rdpgfx_update(
 	    uncompressed_length / 4 / height != width)
 		return false;
 
+	if (send_rdpgfx_av1_update(
+		    client,
+		    buf,
+		    frame_width,
+		    x,
+		    y,
+		    width,
+		    height,
+		    bytes_sent
+	    ))
+		return true;
+	if (client_can_use_rdpgfx_av1(client)) {
+		if (!client->rdpgfx_av1_unavailable_logged) {
+			g_message(
+				"RDP: RDPGFX AV1 update failed; disabling RDPGFX for this client."
+			);
+			client->rdpgfx_av1_unavailable_logged = true;
+		}
+		return false;
+	}
 	if (send_rdpgfx_avc444_update(
 		    client,
 		    buf,

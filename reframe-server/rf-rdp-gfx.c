@@ -492,6 +492,7 @@ bool rf_rdp_gfx_parse_caps_advertise(
 			caps->avc420 = true;
 		if (version == RF_RDP_GFX_CAPVERSION_FRDP_1) {
 			caps->av1 = true;
+			caps->av1_flags = flags;
 			caps->av1_i444 =
 				(flags & RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED) != 0 &&
 				(flags & RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED) == 0;

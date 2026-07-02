@@ -96,7 +96,8 @@ if get_option('rdp')
     'rf-rdp-dvc.c',
     'rf-rdp-gfx.c',
     'rf-rdp-planar.c',
-    'rf-rdp-avc.c'
+    'rf-rdp-avc.c',
+    'rf-rdp-av1.c'
 	  )
 
 	  rdp_headers = files(
@@ -109,7 +110,8 @@ if get_option('rdp')
     'rf-rdp-dvc.h',
     'rf-rdp-gfx.h',
     'rf-rdp-planar.h',
-    'rf-rdp-avc.h'
+    'rf-rdp-avc.h',
+    'rf-rdp-av1.h'
 	  )
 
   rdp_dependencies = []
@@ -214,6 +216,19 @@ if get_option('rdp')
       install: false
     )
     test('rdp-avc', test_rdp_avc)
+
+    test_rdp_av1 = executable(
+      'test-rdp-av1',
+      sources: files(
+        '../tests/test-rdp-av1.c',
+        'rf-rdp-av1.c'
+      ),
+      dependencies: rdp_avc_dependencies,
+      include_directories: rdp_test_include_directories,
+      c_args: rdp_avc_c_args,
+      install: false
+    )
+    test('rdp-av1', test_rdp_av1)
   endif
 
 	  test_rdp_nsc = executable(
