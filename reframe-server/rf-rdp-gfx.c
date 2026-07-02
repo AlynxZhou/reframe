@@ -542,6 +542,17 @@ enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec(
 	return RF_RDP_GFX_CODEC_UNCOMPRESSED;
 }
 
+enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec_policy(
+	const struct rf_rdp_gfx_caps *caps,
+	const struct rf_rdp_gfx_server_codecs *server,
+	bool under_pressure
+)
+{
+	(void)under_pressure;
+
+	return rf_rdp_gfx_select_codec(caps, server, false);
+}
+
 const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec)
 {
 	switch (codec) {

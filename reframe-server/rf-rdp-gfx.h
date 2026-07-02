@@ -121,6 +121,11 @@ enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec(
 	const struct rf_rdp_gfx_server_codecs *server,
 	bool prefer_avc444
 );
+enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec_policy(
+	const struct rf_rdp_gfx_caps *caps,
+	const struct rf_rdp_gfx_server_codecs *server,
+	bool under_pressure
+);
 const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec);
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,

@@ -911,13 +911,12 @@ static bool send_rdpgfx_caps_confirm(
 {
 	RfRDPServer *this = client->server;
 	const struct rf_rdp_gfx_server_codecs codecs = rdpgfx_server_codecs(this);
-	const bool prefer_avc444 = rf_rdp_core_should_use_avc444(
-		caps->avc444,
-		caps->avc420,
-		this->rdpgfx_video_quality_level
-	);
 	const enum rf_rdp_gfx_codec policy_codec =
-		rf_rdp_gfx_select_codec(caps, &codecs, prefer_avc444);
+		rf_rdp_gfx_select_codec_policy(
+			caps,
+			&codecs,
+			this->rdpgfx_video_quality_level > 0
+		);
 	const bool use_av1 = policy_codec == RF_RDP_GFX_CODEC_AV1;
 	const enum rf_rdp_av1_mode av1_mode =
 		use_av1 && caps->av1_i444 &&

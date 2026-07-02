@@ -562,6 +562,84 @@ static void test_select_codec_matrix_prefers_av1_when_available(void)
 	assert(strcmp(rf_rdp_gfx_codec_name(RF_RDP_GFX_CODEC_AV1), "AV1") == 0);
 }
 
+static void test_select_codec_policy_keeps_420_above_444(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.avc420 = true,
+		.avc444 = true,
+		.avc444_v2 = true,
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.avc420 = true,
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec_policy(
+		&caps,
+		&server,
+		true
+	) == RF_RDP_GFX_CODEC_AVC420);
+}
+
+static void test_select_codec_policy_uses_avc444_without_420(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.avc444 = true,
+		.avc444_v2 = true,
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec_policy(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_AVC444_V2);
+}
+
+static void test_select_codec_policy_keeps_av1_first_under_pressure(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.av1 = true,
+		.avc420 = true,
+		.avc444 = true,
+		.avc444_v2 = true,
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.av1 = true,
+		.avc420 = true,
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec_policy(
+		&caps,
+		&server,
+		true
+	) == RF_RDP_GFX_CODEC_AV1);
+}
+
 static void test_select_codec_matrix_falls_back_through_graphics_codecs(void)
 {
 	struct rf_rdp_gfx_caps caps = {
@@ -1245,6 +1323,9 @@ int main(void)
 	test_parse_caps_advertise_rejects_av1_without_standard_caps();
 	test_select_codec_matrix_prefers_avc420_by_default();
 	test_select_codec_matrix_prefers_av1_when_available();
+	test_select_codec_policy_keeps_420_above_444();
+	test_select_codec_policy_uses_avc444_without_420();
+	test_select_codec_policy_keeps_av1_first_under_pressure();
 	test_select_codec_matrix_falls_back_through_graphics_codecs();
 	test_parse_frame_acknowledge();
 	test_parse_qoe_frame_acknowledge();
