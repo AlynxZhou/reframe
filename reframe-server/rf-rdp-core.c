@@ -1212,7 +1212,7 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	if (current_level > 0 &&
 	    !skipped_pressure &&
 	    !queue_pressure &&
-	    bytes_per_second * 10 < target_bytes_per_second * 2 &&
+	    bytes_per_second * 10 < target_bytes_per_second * 5 &&
 	    avg_send_time_us < recovery_threshold_us)
 		return current_level - 1;
 
@@ -1386,25 +1386,30 @@ unsigned int rf_rdp_core_rdpgfx_ack_limited_fps(
 )
 {
 	unsigned int fps = base_fps;
+	unsigned int moderate_fps = 0;
+	unsigned int severe_fps = 0;
 
 	if (base_fps == 0)
 		return 0;
 
-	if (ack_queue_depth_valid && ack_queue_depth >= 8) {
-		fps = base_fps / 2;
+	moderate_fps = base_fps * 3 / 4;
+	if (moderate_fps == 0)
+		moderate_fps = 1;
+	severe_fps = base_fps / 2;
+	if (severe_fps == 0)
+		severe_fps = 1;
 
-		if (fps == 0)
-			fps = 1;
+	if (ack_queue_depth_valid) {
+		if (ack_queue_depth >= 16)
+			fps = severe_fps;
+		else if (ack_queue_depth >= 8 && moderate_fps < fps)
+			fps = moderate_fps;
 	}
 
-	if (inflight_frames >= 18) {
-		unsigned int inflight_fps = base_fps / 2;
-
-		if (inflight_fps == 0)
-			inflight_fps = 1;
-		if (inflight_fps < fps)
-			fps = inflight_fps;
-	}
+	if (inflight_frames >= 32 && severe_fps < fps)
+		fps = severe_fps;
+	else if (inflight_frames >= 24 && moderate_fps < fps)
+		fps = moderate_fps;
 
 	return fps;
 }

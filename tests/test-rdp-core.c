@@ -1116,12 +1116,15 @@ static void test_rdpgfx_ack_fps_policy_prefers_queue_depth(void)
 {
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 4) == 60);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 12) == 60);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 18) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 18) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 24) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 32) == 30);
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 3, true, 0) == 60);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 0) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 18) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, false, 18) == 30);
-	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 18) == 0);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 0) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 16, true, 0) == 30);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 8, true, 18) == 45);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, false, 18) == 60);
+	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 32) == 0);
 }
 
 static void test_avc444_delta_policy_skips_large_damage(void)
@@ -1275,6 +1278,19 @@ static void test_rdpgfx_video_quality_policy(void)
 		0,
 		true
 	) == 0);
+	assert(rf_rdp_core_update_video_quality_level(
+		3,
+		3,
+		6 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		true
+	) == 2);
 	assert(rf_rdp_core_update_video_quality_level(
 		2,
 		3,
