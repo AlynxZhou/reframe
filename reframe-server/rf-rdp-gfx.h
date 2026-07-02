@@ -20,6 +20,7 @@
 
 #define RF_RDP_GFX_CAPVERSION_8 0x00080004u
 #define RF_RDP_GFX_CAPVERSION_81 0x00080105u
+#define RF_RDP_GFX_CAPVERSION_FRDP_1 0x00010000u
 #define RF_RDP_GFX_CAPVERSION_10 0x000a0002u
 #define RF_RDP_GFX_CAPVERSION_101 0x000a0100u
 #define RF_RDP_GFX_CAPVERSION_102 0x000a0200u
@@ -34,11 +35,14 @@
 #define RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED 0x00000020u
 #define RF_RDP_GFX_CAPS_FLAG_AVC_THINCLIENT 0x00000040u
 #define RF_RDP_GFX_CAPS_FLAG_SCALEDMAP_DISABLE 0x00000080u
+#define RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED 0x10000000u
+#define RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED 0x20000000u
 
 #define RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888 0x20u
 #define RF_RDP_GFX_PIXEL_FORMAT_ARGB_8888 0x21u
 
 #define RF_RDP_GFX_CODECID_UNCOMPRESSED 0x0000u
+#define RF_RDP_GFX_CODECID_AV1 0x0001u
 #define RF_RDP_GFX_CODECID_CAVIDEO 0x0003u
 #define RF_RDP_GFX_CODECID_CAPROGRESSIVE 0x0009u
 #define RF_RDP_GFX_CODECID_PLANAR 0x000au
@@ -62,6 +66,35 @@ struct rf_rdp_gfx_caps {
 	uint32_t selected_version;
 	uint32_t selected_flags;
 	bool avc420;
+	bool avc444;
+	bool avc444_v2;
+	bool progressive;
+	bool progressive_v2;
+	bool remotefx;
+	bool planar;
+	bool av1;
+	bool av1_i444;
+};
+
+struct rf_rdp_gfx_server_codecs {
+	bool avc420;
+	bool avc444;
+	bool progressive;
+	bool remotefx;
+	bool planar;
+	bool av1;
+};
+
+enum rf_rdp_gfx_codec {
+	RF_RDP_GFX_CODEC_UNCOMPRESSED,
+	RF_RDP_GFX_CODEC_PLANAR,
+	RF_RDP_GFX_CODEC_REMOTEFX,
+	RF_RDP_GFX_CODEC_PROGRESSIVE,
+	RF_RDP_GFX_CODEC_PROGRESSIVE_V2,
+	RF_RDP_GFX_CODEC_AVC420,
+	RF_RDP_GFX_CODEC_AVC444,
+	RF_RDP_GFX_CODEC_AVC444_V2,
+	RF_RDP_GFX_CODEC_AV1
 };
 
 struct rf_rdp_gfx_frame_ack {
@@ -82,6 +115,12 @@ bool rf_rdp_gfx_parse_caps_advertise(
 	size_t length,
 	struct rf_rdp_gfx_caps *caps
 );
+enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec(
+	const struct rf_rdp_gfx_caps *caps,
+	const struct rf_rdp_gfx_server_codecs *server,
+	bool prefer_avc444
+);
+const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec);
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
 	size_t length,

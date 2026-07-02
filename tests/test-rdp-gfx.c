@@ -394,6 +394,14 @@ static void test_parse_caps_advertise_selects_highest_supported(void)
 	assert(caps.count == 2);
 	assert(caps.selected_version == RF_RDP_GFX_CAPVERSION_10);
 	assert(caps.selected_flags == RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED);
+	assert(caps.planar);
+	assert(caps.remotefx);
+	assert(caps.progressive);
+	assert(caps.progressive_v2);
+	assert(!caps.avc420);
+	assert(!caps.avc444);
+	assert(!caps.avc444_v2);
+	assert(!caps.av1);
 }
 
 static void test_parse_caps_advertise_selects_avc444_capversion(void)
@@ -416,6 +424,13 @@ static void test_parse_caps_advertise_selects_avc444_capversion(void)
 	assert(caps.selected_version == RF_RDP_GFX_CAPVERSION_106);
 	assert(caps.selected_flags == 0);
 	assert(caps.avc420);
+	assert(caps.avc444);
+	assert(caps.avc444_v2);
+	assert(caps.planar);
+	assert(caps.remotefx);
+	assert(caps.progressive);
+	assert(caps.progressive_v2);
+	assert(!caps.av1);
 }
 
 static void test_parse_caps_advertise_keeps_freerdp_avc420_flag(void)
@@ -438,6 +453,129 @@ static void test_parse_caps_advertise_keeps_freerdp_avc420_flag(void)
 	assert(caps.selected_version == RF_RDP_GFX_CAPVERSION_107);
 	assert(caps.selected_flags == 0x00000002u);
 	assert(caps.avc420);
+	assert(caps.avc444);
+	assert(caps.avc444_v2);
+	assert(caps.progressive);
+	assert(caps.progressive_v2);
+	assert(caps.remotefx);
+	assert(caps.planar);
+}
+
+static void test_parse_caps_advertise_detects_freerdp_av1_extension(void)
+{
+	const uint8_t pdu[] = {
+		0x12, 0x00, 0x00, 0x00,
+		0x22, 0x00, 0x00, 0x00,
+		0x02, 0x00,
+		0x00, 0x00, 0x01, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x10,
+		0x01, 0x07, 0x0a, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		0x10, 0x00, 0x00, 0x00
+	};
+	struct rf_rdp_gfx_caps caps = { 0 };
+
+	assert(rf_rdp_gfx_parse_caps_advertise(pdu, sizeof(pdu), &caps));
+	assert(caps.count == 2);
+	assert(caps.selected_version == RF_RDP_GFX_CAPVERSION_107);
+	assert(caps.av1);
+	assert(caps.av1_i444);
+	assert(caps.avc420);
+	assert(caps.avc444);
+	assert(caps.avc444_v2);
+}
+
+static void test_parse_caps_advertise_rejects_av1_without_standard_caps(void)
+{
+	const uint8_t pdu[] = {
+		0x12, 0x00, 0x00, 0x00,
+		0x16, 0x00, 0x00, 0x00,
+		0x01, 0x00,
+		0x00, 0x00, 0x01, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x10
+	};
+	struct rf_rdp_gfx_caps caps = { 0 };
+
+	assert(!rf_rdp_gfx_parse_caps_advertise(pdu, sizeof(pdu), &caps));
+}
+
+static void test_select_codec_matrix_prefers_avc420_by_default(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.avc420 = true,
+		.avc444 = true,
+		.avc444_v2 = true,
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.avc420 = true,
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_AVC420);
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		true
+	) == RF_RDP_GFX_CODEC_AVC444_V2);
+}
+
+static void test_select_codec_matrix_falls_back_through_graphics_codecs(void)
+{
+	struct rf_rdp_gfx_caps caps = {
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	struct rf_rdp_gfx_server_codecs server = {
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_PROGRESSIVE_V2);
+
+	server.progressive = false;
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_REMOTEFX);
+
+	server.remotefx = false;
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_PLANAR);
+
+	caps.planar = false;
+	assert(rf_rdp_gfx_select_codec(
+		&caps,
+		&server,
+		false
+	) == RF_RDP_GFX_CODEC_UNCOMPRESSED);
+	assert(strcmp(
+		rf_rdp_gfx_codec_name(RF_RDP_GFX_CODEC_PROGRESSIVE_V2),
+		"Progressive v2"
+	) == 0);
 }
 
 static void test_parse_frame_acknowledge(void)
@@ -1073,6 +1211,10 @@ int main(void)
 	test_parse_caps_advertise_selects_highest_supported();
 	test_parse_caps_advertise_selects_avc444_capversion();
 	test_parse_caps_advertise_keeps_freerdp_avc420_flag();
+	test_parse_caps_advertise_detects_freerdp_av1_extension();
+	test_parse_caps_advertise_rejects_av1_without_standard_caps();
+	test_select_codec_matrix_prefers_avc420_by_default();
+	test_select_codec_matrix_falls_back_through_graphics_codecs();
 	test_parse_frame_acknowledge();
 	test_parse_qoe_frame_acknowledge();
 	test_write_create_surface();

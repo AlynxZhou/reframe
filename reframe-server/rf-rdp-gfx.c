@@ -66,6 +66,23 @@ static bool is_supported_caps_version(uint32_t version)
 	       version == RF_RDP_GFX_CAPVERSION_107;
 }
 
+static void derive_caps_codecs(struct rf_rdp_gfx_caps *caps)
+{
+	if (caps->selected_version == 0)
+		return;
+
+	caps->planar = true;
+	caps->remotefx = true;
+	caps->progressive = true;
+	caps->progressive_v2 = caps->selected_version >= RF_RDP_GFX_CAPVERSION_10;
+	caps->avc444 =
+		caps->selected_version >= RF_RDP_GFX_CAPVERSION_10 &&
+		(caps->selected_flags & RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED) == 0;
+	caps->avc444_v2 =
+		caps->avc444 &&
+		caps->selected_version >= RF_RDP_GFX_CAPVERSION_106;
+}
+
 static bool check_command(
 	const uint8_t *data,
 	size_t length,
@@ -466,23 +483,87 @@ bool rf_rdp_gfx_parse_caps_advertise(
 			return false;
 
 		uint32_t flags = 0;
-			if (caps_length >= 4)
-				flags = read_u32_le(data + offset);
+		if (caps_length >= 4)
+			flags = read_u32_le(data + offset);
 
-			if (is_supported_caps_version(version) &&
-			    version >= RF_RDP_GFX_CAPVERSION_81 &&
-			    (flags & RF_RDP_GFX_CAPS_FLAG_AVC420_ENABLED) != 0)
-				caps->avc420 = true;
+		if (is_supported_caps_version(version) &&
+		    version >= RF_RDP_GFX_CAPVERSION_81 &&
+		    (flags & RF_RDP_GFX_CAPS_FLAG_AVC420_ENABLED) != 0)
+			caps->avc420 = true;
+		if (version == RF_RDP_GFX_CAPVERSION_FRDP_1) {
+			caps->av1 = true;
+			caps->av1_i444 =
+				(flags & RF_RDP_GFX_CAPS_FLAG_AV1_I444_SUPPORTED) != 0 &&
+				(flags & RF_RDP_GFX_CAPS_FLAG_AV1_I444_DISABLED) == 0;
+		}
 
-			if (is_supported_caps_version(version) &&
-			    version >= caps->selected_version) {
-				caps->selected_version = version;
-				caps->selected_flags = flags;
-			}
+		if (is_supported_caps_version(version) &&
+		    version >= caps->selected_version) {
+			caps->selected_version = version;
+			caps->selected_flags = flags;
+		}
 		offset += caps_length;
 	}
 
+	derive_caps_codecs(caps);
 	return caps->selected_version != 0;
+}
+
+enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec(
+	const struct rf_rdp_gfx_caps *caps,
+	const struct rf_rdp_gfx_server_codecs *server,
+	bool prefer_avc444
+)
+{
+	if (caps == NULL || server == NULL)
+		return RF_RDP_GFX_CODEC_UNCOMPRESSED;
+
+	if (server->av1 && caps->av1)
+		return RF_RDP_GFX_CODEC_AV1;
+	if (prefer_avc444 && server->avc444 && caps->avc444)
+		return caps->avc444_v2 ?
+			RF_RDP_GFX_CODEC_AVC444_V2 :
+			RF_RDP_GFX_CODEC_AVC444;
+	if (server->avc420 && caps->avc420)
+		return RF_RDP_GFX_CODEC_AVC420;
+	if (server->avc444 && caps->avc444)
+		return caps->avc444_v2 ?
+			RF_RDP_GFX_CODEC_AVC444_V2 :
+			RF_RDP_GFX_CODEC_AVC444;
+	if (server->progressive && caps->progressive)
+		return caps->progressive_v2 ?
+			RF_RDP_GFX_CODEC_PROGRESSIVE_V2 :
+			RF_RDP_GFX_CODEC_PROGRESSIVE;
+	if (server->remotefx && caps->remotefx)
+		return RF_RDP_GFX_CODEC_REMOTEFX;
+	if (server->planar && caps->planar)
+		return RF_RDP_GFX_CODEC_PLANAR;
+	return RF_RDP_GFX_CODEC_UNCOMPRESSED;
+}
+
+const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec)
+{
+	switch (codec) {
+	case RF_RDP_GFX_CODEC_AV1:
+		return "AV1";
+	case RF_RDP_GFX_CODEC_AVC444_V2:
+		return "AVC444 v2";
+	case RF_RDP_GFX_CODEC_AVC444:
+		return "AVC444";
+	case RF_RDP_GFX_CODEC_AVC420:
+		return "AVC420";
+	case RF_RDP_GFX_CODEC_PROGRESSIVE_V2:
+		return "Progressive v2";
+	case RF_RDP_GFX_CODEC_PROGRESSIVE:
+		return "Progressive";
+	case RF_RDP_GFX_CODEC_REMOTEFX:
+		return "RemoteFX";
+	case RF_RDP_GFX_CODEC_PLANAR:
+		return "PLANAR";
+	case RF_RDP_GFX_CODEC_UNCOMPRESSED:
+	default:
+		return "uncompressed";
+	}
 }
 
 bool rf_rdp_gfx_parse_frame_acknowledge(

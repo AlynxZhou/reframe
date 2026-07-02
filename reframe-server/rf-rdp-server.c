@@ -34,6 +34,11 @@ static unsigned int align16(unsigned int value)
 	return (value + 15u) & ~15u;
 }
 
+static const char *yes_no(bool value)
+{
+	return value ? "yes" : "no";
+}
+
 struct _RfRDPServer {
 	RfRemoteServer parent_instance;
 	RfConfig *config;
@@ -146,6 +151,56 @@ struct client {
 	bool rdpgfx_avc_unavailable_logged;
 	bool rdpgfx_avc444_software_fallback_logged;
 };
+
+static struct rf_rdp_gfx_server_codecs rdpgfx_server_codecs(void)
+{
+	return (struct rf_rdp_gfx_server_codecs){
+#ifdef RF_HAVE_RDP_AVC
+		.avc420 = true,
+		.avc444 = true,
+#endif
+		.planar = true
+	};
+}
+
+static void log_rdpgfx_caps_advertise(const struct rf_rdp_gfx_caps *caps)
+{
+	g_message(
+		"RDP: GFX caps advertised sets=%u selected=0x%08x flags=0x%08x client-codecs avc420=%s avc444=%s avc444v2=%s progressive=%s progressivev2=%s remotefx=%s planar=%s av1=%s av1-i444=%s.",
+		caps->count,
+		caps->selected_version,
+		caps->selected_flags,
+		yes_no(caps->avc420),
+		yes_no(caps->avc444),
+		yes_no(caps->avc444_v2),
+		yes_no(caps->progressive),
+		yes_no(caps->progressive_v2),
+		yes_no(caps->remotefx),
+		yes_no(caps->planar),
+		yes_no(caps->av1),
+		yes_no(caps->av1_i444)
+	);
+}
+
+static void log_rdpgfx_codec_policy(
+	const struct rf_rdp_gfx_caps *caps,
+	const struct rf_rdp_gfx_server_codecs *codecs,
+	enum rf_rdp_gfx_codec policy_codec
+)
+{
+	g_message(
+		"RDP: GFX confirmed caps version=0x%08x flags=0x%08x policy-codec=%s server-codecs avc420=%s avc444=%s progressive=%s remotefx=%s planar=%s av1=%s; WireToSurface updates enabled.",
+		caps->selected_version,
+		caps->selected_flags,
+		rf_rdp_gfx_codec_name(policy_codec),
+		yes_no(codecs->avc420),
+		yes_no(codecs->avc444),
+		yes_no(codecs->progressive),
+		yes_no(codecs->remotefx),
+		yes_no(codecs->planar),
+		yes_no(codecs->av1)
+	);
+}
 
 static bool send_bitmap_update(
 	struct client *client,
@@ -778,6 +833,15 @@ static bool send_rdpgfx_caps_confirm(
 	const struct rf_rdp_gfx_caps *caps
 )
 {
+	RfRDPServer *this = client->server;
+	const struct rf_rdp_gfx_server_codecs codecs = rdpgfx_server_codecs();
+	const bool prefer_avc444 = rf_rdp_core_should_use_avc444(
+		caps->avc444,
+		caps->avc420,
+		this->rdpgfx_video_quality_level
+	);
+	const enum rf_rdp_gfx_codec policy_codec =
+		rf_rdp_gfx_select_codec(caps, &codecs, prefer_avc444);
 	uint8_t gfx[64] = { 0 };
 	const size_t length = rf_rdp_gfx_write_caps_confirm(
 		gfx,
@@ -793,12 +857,7 @@ static bool send_rdpgfx_caps_confirm(
 	client->rdpgfx_caps_version = caps->selected_version;
 	client->rdpgfx_caps_flags = caps->selected_flags;
 	client->rdpgfx_avc420_available = caps->avc420;
-	g_message(
-		"RDP: GFX confirmed caps version=0x%08x flags=0x%08x avc420=%s; WireToSurface updates enabled.",
-		client->rdpgfx_caps_version,
-		client->rdpgfx_caps_flags,
-		client->rdpgfx_avc420_available ? "yes" : "no"
-	);
+	log_rdpgfx_codec_policy(caps, &codecs, policy_codec);
 	return true;
 }
 
@@ -861,13 +920,7 @@ static void handle_rdpgfx_payload(
 	struct rf_rdp_gfx_qoe_frame_ack qoe_ack = { 0 };
 
 	if (rf_rdp_gfx_parse_caps_advertise(payload, payload_length, &caps)) {
-		g_message(
-			"RDP: GFX caps advertised sets=%u selected=0x%08x flags=0x%08x avc420=%s.",
-			caps.count,
-			caps.selected_version,
-			caps.selected_flags,
-			caps.avc420 ? "yes" : "no"
-		);
+		log_rdpgfx_caps_advertise(&caps);
 		if (!send_rdpgfx_caps_confirm(client, &caps))
 			g_warning("RDP: Failed to send GFX CapsConfirm.");
 		return;
