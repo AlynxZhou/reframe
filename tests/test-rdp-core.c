@@ -1351,6 +1351,73 @@ static void test_rdpgfx_video_quality_policy(void)
 	) == 2);
 }
 
+static void test_rdpgfx_video_quality_policy_uses_qoe_latency(void)
+{
+	const int64_t five_seconds = 5 * 1000000;
+	const uint64_t three_mb_per_second = 3 * 1024 * 1024;
+
+	assert(rf_rdp_core_update_video_quality_level_with_qoe(
+		0,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		40,
+		10,
+		true
+	) == 1);
+	assert(rf_rdp_core_update_video_quality_level_with_qoe(
+		1,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		10,
+		80,
+		true
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level_with_qoe(
+		1,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		8,
+		12,
+		true
+	) == 0);
+	assert(rf_rdp_core_update_video_quality_level_with_qoe(
+		2,
+		3,
+		20 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		26000,
+		60,
+		0,
+		0,
+		120,
+		160,
+		false
+	) == 0);
+}
+
 static void test_rdpgfx_avc444_only_used_without_avc420_fallback(void)
 {
 	assert(rf_rdp_core_should_use_avc444(true, false, 0));
@@ -1417,6 +1484,7 @@ int main(void)
 	test_avc444_delta_policy_skips_large_damage();
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();
+	test_rdpgfx_video_quality_policy_uses_qoe_latency();
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
 	test_rdpgfx_avc444_lc_stats_index();
 	return 0;

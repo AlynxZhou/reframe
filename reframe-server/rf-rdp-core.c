@@ -1176,6 +1176,39 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	bool video_clients
 )
 {
+	return rf_rdp_core_update_video_quality_level_with_qoe(
+		current_level,
+		max_level,
+		bytes_sent,
+		interval_us,
+		target_bytes_per_second,
+		target_fps,
+		avg_send_time_us,
+		frames_sent,
+		frames_skipped,
+		max_inflight_frames,
+		0,
+		0,
+		video_clients
+	);
+}
+
+unsigned int rf_rdp_core_update_video_quality_level_with_qoe(
+	unsigned int current_level,
+	unsigned int max_level,
+	uint64_t bytes_sent,
+	int64_t interval_us,
+	uint64_t target_bytes_per_second,
+	unsigned int target_fps,
+	uint64_t avg_send_time_us,
+	uint64_t frames_sent,
+	uint64_t frames_skipped,
+	uint32_t max_inflight_frames,
+	uint16_t max_qoe_time_diff_se,
+	uint16_t max_qoe_time_diff_edr,
+	bool video_clients
+)
+{
 	if (!video_clients || max_level == 0 || target_bytes_per_second == 0 ||
 	    interval_us <= 0)
 		return 0;
@@ -1199,9 +1232,16 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	const bool inflight_pressure = max_inflight_frames >= 10;
 	const bool queue_pressure =
 		inflight_pressure || (frames_skipped > 0 && max_inflight_frames >= 8);
+	const uint16_t max_qoe_time_diff =
+		max_qoe_time_diff_se > max_qoe_time_diff_edr ?
+			max_qoe_time_diff_se :
+			max_qoe_time_diff_edr;
+	const uint64_t qoe_time_diff_us = (uint64_t)max_qoe_time_diff * 1000ull;
+	const bool qoe_pressure =
+		qoe_time_diff_us > 0 && qoe_time_diff_us > frame_budget_us * 2;
 
 	if ((bandwidth_pressure || send_pressure || skipped_pressure ||
-	     queue_pressure) && current_level < max_level) {
+	     queue_pressure || qoe_pressure) && current_level < max_level) {
 		if (bandwidth_pressure &&
 		    bytes_per_second > target_bytes_per_second * 2 &&
 		    current_level + 1 < max_level)
@@ -1212,6 +1252,7 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	if (current_level > 0 &&
 	    !skipped_pressure &&
 	    !queue_pressure &&
+	    !qoe_pressure &&
 	    bytes_per_second * 10 < target_bytes_per_second * 5 &&
 	    avg_send_time_us < recovery_threshold_us)
 		return current_level - 1;

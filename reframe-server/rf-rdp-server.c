@@ -93,6 +93,8 @@ struct _RfRDPServer {
 	uint64_t rdpgfx_target_bytes_per_second;
 	uint32_t stats_max_rdpgfx_inflight;
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
+	uint16_t stats_max_rdpgfx_qoe_time_diff_se;
+	uint16_t stats_max_rdpgfx_qoe_time_diff_edr;
 	bool nla;
 	bool clipboard;
 	bool running;
@@ -1000,6 +1002,14 @@ static void handle_rdpgfx_qoe_frame_acknowledge(
 	client->rdpgfx_qoe_timestamp = ack->timestamp;
 	client->rdpgfx_qoe_time_diff_se = ack->time_diff_se;
 	client->rdpgfx_qoe_time_diff_edr = ack->time_diff_edr;
+	this->stats_max_rdpgfx_qoe_time_diff_se = MAX(
+		this->stats_max_rdpgfx_qoe_time_diff_se,
+		ack->time_diff_se
+	);
+	this->stats_max_rdpgfx_qoe_time_diff_edr = MAX(
+		this->stats_max_rdpgfx_qoe_time_diff_edr,
+		ack->time_diff_edr
+	);
 	if (!client->rdpgfx_qoe_ack_logged) {
 		g_message(
 			"RDP: RDPGFX QoE frame acknowledge active frame-id=%u se=%u edr=%u.",
@@ -3378,7 +3388,7 @@ static void maybe_log_stats(
 	);
 	if (this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO) {
 		this->rdpgfx_video_quality_level =
-			rf_rdp_core_update_video_quality_level(
+			rf_rdp_core_update_video_quality_level_with_qoe(
 				this->rdpgfx_video_quality_level,
 				this->max_video_quality_level,
 				this->stats_bytes_sent,
@@ -3389,6 +3399,8 @@ static void maybe_log_stats(
 				this->stats_frames_sent,
 				this->stats_frames_skipped,
 				this->stats_max_rdpgfx_inflight,
+				this->stats_max_rdpgfx_qoe_time_diff_se,
+				this->stats_max_rdpgfx_qoe_time_diff_edr,
 				video_clients > 0
 			);
 	} else {
@@ -3411,7 +3423,7 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
@@ -3425,6 +3437,8 @@ static void maybe_log_stats(
 		full_clients,
 		this->stats_max_rdpgfx_inflight,
 		this->stats_max_rdpgfx_ack_queue_depth,
+		this->stats_max_rdpgfx_qoe_time_diff_se,
+		this->stats_max_rdpgfx_qoe_time_diff_edr,
 		avg_send_time_us / 1000,
 		this->stats_avc444_lc[0],
 		this->stats_avc444_lc[1],
@@ -3440,6 +3454,8 @@ static void maybe_log_stats(
 	this->stats_min_target_fps = 0;
 	this->stats_max_rdpgfx_inflight = 0;
 	this->stats_max_rdpgfx_ack_queue_depth = 0;
+	this->stats_max_rdpgfx_qoe_time_diff_se = 0;
+	this->stats_max_rdpgfx_qoe_time_diff_edr = 0;
 }
 
 static bool should_render_frame(RfRemoteServer *super)

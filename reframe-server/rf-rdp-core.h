@@ -216,6 +216,21 @@ unsigned int rf_rdp_core_update_video_quality_level(
 	uint32_t max_inflight_frames,
 	bool video_clients
 );
+unsigned int rf_rdp_core_update_video_quality_level_with_qoe(
+	unsigned int current_level,
+	unsigned int max_level,
+	uint64_t bytes_sent,
+	int64_t interval_us,
+	uint64_t target_bytes_per_second,
+	unsigned int target_fps,
+	uint64_t avg_send_time_us,
+	uint64_t frames_sent,
+	uint64_t frames_skipped,
+	uint32_t max_inflight_frames,
+	uint16_t max_qoe_time_diff_se,
+	uint16_t max_qoe_time_diff_edr,
+	bool video_clients
+);
 bool rf_rdp_core_should_use_avc444(
 	bool avc444_available,
 	bool avc420_available,
