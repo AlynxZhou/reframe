@@ -131,6 +131,7 @@ struct client {
 	struct rf_rdp_pointer_state pointer;
 	struct rf_rdp_core_capabilities caps;
 	enum rf_rdp_graphics_mode graphics_mode;
+	enum rf_rdp_gfx_codec rdpgfx_policy_codec;
 	RfRdpNscContext *nsc;
 	RfRdpAv1Encoder *av1;
 	RfRdpAvcEncoder *avc;
@@ -972,6 +973,7 @@ static bool send_rdpgfx_caps_confirm(
 	client->rdpgfx_caps_confirmed = true;
 	client->rdpgfx_caps_version = confirm_version;
 	client->rdpgfx_caps_flags = confirm_flags;
+	client->rdpgfx_policy_codec = policy_codec;
 	client->rdpgfx_av1_available = use_av1;
 	client->av1_mode = av1_mode;
 	client->rdpgfx_avc420_available = caps->avc420;
@@ -3350,8 +3352,10 @@ static unsigned int bitmap_limited_client_count(RfRDPServer *this)
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
 
-		if (!client_can_use_rdpgfx(client) &&
-		    client->graphics_mode == RF_RDP_GRAPHICS_MODE_BITMAP)
+		if ((!client_can_use_rdpgfx(client) &&
+		     client->graphics_mode == RF_RDP_GRAPHICS_MODE_BITMAP) ||
+		    (client_can_use_rdpgfx(client) &&
+		     !rf_rdp_gfx_codec_is_video(client->rdpgfx_policy_codec)))
 			limited_clients++;
 	}
 	return limited_clients;
@@ -3364,7 +3368,8 @@ static unsigned int rdpgfx_video_client_count(RfRDPServer *this)
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
 
-		if (client_can_use_rdpgfx(client))
+		if (client_can_use_rdpgfx(client) &&
+		    rf_rdp_gfx_codec_is_video(client->rdpgfx_policy_codec))
 			video_clients++;
 	}
 	return video_clients;

@@ -589,6 +589,19 @@ bool rf_rdp_gfx_codec_payload_allows_zgfx(uint16_t codec_id)
 	}
 }
 
+bool rf_rdp_gfx_codec_is_video(enum rf_rdp_gfx_codec codec)
+{
+	switch (codec) {
+	case RF_RDP_GFX_CODEC_AV1:
+	case RF_RDP_GFX_CODEC_AVC420:
+	case RF_RDP_GFX_CODEC_AVC444:
+	case RF_RDP_GFX_CODEC_AVC444_V2:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
 	size_t length,

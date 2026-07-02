@@ -1368,6 +1368,19 @@ static void test_codec_payload_zgfx_policy_skips_video_codecs(void)
 	assert(!rf_rdp_gfx_codec_payload_allows_zgfx(RF_RDP_GFX_CODECID_AV1));
 }
 
+static void test_codec_video_policy_matches_qoe_tunable_codecs(void)
+{
+	assert(rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_AV1));
+	assert(rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_AVC420));
+	assert(rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_AVC444));
+	assert(rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_AVC444_V2));
+	assert(!rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_PLANAR));
+	assert(!rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_UNCOMPRESSED));
+	assert(!rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_REMOTEFX));
+	assert(!rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_PROGRESSIVE));
+	assert(!rf_rdp_gfx_codec_is_video(RF_RDP_GFX_CODEC_PROGRESSIVE_V2));
+}
+
 int main(void)
 {
 	test_write_caps_confirm();
@@ -1405,5 +1418,6 @@ int main(void)
 	test_write_zgfx_falls_back_when_not_smaller();
 	test_write_zgfx_payload_respects_compression_policy();
 	test_codec_payload_zgfx_policy_skips_video_codecs();
+	test_codec_video_policy_matches_qoe_tunable_codecs();
 	return 0;
 }

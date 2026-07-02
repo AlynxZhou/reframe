@@ -127,6 +127,7 @@ enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec_policy(
 	bool under_pressure
 );
 const char *rf_rdp_gfx_codec_name(enum rf_rdp_gfx_codec codec);
+bool rf_rdp_gfx_codec_is_video(enum rf_rdp_gfx_codec codec);
 bool rf_rdp_gfx_codec_payload_allows_zgfx(uint16_t codec_id);
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
