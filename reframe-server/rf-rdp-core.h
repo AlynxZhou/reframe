@@ -242,6 +242,10 @@ bool rf_rdp_core_should_accept_desktop_resize(
 	unsigned int requested_width,
 	unsigned int requested_height
 );
+bool rf_rdp_core_should_replace_existing_client(
+	bool new_client_already_counted,
+	unsigned int existing_clients
+);
 bool rf_rdp_core_should_rebuild_video_encoder_for_quality(
 	unsigned int encoder_quality_level,
 	unsigned int requested_quality_level,

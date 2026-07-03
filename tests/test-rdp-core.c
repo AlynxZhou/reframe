@@ -21,6 +21,10 @@ bool rf_rdp_core_should_accept_desktop_resize(
 	unsigned int requested_width,
 	unsigned int requested_height
 );
+bool rf_rdp_core_should_replace_existing_client(
+	bool new_client_already_counted,
+	unsigned int existing_clients
+);
 bool rf_rdp_core_fit_frame_to_client_surface(
 	unsigned int frame_width,
 	unsigned int frame_height,
@@ -1244,6 +1248,14 @@ static void test_rdp_resize_owner_policy_keeps_secondary_clients_from_resizing(v
 	));
 }
 
+static void test_rdp_single_client_policy_replaces_existing_connections(void)
+{
+	assert(!rf_rdp_core_should_replace_existing_client(false, 0));
+	assert(rf_rdp_core_should_replace_existing_client(false, 1));
+	assert(rf_rdp_core_should_replace_existing_client(false, 3));
+	assert(!rf_rdp_core_should_replace_existing_client(true, 1));
+}
+
 static void test_client_surface_viewport_preserves_source_aspect(void)
 {
 	uint16_t x = 0;
@@ -2016,6 +2028,7 @@ int main(void)
 	test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical();
 	test_rdpgfx_video_encoder_quality_rebuild_policy();
 	test_rdp_resize_owner_policy_keeps_secondary_clients_from_resizing();
+	test_rdp_single_client_policy_replaces_existing_connections();
 	test_client_surface_viewport_preserves_source_aspect();
 	test_client_surface_update_rect_stays_inside_client_desktop();
 	test_avc444_delta_policy_skips_large_damage();

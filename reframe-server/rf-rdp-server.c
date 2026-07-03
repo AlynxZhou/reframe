@@ -551,19 +551,82 @@ static void remove_client(struct client *client)
 		);
 }
 
+static GList *replace_existing_clients_locked(
+	RfRDPServer *this,
+	const struct client *new_client,
+	unsigned int *replaced_clients
+)
+{
+	GList *streams = NULL;
+
+	for (GList *l = this->clients; l != NULL;) {
+		GList *next = l->next;
+		struct client *old_client = l->data;
+		GIOStream *stream = old_client->stream;
+
+		if (old_client == new_client) {
+			l = next;
+			continue;
+		}
+
+		if (stream == NULL && old_client->connection != NULL)
+			stream = G_IO_STREAM(old_client->connection);
+		if (stream != NULL)
+			streams = g_list_prepend(streams, g_object_ref(stream));
+
+		this->clients = g_list_delete_link(this->clients, l);
+		old_client->counted = false;
+		old_client->needs_full_frame = false;
+		if (this->resize_owner == old_client)
+			this->resize_owner = NULL;
+		if (replaced_clients != NULL)
+			(*replaced_clients)++;
+		l = next;
+	}
+	return streams;
+}
+
+static void close_replaced_client_streams(GList *streams)
+{
+	for (GList *l = streams; l != NULL; l = l->next)
+		g_io_stream_close(G_IO_STREAM(l->data), NULL, NULL);
+	g_list_free_full(streams, g_object_unref);
+}
+
 static void add_client(struct client *client)
 {
 	RfRDPServer *this = client->server;
+	GList *replaced_streams = NULL;
+	unsigned int replaced_clients = 0;
 	bool first_client = false;
 	bool resize_owner = false;
 
 	g_mutex_lock(&this->lock);
 	if (!client->counted) {
-		first_client = this->clients == NULL;
+		const bool had_clients = this->clients != NULL;
+		const bool replace_clients =
+			rf_rdp_core_should_replace_existing_client(
+				client->counted,
+				(unsigned int)g_list_length(this->clients)
+			);
+
+		if (replace_clients) {
+			replaced_streams = replace_existing_clients_locked(
+				this,
+				client,
+				&replaced_clients
+			);
+			g_clear_pointer(&this->last_frame, g_byte_array_unref);
+			this->last_frame_width = 0;
+			this->last_frame_height = 0;
+			this->next_render_time_us = -1;
+		}
+
+		first_client = !had_clients && this->clients == NULL;
 		this->clients = g_list_prepend(this->clients, client);
 		client->counted = true;
 		client->needs_full_frame = true;
-		if (first_client) {
+		if (first_client || replaced_clients > 0) {
 			this->updates_sent = 0;
 			this->next_render_time_us = -1;
 			this->rdpgfx_video_quality_last_change_time_us = 0;
@@ -607,10 +670,23 @@ static void add_client(struct client *client)
 				g_io_stream_close(G_IO_STREAM(client->connection), NULL, NULL);
 			}
 		}
+		if (replaced_clients > 0 &&
+		    client->desktop_width > 0 && client->desktop_height > 0) {
+			this->resize_owner = client;
+			this->desktop_width = client->desktop_width;
+			this->desktop_height = client->desktop_height;
+		}
 		resize_owner = this->resize_owner == client;
 	}
 	g_mutex_unlock(&this->lock);
 
+	if (replaced_clients > 0) {
+		g_message(
+			"RDP: Replacing %u existing client(s) with the new connection.",
+			replaced_clients
+		);
+		close_replaced_client_streams(replaced_streams);
+	}
 	if (first_client)
 		rf_remote_server_handle_first_client(RF_REMOTE_SERVER(this));
 	if (resize_owner && client->desktop_width > 0 && client->desktop_height > 0)
