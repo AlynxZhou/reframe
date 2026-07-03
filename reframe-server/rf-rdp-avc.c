@@ -523,6 +523,9 @@ static bool fill_avc444_chroma_nv12_from_yuv444(RfRdpAvcEncoder *encoder)
 	AVFrame *frame = encoder->frame;
 	AVFrame *yuv = encoder->avc444_yuv444_frame;
 
+	if (frame->linesize[0] < encoder->width ||
+	    frame->linesize[1] < encoder->width)
+		return false;
 	if (yuv->linesize[1] < encoder->width ||
 	    yuv->linesize[2] < encoder->width)
 		return false;
@@ -548,6 +551,53 @@ static bool fill_avc444_chroma_nv12_from_yuv444(RfRdpAvcEncoder *encoder)
 			b5[x + 1] = v_odd[x + 1];
 			uv[x] = u_even[x + 1];
 			uv[x + 1] = v_even[x + 1];
+		}
+	}
+	return true;
+}
+
+static bool fill_avc444_v2_chroma_nv12_from_yuv444(RfRdpAvcEncoder *encoder)
+{
+	AVFrame *frame = encoder->frame;
+	AVFrame *yuv = encoder->avc444_yuv444_frame;
+
+	if (encoder->width % 4 != 0)
+		return false;
+	if (frame->linesize[0] < encoder->width ||
+	    frame->linesize[1] < encoder->width)
+		return false;
+	if (yuv->linesize[1] < encoder->width ||
+	    yuv->linesize[2] < encoder->width)
+		return false;
+
+	const uint16_t half_width = encoder->width / 2;
+	const uint16_t quarter_width = encoder->width / 4;
+
+	for (uint16_t y = 0; y < encoder->height; y += 2) {
+		const uint8_t *u_even = yuv->data[1] + (size_t)y * yuv->linesize[1];
+		const uint8_t *u_odd = yuv->data[1] +
+			(size_t)(y + 1) * yuv->linesize[1];
+		const uint8_t *v_even = yuv->data[2] + (size_t)y * yuv->linesize[2];
+		const uint8_t *v_odd = yuv->data[2] +
+			(size_t)(y + 1) * yuv->linesize[2];
+		uint8_t *y_even = frame->data[0] + (size_t)y * frame->linesize[0];
+		uint8_t *y_odd = frame->data[0] +
+			(size_t)(y + 1) * frame->linesize[0];
+		uint8_t *uv = frame->data[1] +
+			(size_t)(y / 2) * frame->linesize[1];
+
+		for (uint16_t x = 0; x < encoder->width; x += 2) {
+			const uint16_t pair_index = x / 2;
+			const uint16_t uv_index = x % 4 == 0 ?
+				x / 4 :
+				quarter_width + x / 4;
+
+			y_even[pair_index] = u_even[x + 1];
+			y_even[half_width + pair_index] = v_even[x + 1];
+			y_odd[pair_index] = u_odd[x + 1];
+			y_odd[half_width + pair_index] = v_odd[x + 1];
+			uv[uv_index * 2] = u_odd[x];
+			uv[uv_index * 2 + 1] = v_odd[x];
 		}
 	}
 	return true;
@@ -964,6 +1014,7 @@ static bool encode_avc444_plane_rgba(
 	size_t rgba_stride,
 	bool force_keyframe,
 	bool chroma,
+	bool avc444_v2,
 	uint8_t **h264_data,
 	size_t *h264_data_length
 )
@@ -981,6 +1032,7 @@ static bool encode_avc444_plane_rgba(
 	(void)rgba_stride;
 	(void)force_keyframe;
 	(void)chroma;
+	(void)avc444_v2;
 	return false;
 #else
 	const size_t row_bytes = (size_t)encoder->width * 4;
@@ -991,7 +1043,8 @@ static bool encode_avc444_plane_rgba(
 	size_t src_stride = rgba_stride;
 	bool ok = false;
 
-	if (encoder->width % 2 != 0 || encoder->height % 16 != 0 ||
+	if (encoder->width % 2 != 0 || (avc444_v2 && encoder->width % 4 != 0) ||
+	    encoder->height % 16 != 0 ||
 	    row_bytes == 0 || !get_rgba_source_geometry(
 				    encoder,
 				    rgba_length,
@@ -1020,7 +1073,9 @@ static bool encode_avc444_plane_rgba(
 	if (av_frame_make_writable(encoder->frame) < 0)
 		goto out;
 	if (chroma) {
-		if (!fill_avc444_chroma_nv12_from_yuv444(encoder))
+		if (!(avc444_v2 ?
+			      fill_avc444_v2_chroma_nv12_from_yuv444(encoder) :
+			      fill_avc444_chroma_nv12_from_yuv444(encoder)))
 			goto out;
 	} else if (!fill_avc444_luma_nv12(encoder, src_rgba, src_stride)) {
 		goto out;
@@ -1038,7 +1093,7 @@ out:
 #endif
 }
 
-bool rf_rdp_avc_encoder_encode_avc444_rgba(
+static bool encode_avc444_rgba_internal(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,
 	size_t rgba_length,
@@ -1048,7 +1103,8 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 	uint8_t **first_h264_data,
 	size_t *first_h264_data_length,
 	uint8_t **second_h264_data,
-	size_t *second_h264_data_length
+	size_t *second_h264_data_length,
+	bool avc444_v2
 )
 {
 	if (lc != NULL)
@@ -1070,6 +1126,7 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 	(void)rgba_length;
 	(void)rgba_stride;
 	(void)force_keyframe;
+	(void)avc444_v2;
 	return false;
 #else
 	const size_t row_bytes = (size_t)encoder->width * 4;
@@ -1084,7 +1141,8 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 	size_t chroma_length = 0;
 	bool ok = false;
 
-	if (encoder->width % 2 != 0 || encoder->height % 16 != 0 ||
+	if (encoder->width % 2 != 0 || (avc444_v2 && encoder->width % 4 != 0) ||
+	    encoder->height % 16 != 0 ||
 	    row_bytes == 0 || !get_rgba_source_geometry(
 				    encoder,
 				    rgba_length,
@@ -1124,7 +1182,9 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 
 	if (av_frame_make_writable(encoder->frame) < 0)
 		goto out;
-	if (!fill_avc444_chroma_nv12_from_yuv444(encoder))
+	if (!(avc444_v2 ?
+		      fill_avc444_v2_chroma_nv12_from_yuv444(encoder) :
+		      fill_avc444_chroma_nv12_from_yuv444(encoder)))
 		goto out;
 	if (!encode_current_frame(
 		    encoder,
@@ -1151,6 +1211,62 @@ out:
 #endif
 }
 
+bool rf_rdp_avc_encoder_encode_avc444_rgba(
+	RfRdpAvcEncoder *encoder,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	bool force_keyframe,
+	uint8_t *lc,
+	uint8_t **first_h264_data,
+	size_t *first_h264_data_length,
+	uint8_t **second_h264_data,
+	size_t *second_h264_data_length
+)
+{
+	return encode_avc444_rgba_internal(
+		encoder,
+		rgba,
+		rgba_length,
+		rgba_stride,
+		force_keyframe,
+		lc,
+		first_h264_data,
+		first_h264_data_length,
+		second_h264_data,
+		second_h264_data_length,
+		false
+	);
+}
+
+bool rf_rdp_avc_encoder_encode_avc444_v2_rgba(
+	RfRdpAvcEncoder *encoder,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	bool force_keyframe,
+	uint8_t *lc,
+	uint8_t **first_h264_data,
+	size_t *first_h264_data_length,
+	uint8_t **second_h264_data,
+	size_t *second_h264_data_length
+)
+{
+	return encode_avc444_rgba_internal(
+		encoder,
+		rgba,
+		rgba_length,
+		rgba_stride,
+		force_keyframe,
+		lc,
+		first_h264_data,
+		first_h264_data_length,
+		second_h264_data,
+		second_h264_data_length,
+		true
+	);
+}
+
 bool rf_rdp_avc_encoder_encode_avc444_luma_rgba(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,
@@ -1167,6 +1283,7 @@ bool rf_rdp_avc_encoder_encode_avc444_luma_rgba(
 		rgba_length,
 		rgba_stride,
 		force_keyframe,
+		false,
 		false,
 		h264_data,
 		h264_data_length
@@ -1189,6 +1306,30 @@ bool rf_rdp_avc_encoder_encode_avc444_chroma_rgba(
 		rgba_length,
 		rgba_stride,
 		force_keyframe,
+		true,
+		false,
+		h264_data,
+		h264_data_length
+	);
+}
+
+bool rf_rdp_avc_encoder_encode_avc444_v2_chroma_rgba(
+	RfRdpAvcEncoder *encoder,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	bool force_keyframe,
+	uint8_t **h264_data,
+	size_t *h264_data_length
+)
+{
+	return encode_avc444_plane_rgba(
+		encoder,
+		rgba,
+		rgba_length,
+		rgba_stride,
+		force_keyframe,
+		true,
 		true,
 		h264_data,
 		h264_data_length

@@ -2128,6 +2128,10 @@ static bool send_rdpgfx_avc444_update(
 	size_t rgba_stride = 0;
 	uint8_t lc = RF_RDP_GFX_AVC444_LC_BOTH;
 	unsigned int lc_index = 0;
+	const bool avc444_v2 =
+		client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_AVC444_V2;
+	const uint16_t codec_id =
+		rf_rdp_gfx_codec_wire_id(client->rdpgfx_policy_codec);
 	size_t luma_h264_length = 0;
 	size_t chroma_h264_length = 0;
 	size_t avc_length = 0;
@@ -2279,7 +2283,20 @@ static bool send_rdpgfx_avc444_update(
 	if (encode_luma && encode_chroma) {
 		uint8_t encoded_lc = 0xff;
 
-		if (!rf_rdp_avc_encoder_encode_avc444_rgba(
+		const bool encoded = avc444_v2 ?
+			rf_rdp_avc_encoder_encode_avc444_v2_rgba(
+				client->avc,
+				rgba,
+				rgba_available_length,
+				rgba_stride,
+				full_avc444,
+				&encoded_lc,
+				&luma_h264,
+				&luma_h264_length,
+				&chroma_h264,
+				&chroma_h264_length
+			) :
+			rf_rdp_avc_encoder_encode_avc444_rgba(
 			    client->avc,
 			    rgba,
 			    rgba_available_length,
@@ -2290,7 +2307,9 @@ static bool send_rdpgfx_avc444_update(
 			    &luma_h264_length,
 			    &chroma_h264,
 			    &chroma_h264_length
-		    )) {
+		    );
+
+		if (!encoded) {
 			client_reset_avc(client);
 			return false;
 		}
@@ -2305,16 +2324,28 @@ static bool send_rdpgfx_avc444_update(
 			    &luma_h264_length
 		    ))
 			return false;
-	} else if (!rf_rdp_avc_encoder_encode_avc444_chroma_rgba(
-			   client->avc,
-			   rgba,
-			   rgba_available_length,
-			   rgba_stride,
-			   false,
-			   &chroma_h264,
-			   &chroma_h264_length
-		   )) {
-		return false;
+	} else {
+		const bool encoded = avc444_v2 ?
+			rf_rdp_avc_encoder_encode_avc444_v2_chroma_rgba(
+				client->avc,
+				rgba,
+				rgba_available_length,
+				rgba_stride,
+				false,
+				&chroma_h264,
+				&chroma_h264_length
+			) :
+			rf_rdp_avc_encoder_encode_avc444_chroma_rgba(
+				client->avc,
+				rgba,
+				rgba_available_length,
+				rgba_stride,
+				false,
+				&chroma_h264,
+				&chroma_h264_length
+			);
+		if (!encoded)
+			return false;
 	}
 
 	if (encode_luma && encode_chroma) {
@@ -2398,7 +2429,7 @@ static bool send_rdpgfx_avc444_update(
 		gfx + offset,
 		raw_capacity - offset,
 		RDP_RDPGFX_SURFACE_ID,
-		RF_RDP_GFX_CODECID_AVC444,
+		codec_id,
 		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888,
 		x,
 		y,
@@ -2427,7 +2458,8 @@ static bool send_rdpgfx_avc444_update(
 
 	if (!client->rdpgfx_update_logged) {
 		g_message(
-			"RDP: RDPGFX AVC444 updates active using %s, rect %u,%u %ux%u, coded %ux%u, lc=%u, bitrate=%" G_GINT64_FORMAT ", qp=%u, gop=%u.",
+			"RDP: RDPGFX %s updates active using %s, rect %u,%u %ux%u, coded %ux%u, lc=%u, bitrate=%" G_GINT64_FORMAT ", qp=%u, gop=%u.",
+			rf_rdp_gfx_codec_name(client->rdpgfx_policy_codec),
 			rf_rdp_avc_encoder_name(client->avc),
 			x,
 			y,

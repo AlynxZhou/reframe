@@ -83,6 +83,18 @@ bool rf_rdp_avc_encoder_encode_avc444_rgba(
 	uint8_t **second_h264_data,
 	size_t *second_h264_data_length
 );
+bool rf_rdp_avc_encoder_encode_avc444_v2_rgba(
+	RfRdpAvcEncoder *encoder,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	bool force_keyframe,
+	uint8_t *lc,
+	uint8_t **first_h264_data,
+	size_t *first_h264_data_length,
+	uint8_t **second_h264_data,
+	size_t *second_h264_data_length
+);
 bool rf_rdp_avc_encoder_encode_avc444_luma_rgba(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,
@@ -93,6 +105,15 @@ bool rf_rdp_avc_encoder_encode_avc444_luma_rgba(
 	size_t *h264_data_length
 );
 bool rf_rdp_avc_encoder_encode_avc444_chroma_rgba(
+	RfRdpAvcEncoder *encoder,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	bool force_keyframe,
+	uint8_t **h264_data,
+	size_t *h264_data_length
+);
+bool rf_rdp_avc_encoder_encode_avc444_v2_chroma_rgba(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,
 	size_t rgba_length,

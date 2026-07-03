@@ -600,6 +600,31 @@ bool rf_rdp_gfx_codec_is_video(enum rf_rdp_gfx_codec codec)
 	}
 }
 
+uint16_t rf_rdp_gfx_codec_wire_id(enum rf_rdp_gfx_codec codec)
+{
+	switch (codec) {
+	case RF_RDP_GFX_CODEC_AV1:
+		return RF_RDP_GFX_CODECID_AV1;
+	case RF_RDP_GFX_CODEC_AVC444_V2:
+		return RF_RDP_GFX_CODECID_AVC444V2;
+	case RF_RDP_GFX_CODEC_AVC444:
+		return RF_RDP_GFX_CODECID_AVC444;
+	case RF_RDP_GFX_CODEC_AVC420:
+		return RF_RDP_GFX_CODECID_AVC420;
+	case RF_RDP_GFX_CODEC_PROGRESSIVE_V2:
+		return RF_RDP_GFX_CODECID_CAPROGRESSIVE_V2;
+	case RF_RDP_GFX_CODEC_PROGRESSIVE:
+		return RF_RDP_GFX_CODECID_CAPROGRESSIVE;
+	case RF_RDP_GFX_CODEC_REMOTEFX:
+		return RF_RDP_GFX_CODECID_CAVIDEO;
+	case RF_RDP_GFX_CODEC_PLANAR:
+		return RF_RDP_GFX_CODECID_PLANAR;
+	case RF_RDP_GFX_CODEC_UNCOMPRESSED:
+	default:
+		return RF_RDP_GFX_CODECID_UNCOMPRESSED;
+	}
+}
+
 bool rf_rdp_gfx_parse_frame_acknowledge(
 	const uint8_t *data,
 	size_t length,
