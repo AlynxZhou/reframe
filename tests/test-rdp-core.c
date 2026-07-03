@@ -1112,6 +1112,34 @@ static void test_adaptive_bitmap_fps_policy(void)
 	) == 0);
 }
 
+static void test_rdpgfx_quality_headroom_holds_fallback_fps_limit(void)
+{
+	assert(!rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+		true,
+		true,
+		1,
+		3
+	));
+	assert(rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+		true,
+		true,
+		3,
+		3
+	));
+	assert(rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+		true,
+		false,
+		1,
+		3
+	));
+	assert(!rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+		false,
+		true,
+		1,
+		3
+	));
+}
+
 static void test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical(void)
 {
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(60, 0, true, 4) == 60);
@@ -1480,6 +1508,7 @@ int main(void)
 	test_frame_pacing_accepts_small_source_jitter();
 	test_frame_pacing_limits_fast_source();
 	test_adaptive_bitmap_fps_policy();
+	test_rdpgfx_quality_headroom_holds_fallback_fps_limit();
 	test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical();
 	test_avc444_delta_policy_skips_large_damage();
 	test_rdpgfx_avc_quality_parameters();

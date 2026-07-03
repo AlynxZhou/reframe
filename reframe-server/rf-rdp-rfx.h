@@ -16,6 +16,14 @@ void rf_rdp_rfx_context_set_thread_count(
 	unsigned int thread_count
 );
 unsigned int rf_rdp_rfx_context_get_thread_count(const RfRdpRfxContext *context);
+void rf_rdp_rfx_context_set_quality_level(
+	RfRdpRfxContext *context,
+	unsigned int quality_level,
+	unsigned int max_quality_level
+);
+unsigned int rf_rdp_rfx_context_get_quality_level(
+	const RfRdpRfxContext *context
+);
 
 GByteArray *rf_rdp_rfx_encode_rgba(
 	RfRdpRfxContext *context,

@@ -2723,6 +2723,11 @@ static bool send_rdpgfx_rfx_update(
 		if (client->rfx == NULL)
 			return false;
 	}
+	rf_rdp_rfx_context_set_quality_level(
+		client->rfx,
+		client->server->rdpgfx_video_quality_level,
+		client->server->max_video_quality_level
+	);
 
 	rfx = rf_rdp_rfx_encode_rgba(
 		client->rfx,
@@ -2795,11 +2800,12 @@ static bool send_rdpgfx_rfx_update(
 
 	if (!client->rdpgfx_update_logged) {
 		g_message(
-			"RDP: RDPGFX RemoteFX updates active, rect %u,%u %ux%u, tile-threads=%u.",
+			"RDP: RDPGFX RemoteFX updates active, rect %u,%u %ux%u, quality=%u, tile-threads=%u.",
 			x,
 			y,
 			width,
 			height,
+			rf_rdp_rfx_context_get_quality_level(client->rfx),
 			rf_rdp_rfx_context_get_thread_count(client->rfx)
 		);
 		client->rdpgfx_update_logged = true;
@@ -3532,6 +3538,20 @@ static unsigned int rdpgfx_video_client_count(RfRDPServer *this)
 	return video_clients;
 }
 
+static unsigned int rdpgfx_rfx_client_count(RfRDPServer *this)
+{
+	unsigned int rfx_clients = 0;
+
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		if (client_can_use_rdpgfx(client) &&
+		    client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_REMOTEFX)
+			rfx_clients++;
+	}
+	return rfx_clients;
+}
+
 static void reset_rdpgfx_video_encoders(RfRDPServer *this)
 {
 	for (GList *l = this->clients; l != NULL; l = l->next) {
@@ -3563,6 +3583,24 @@ static void maybe_log_stats(
 	const int64_t interval_us = now - this->stats_last_log_time_us;
 	const unsigned int limited_clients = bitmap_limited_client_count(this);
 	const unsigned int video_clients = rdpgfx_video_client_count(this);
+	const unsigned int rfx_clients = rdpgfx_rfx_client_count(this);
+	const unsigned int quality_clients = video_clients + rfx_clients;
+	const unsigned int rfx_limited_clients = MIN(limited_clients, rfx_clients);
+	const unsigned int non_quality_limited_clients =
+		limited_clients - rfx_limited_clients;
+	const bool quality_auto_clients =
+		this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO &&
+		quality_clients > 0;
+	const bool limit_rfx_fps =
+		rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+			rfx_limited_clients > 0,
+			quality_auto_clients,
+			this->rdpgfx_video_quality_level,
+			this->max_video_quality_level
+		);
+	const unsigned int fps_limited_clients =
+		non_quality_limited_clients +
+		(limit_rfx_fps ? rfx_limited_clients : 0);
 	const unsigned int previous_fps = this->adaptive_fps;
 	const unsigned int previous_video_quality =
 		this->rdpgfx_video_quality_level;
@@ -3579,7 +3617,7 @@ static void maybe_log_stats(
 		interval_us,
 		RDP_BITMAP_TARGET_BYTES_PER_SECOND,
 		avg_send_time_us,
-		limited_clients > 0
+		fps_limited_clients > 0
 	);
 	if (this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO) {
 		this->rdpgfx_video_quality_level =
@@ -3596,7 +3634,7 @@ static void maybe_log_stats(
 				this->stats_max_rdpgfx_inflight,
 				this->stats_max_rdpgfx_qoe_time_diff_se,
 				this->stats_max_rdpgfx_qoe_time_diff_edr,
-				video_clients > 0
+				quality_clients > 0
 			);
 	} else {
 		this->rdpgfx_video_quality_level =
@@ -3612,13 +3650,13 @@ static void maybe_log_stats(
 	if (this->rdpgfx_video_quality_level != previous_video_quality) {
 		reset_rdpgfx_video_encoders(this);
 		g_message(
-			"RDP: RDPGFX video quality level changed from %u to %u.",
+			"RDP: RDPGFX graphics quality level changed from %u to %u.",
 			previous_video_quality,
 			this->rdpgfx_video_quality_level
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, rdpgfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, fps-limited-clients=%u, rdpgfx-video-clients=%u, rfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
@@ -3628,7 +3666,9 @@ static void maybe_log_stats(
 		this->stats_frames_skipped,
 		this->stats_bytes_sent,
 		limited_clients,
+		fps_limited_clients,
 		video_clients,
+		rfx_clients,
 		full_clients,
 		this->stats_max_rdpgfx_inflight,
 		this->stats_max_rdpgfx_ack_queue_depth,

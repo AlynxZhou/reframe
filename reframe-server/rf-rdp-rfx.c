@@ -7,6 +7,7 @@
 #define RF_RFX_TILE_SIZE 64u
 #define RF_RFX_COEFF_COUNT (RF_RFX_TILE_SIZE * RF_RFX_TILE_SIZE)
 #define RF_RFX_COMPONENT_CAPACITY 4096u
+#define RF_RFX_QUANT_COUNT 10u
 
 #define RF_RFX_WBT_SYNC 0xccc0u
 #define RF_RFX_WBT_CODEC_VERSIONS 0xccc1u
@@ -39,10 +40,12 @@
 struct rf_rdp_rfx_context {
 	GThreadPool *thread_pool;
 	unsigned int thread_count;
+	unsigned int quality_level;
 	bool send_headers;
 	uint16_t width;
 	uint16_t height;
 	uint32_t frame_idx;
+	uint32_t quants[RF_RFX_QUANT_COUNT];
 };
 
 struct rfx_bit_writer {
@@ -69,11 +72,16 @@ struct rfx_tile_job {
 	uint16_t source_y;
 	uint16_t tile_x_idx;
 	uint16_t tile_y_idx;
+	const uint32_t *quants;
 	GByteArray *encoded;
 };
 
-static const uint32_t RFX_QUANTS[10] = {
+static const uint32_t RFX_DEFAULT_QUANTS[RF_RFX_QUANT_COUNT] = {
 	6, 6, 6, 6, 7, 7, 8, 8, 8, 9
+};
+
+static const uint32_t RFX_QUALITY_MAX_DELTA[RF_RFX_QUANT_COUNT] = {
+	1, 2, 2, 3, 3, 4, 4, 5, 5, 6
 };
 
 static void append_u8(GByteArray *array, uint8_t value)
@@ -342,18 +350,18 @@ static void quantize_block(int16_t *buffer, size_t count, uint32_t factor)
 		buffer[i] = cast_i16((buffer[i] + half) >> factor);
 }
 
-static void quantize(int16_t *buffer)
+static void quantize(int16_t *buffer, const uint32_t quants[RF_RFX_QUANT_COUNT])
 {
-	quantize_block(buffer, 1024, RFX_QUANTS[8] - 6);
-	quantize_block(buffer + 1024, 1024, RFX_QUANTS[7] - 6);
-	quantize_block(buffer + 2048, 1024, RFX_QUANTS[9] - 6);
-	quantize_block(buffer + 3072, 256, RFX_QUANTS[5] - 6);
-	quantize_block(buffer + 3328, 256, RFX_QUANTS[4] - 6);
-	quantize_block(buffer + 3584, 256, RFX_QUANTS[6] - 6);
-	quantize_block(buffer + 3840, 64, RFX_QUANTS[2] - 6);
-	quantize_block(buffer + 3904, 64, RFX_QUANTS[1] - 6);
-	quantize_block(buffer + 3968, 64, RFX_QUANTS[3] - 6);
-	quantize_block(buffer + 4032, 64, RFX_QUANTS[0] - 6);
+	quantize_block(buffer, 1024, quants[8] - 6);
+	quantize_block(buffer + 1024, 1024, quants[7] - 6);
+	quantize_block(buffer + 2048, 1024, quants[9] - 6);
+	quantize_block(buffer + 3072, 256, quants[5] - 6);
+	quantize_block(buffer + 3328, 256, quants[4] - 6);
+	quantize_block(buffer + 3584, 256, quants[6] - 6);
+	quantize_block(buffer + 3840, 64, quants[2] - 6);
+	quantize_block(buffer + 3904, 64, quants[1] - 6);
+	quantize_block(buffer + 3968, 64, quants[3] - 6);
+	quantize_block(buffer + 4032, 64, quants[0] - 6);
 	quantize_block(buffer, RF_RFX_COEFF_COUNT, 5);
 }
 
@@ -398,13 +406,14 @@ static void convert_rgb_to_ycbcr(int16_t *r, int16_t *g, int16_t *b)
 static bool encode_component(
 	int16_t *component,
 	uint8_t *out,
-	uint16_t *out_length
+	uint16_t *out_length,
+	const uint32_t quants[RF_RFX_QUANT_COUNT]
 )
 {
 	int16_t dwt[RF_RFX_COEFF_COUNT] = { 0 };
 
 	dwt_2d_encode(component, dwt);
-	quantize(component);
+	quantize(component, quants);
 	differential_encode(component + 4032, 64);
 	memset(out, 0, RF_RFX_COMPONENT_CAPACITY);
 	return rlgr1_encode(
@@ -488,7 +497,8 @@ static GByteArray *encode_tile(
 	uint16_t source_x,
 	uint16_t source_y,
 	uint16_t tile_x_idx,
-	uint16_t tile_y_idx
+	uint16_t tile_y_idx,
+	const uint32_t quants[RF_RFX_QUANT_COUNT]
 )
 {
 	int16_t y[RF_RFX_COEFF_COUNT] = { 0 };
@@ -513,9 +523,9 @@ static GByteArray *encode_tile(
 		cr
 	);
 	convert_rgb_to_ycbcr(y, cb, cr);
-	if (!encode_component(y, y_data, &y_length) ||
-	    !encode_component(cb, cb_data, &cb_length) ||
-	    !encode_component(cr, cr_data, &cr_length))
+	if (!encode_component(y, y_data, &y_length, quants) ||
+	    !encode_component(cb, cb_data, &cb_length, quants) ||
+	    !encode_component(cr, cr_data, &cr_length, quants))
 		return NULL;
 
 	const size_t block_len =
@@ -549,7 +559,8 @@ static void encode_tile_job_sync(struct rfx_tile_job *job)
 		job->source_x,
 		job->source_y,
 		job->tile_x_idx,
-		job->tile_y_idx
+		job->tile_y_idx,
+		job->quants
 	);
 }
 
@@ -700,7 +711,8 @@ static void prepare_tile_jobs(
 	uint16_t x,
 	uint16_t y,
 	uint16_t end_x,
-	uint16_t end_y
+	uint16_t end_y,
+	const uint32_t quants[RF_RFX_QUANT_COUNT]
 )
 {
 	uint16_t index = 0;
@@ -721,6 +733,7 @@ static void prepare_tile_jobs(
 			);
 			job->tile_x_idx = tile_x;
 			job->tile_y_idx = tile_y;
+			job->quants = quants;
 		}
 	}
 }
@@ -780,7 +793,8 @@ static bool append_tiles(
 	uint16_t y,
 	uint16_t end_x,
 	uint16_t end_y,
-	uint16_t tile_count
+	uint16_t tile_count,
+	const uint32_t quants[RF_RFX_QUANT_COUNT]
 )
 {
 	struct rfx_tile_job *jobs = g_new0(struct rfx_tile_job, tile_count);
@@ -795,7 +809,8 @@ static bool append_tiles(
 		x,
 		y,
 		end_x,
-		end_y
+		end_y,
+		quants
 	);
 
 	if (context->thread_pool != NULL &&
@@ -825,10 +840,13 @@ static bool append_tileset(
 	const uint16_t end_y = (height - 1) / RF_RFX_TILE_SIZE;
 	const uint32_t tile_count_32 =
 		((uint32_t)end_x + 1) * ((uint32_t)end_y + 1);
+	uint32_t quants[RF_RFX_QUANT_COUNT] = { 0 };
 	if (tile_count_32 == 0 || tile_count_32 > UINT16_MAX)
 		return false;
 	const uint16_t tile_count = (uint16_t)tile_count_32;
 	const size_t block = begin_block(array, RF_RFX_WBT_EXTENSION);
+
+	memcpy(quants, context->quants, sizeof(quants));
 
 	append_u8(array, 1);
 	append_u8(array, 0);
@@ -840,8 +858,8 @@ static bool append_tileset(
 	append_u16_le(array, tile_count);
 	const size_t tiles_size_offset = array->len;
 	append_u32_le(array, 0);
-	for (size_t i = 0; i < G_N_ELEMENTS(RFX_QUANTS); i += 2)
-		append_u8(array, (uint8_t)(RFX_QUANTS[i] | (RFX_QUANTS[i + 1] << 4)));
+	for (size_t i = 0; i < G_N_ELEMENTS(quants); i += 2)
+		append_u8(array, (uint8_t)(quants[i] | (quants[i + 1] << 4)));
 
 	const size_t tiles_start = array->len;
 	if (!append_tiles(
@@ -855,7 +873,8 @@ static bool append_tileset(
 		    y,
 		    end_x,
 		    end_y,
-		    tile_count
+		    tile_count,
+		    quants
 	    ))
 		return false;
 
@@ -887,6 +906,47 @@ static unsigned int default_thread_count(void)
 	}
 
 	return clamp_thread_count((unsigned int)g_get_num_processors());
+}
+
+static void set_default_quants(RfRdpRfxContext *context)
+{
+	memcpy(context->quants, RFX_DEFAULT_QUANTS, sizeof(context->quants));
+}
+
+void rf_rdp_rfx_context_set_quality_level(
+	RfRdpRfxContext *context,
+	unsigned int quality_level,
+	unsigned int max_quality_level
+)
+{
+	if (context == NULL)
+		return;
+
+	if (max_quality_level == 0 || quality_level == 0) {
+		context->quality_level = 0;
+		set_default_quants(context);
+		return;
+	}
+
+	if (quality_level > max_quality_level)
+		quality_level = max_quality_level;
+	context->quality_level = quality_level;
+
+	for (size_t i = 0; i < G_N_ELEMENTS(context->quants); ++i) {
+		uint32_t delta = RFX_QUALITY_MAX_DELTA[i] * quality_level;
+
+		delta = (delta + max_quality_level / 2) / max_quality_level;
+		context->quants[i] = RFX_DEFAULT_QUANTS[i] + delta;
+		if (context->quants[i] > 15)
+			context->quants[i] = 15;
+	}
+}
+
+unsigned int rf_rdp_rfx_context_get_quality_level(
+	const RfRdpRfxContext *context
+)
+{
+	return context != NULL ? context->quality_level : 0;
 }
 
 void rf_rdp_rfx_context_set_thread_count(
@@ -929,6 +989,7 @@ RfRdpRfxContext *rf_rdp_rfx_context_new(void)
 	RfRdpRfxContext *context = g_new0(RfRdpRfxContext, 1);
 
 	context->send_headers = true;
+	set_default_quants(context);
 	rf_rdp_rfx_context_set_thread_count(context, default_thread_count());
 	return context;
 }

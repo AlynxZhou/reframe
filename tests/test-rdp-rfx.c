@@ -146,6 +146,57 @@ static void assert_region_and_first_tile_are_surface_relative(
 	assert(saw_tileset);
 }
 
+static void copy_tileset_quants(
+	const GByteArray *message,
+	uint8_t quants[5]
+)
+{
+	size_t offset = 0;
+
+	while (offset < message->len) {
+		assert(message->len - offset >= 6);
+		const uint16_t block_type = read_u16_le(message->data + offset);
+		const uint32_t block_len = read_u32_le(message->data + offset + 2);
+
+		assert(block_len >= 6);
+		assert(block_len <= message->len - offset);
+
+		if (block_type == WBT_EXTENSION) {
+			assert(block_len >= 27);
+			assert(read_u16_le(message->data + offset + 8) == CBT_TILESET);
+			memcpy(quants, message->data + offset + 22, 5);
+			return;
+		}
+
+		offset += block_len;
+	}
+
+	assert(false);
+}
+
+static bool quant_nibbles_are_greater_or_equal(
+	const uint8_t baseline[5],
+	const uint8_t candidate[5]
+)
+{
+	bool increased = false;
+
+	for (size_t i = 0; i < 5; ++i) {
+		const uint8_t baseline_low = baseline[i] & 0x0f;
+		const uint8_t baseline_high = baseline[i] >> 4;
+		const uint8_t candidate_low = candidate[i] & 0x0f;
+		const uint8_t candidate_high = candidate[i] >> 4;
+
+		assert(candidate_low >= baseline_low);
+		assert(candidate_high >= baseline_high);
+		increased = increased ||
+			candidate_low > baseline_low ||
+			candidate_high > baseline_high;
+	}
+
+	return increased;
+}
+
 static void fill_frame(uint8_t *rgba, uint16_t width, uint16_t height)
 {
 	for (uint16_t y = 0; y < height; ++y) {
@@ -283,6 +334,56 @@ static void test_encode_damage_rect_uses_surface_relative_message_coords(void)
 	assert_region_and_first_tile_are_surface_relative(message);
 }
 
+static void test_quality_level_changes_quant_table_and_reduces_size(void)
+{
+	g_autoptr(RfRdpRfxContext) high = rf_rdp_rfx_context_new();
+	g_autoptr(RfRdpRfxContext) low = rf_rdp_rfx_context_new();
+	uint8_t rgba[128 * 128 * 4] = { 0 };
+	uint8_t high_quants[5] = { 0 };
+	uint8_t low_quants[5] = { 0 };
+
+	assert(high != NULL);
+	assert(low != NULL);
+	fill_frame(rgba, 128, 128);
+
+	rf_rdp_rfx_context_set_thread_count(high, 1);
+	rf_rdp_rfx_context_set_thread_count(low, 1);
+	rf_rdp_rfx_context_set_quality_level(low, 3, 3);
+
+	g_autoptr(GByteArray) high_message = rf_rdp_rfx_encode_rgba(
+		high,
+		rgba,
+		sizeof(rgba),
+		128 * 4,
+		128,
+		128,
+		0,
+		0,
+		128,
+		128
+	);
+	g_autoptr(GByteArray) low_message = rf_rdp_rfx_encode_rgba(
+		low,
+		rgba,
+		sizeof(rgba),
+		128 * 4,
+		128,
+		128,
+		0,
+		0,
+		128,
+		128
+	);
+
+	assert(high_message != NULL);
+	assert(low_message != NULL);
+	copy_tileset_quants(high_message, high_quants);
+	copy_tileset_quants(low_message, low_quants);
+	assert(quant_nibbles_are_greater_or_equal(high_quants, low_quants));
+	assert(low_message->len <= high_message->len);
+	assert(rf_rdp_rfx_context_get_quality_level(low) == 3);
+}
+
 static void test_parallel_encoding_matches_single_thread_output(void)
 {
 	g_autoptr(RfRdpRfxContext) single = rf_rdp_rfx_context_new();
@@ -295,6 +396,8 @@ static void test_parallel_encoding_matches_single_thread_output(void)
 
 	rf_rdp_rfx_context_set_thread_count(single, 1);
 	rf_rdp_rfx_context_set_thread_count(parallel, 4);
+	rf_rdp_rfx_context_set_quality_level(single, 2, 3);
+	rf_rdp_rfx_context_set_quality_level(parallel, 2, 3);
 
 	g_autoptr(GByteArray) single_message = rf_rdp_rfx_encode_rgba(
 		single,
@@ -336,6 +439,7 @@ int main(void)
 	test_encode_first_frame_writes_headers_and_tiles();
 	test_encode_second_frame_omits_headers();
 	test_encode_damage_rect_uses_surface_relative_message_coords();
+	test_quality_level_changes_quant_table_and_reduces_size();
 	test_parallel_encoding_matches_single_thread_output();
 	return 0;
 }

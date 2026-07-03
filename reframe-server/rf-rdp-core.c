@@ -1162,6 +1162,20 @@ unsigned int rf_rdp_core_update_adaptive_fps(
 	return current_fps;
 }
 
+bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
+	bool limited_clients,
+	bool quality_auto_clients,
+	unsigned int current_quality_level,
+	unsigned int max_quality_level
+)
+{
+	if (!limited_clients)
+		return false;
+	if (!quality_auto_clients)
+		return true;
+	return max_quality_level == 0 || current_quality_level >= max_quality_level;
+}
+
 unsigned int rf_rdp_core_update_video_quality_level(
 	unsigned int current_level,
 	unsigned int max_level,
