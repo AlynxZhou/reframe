@@ -1161,6 +1161,20 @@ static void test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical(void)
 	assert(rf_rdp_core_rdpgfx_ack_limited_fps(0, 0, true, 32) == 0);
 }
 
+static void test_rdpgfx_video_encoder_quality_rebuild_policy(void)
+{
+	assert(!rf_rdp_core_should_rebuild_video_encoder_for_quality(0, 0, 3));
+	assert(!rf_rdp_core_should_rebuild_video_encoder_for_quality(0, 1, 3));
+	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(0, 2, 3));
+	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(0, 3, 3));
+	assert(!rf_rdp_core_should_rebuild_video_encoder_for_quality(1, 2, 3));
+	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(1, 3, 3));
+	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(2, 3, 3));
+	assert(!rf_rdp_core_should_rebuild_video_encoder_for_quality(3, 2, 3));
+	assert(!rf_rdp_core_should_rebuild_video_encoder_for_quality(2, 1, 3));
+	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(1, 0, 3));
+}
+
 static void test_avc444_delta_policy_skips_large_damage(void)
 {
 	assert(rf_rdp_core_should_skip_avc444_delta(1920, 1080, 1920, 1080));
@@ -1845,6 +1859,7 @@ int main(void)
 	test_adaptive_bitmap_fps_policy();
 	test_rdpgfx_quality_headroom_holds_fallback_fps_limit();
 	test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical();
+	test_rdpgfx_video_encoder_quality_rebuild_policy();
 	test_avc444_delta_policy_skips_large_damage();
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();

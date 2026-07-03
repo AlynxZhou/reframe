@@ -209,6 +209,11 @@ bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
 	unsigned int current_quality_level,
 	unsigned int max_quality_level
 );
+bool rf_rdp_core_should_rebuild_video_encoder_for_quality(
+	unsigned int encoder_quality_level,
+	unsigned int requested_quality_level,
+	unsigned int max_quality_level
+);
 unsigned int rf_rdp_core_update_video_quality_level(
 	unsigned int current_level,
 	unsigned int max_level,

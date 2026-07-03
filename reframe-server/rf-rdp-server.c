@@ -143,6 +143,8 @@ struct client {
 	int64_t avc_bit_rate;
 	unsigned int av1_gop_size;
 	unsigned int avc_gop_size;
+	unsigned int av1_quality_level;
+	unsigned int avc_quality_level;
 	enum rf_rdp_av1_mode av1_mode;
 	uint8_t av1_qp;
 	uint8_t avc_qp;
@@ -320,11 +322,13 @@ static void client_reset_avc(struct client *client)
 	client->av1_height = 0;
 	client->av1_bit_rate = 0;
 	client->av1_gop_size = 0;
+	client->av1_quality_level = 0;
 	client->av1_qp = 0;
 	client->avc_width = 0;
 	client->avc_height = 0;
 	client->avc_bit_rate = 0;
 	client->avc_gop_size = 0;
+	client->avc_quality_level = 0;
 	client->avc_qp = 0;
 	client->avc444_signature_x = 0;
 	client->avc444_signature_y = 0;
@@ -1106,6 +1110,7 @@ static bool client_can_use_rdpgfx(const struct client *client)
 static bool client_can_use_rdpgfx_avc420(const struct client *client)
 {
 	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_AVC420 &&
 	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
 	       client->rdpgfx_avc420_available &&
 	       (client->rdpgfx_caps_flags & RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED) == 0;
@@ -1114,6 +1119,7 @@ static bool client_can_use_rdpgfx_avc420(const struct client *client)
 static bool client_can_use_rdpgfx_av1(const struct client *client)
 {
 	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_AV1 &&
 	       client->rdpgfx_av1_available &&
 	       client->rdpgfx_caps_version == RF_RDP_GFX_CAPVERSION_FRDP_1;
 }
@@ -1121,6 +1127,8 @@ static bool client_can_use_rdpgfx_av1(const struct client *client)
 static bool client_can_use_rdpgfx_avc444(const struct client *client)
 {
 	return client_can_use_rdpgfx(client) &&
+	       (client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_AVC444 ||
+		client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_AVC444_V2) &&
 	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
 	       client->rdpgfx_caps_version >= RF_RDP_GFX_CAPVERSION_10 &&
 	       (client->rdpgfx_caps_flags & RF_RDP_GFX_CAPS_FLAG_AVC_DISABLED) == 0;
@@ -1161,6 +1169,24 @@ static uint32_t client_rdpgfx_inflight_frames(const struct client *client)
 	    client->rdpgfx_frame_id < client->rdpgfx_last_ack_frame_id)
 		return 0;
 	return client->rdpgfx_frame_id - client->rdpgfx_last_ack_frame_id;
+}
+
+static unsigned int client_video_encoder_quality_level(
+	const struct client *client,
+	bool encoder_ready,
+	unsigned int encoder_quality_level,
+	unsigned int requested_quality_level
+)
+{
+	if (!encoder_ready)
+		return requested_quality_level;
+	if (rf_rdp_core_should_rebuild_video_encoder_for_quality(
+		    encoder_quality_level,
+		    requested_quality_level,
+		    client->server->max_video_quality_level
+	    ))
+		return requested_quality_level;
+	return encoder_quality_level;
 }
 
 static unsigned int rdpgfx_ack_limited_fps(
@@ -1871,8 +1897,9 @@ static bool send_rdpgfx_av1_update(
 )
 {
 	const unsigned int frame_height = client->server->height;
-	const unsigned int quality_level =
+	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
+	unsigned int quality_level = 0;
 	unsigned int coded_width = 0;
 	unsigned int coded_height = 0;
 	int64_t bit_rate = 0;
@@ -1912,6 +1939,15 @@ static bool send_rdpgfx_av1_update(
 	rgba_stride = (size_t)frame_width * 4;
 	rgba_available_length = buf->len;
 	rgba = buf->data;
+	quality_level = client_video_encoder_quality_level(
+		client,
+		client->av1 != NULL &&
+			rf_rdp_av1_encoder_mode(client->av1) == client->av1_mode &&
+			client->av1_width == coded_width &&
+			client->av1_height == coded_height,
+		client->av1_quality_level,
+		policy_quality_level
+	);
 
 	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
 		coded_width,
@@ -1947,8 +1983,10 @@ static bool send_rdpgfx_av1_update(
 	    client->av1_width != coded_width ||
 	    client->av1_height != coded_height ||
 	    client->av1_bit_rate != bit_rate ||
-	    client->av1_gop_size != gop_size || client->av1_qp != qp) {
+	    client->av1_gop_size != gop_size || client->av1_qp != qp ||
+	    client->av1_quality_level != quality_level) {
 		client_reset_avc(client);
+		client->rdpgfx_update_logged = false;
 		client->av1 = rf_rdp_av1_encoder_new_with_rate_and_mode(
 			(uint16_t)coded_width,
 			(uint16_t)coded_height,
@@ -1964,6 +2002,8 @@ static bool send_rdpgfx_av1_update(
 		client->av1_bit_rate = client->av1 != NULL ? bit_rate : 0;
 		client->av1_gop_size = client->av1 != NULL ? gop_size : 0;
 		client->av1_qp = client->av1 != NULL ? qp : 0;
+		client->av1_quality_level =
+			client->av1 != NULL ? quality_level : 0;
 		force_keyframe = true;
 	}
 	if (client->av1 == NULL) {
@@ -2113,8 +2153,9 @@ static bool send_rdpgfx_avc444_update(
 )
 {
 	const unsigned int frame_height = client->server->height;
-	const unsigned int quality_level =
+	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
+	unsigned int encoder_quality_level = 0;
 	unsigned int coded_width = 0;
 	unsigned int coded_height = 0;
 	int64_t bit_rate = 0;
@@ -2158,7 +2199,7 @@ static bool send_rdpgfx_avc444_update(
 	if (!rf_rdp_core_should_use_avc444(
 		    client_can_use_rdpgfx_avc444(client),
 		    client_can_use_rdpgfx_avc420(client),
-		    quality_level
+		    policy_quality_level
 	    ) ||
 	    frame_width == 0 || frame_height == 0 || width == 0 || height == 0 ||
 	    frame_width > UINT16_MAX || frame_height > UINT16_MAX)
@@ -2177,19 +2218,28 @@ static bool send_rdpgfx_avc444_update(
 	rgba_stride = (size_t)frame_width * 4;
 	rgba_available_length = buf->len;
 	rgba = buf->data;
+	encoder_quality_level = client_video_encoder_quality_level(
+		client,
+		client->avc != NULL &&
+			client->avc_chroma == NULL &&
+			client->avc_width == coded_width &&
+			client->avc_height == coded_height,
+		client->avc_quality_level,
+		policy_quality_level
+	);
 
 	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
 		coded_width,
 		coded_height,
 		MAX(client->server->adaptive_fps, 1),
-		quality_level,
+		encoder_quality_level,
 		true
 	);
-	qp = rf_rdp_core_rdpgfx_avc_qp(quality_level, true);
-	quality = rf_rdp_core_rdpgfx_avc_quality(quality_level, true);
+	qp = rf_rdp_core_rdpgfx_avc_qp(encoder_quality_level, true);
+	quality = rf_rdp_core_rdpgfx_avc_quality(encoder_quality_level, true);
 	gop_size = rf_rdp_core_rdpgfx_avc_gop_size(
 		MAX(client->server->adaptive_fps, 1),
-		quality_level,
+		encoder_quality_level,
 		true
 	);
 
@@ -2211,8 +2261,10 @@ static bool send_rdpgfx_avc444_update(
 	    client->avc_width != coded_width ||
 	    client->avc_height != coded_height ||
 	    client->avc_bit_rate != bit_rate ||
-	    client->avc_gop_size != gop_size || client->avc_qp != qp) {
+	    client->avc_gop_size != gop_size || client->avc_qp != qp ||
+	    client->avc_quality_level != encoder_quality_level) {
 		client_reset_avc(client);
+		client->rdpgfx_update_logged = false;
 		client->avc = rf_rdp_avc_hardware_encoder_new_with_rate(
 			(uint16_t)coded_width,
 			(uint16_t)coded_height,
@@ -2237,6 +2289,7 @@ static bool send_rdpgfx_avc444_update(
 		client->avc_bit_rate = bit_rate;
 		client->avc_gop_size = gop_size;
 		client->avc_qp = qp;
+		client->avc_quality_level = encoder_quality_level;
 		force_keyframe = true;
 	}
 	if (!rf_rdp_avc_encoder_is_hardware(client->avc)) {
@@ -2259,7 +2312,7 @@ static bool send_rdpgfx_avc444_update(
 		frame_height,
 		damage_width,
 		damage_height,
-		quality_level
+		policy_quality_level
 	);
 	damage_pixels = (uint32_t)damage_width * damage_height;
 	if (full_avc444 || skip_avc444_delta) {
@@ -2292,7 +2345,7 @@ static bool send_rdpgfx_avc444_update(
 		return true;
 	if (rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		    client->rdpgfx_frame_id + 1u,
-		    quality_level,
+		    policy_quality_level,
 		    full_avc444,
 		    encode_luma,
 		    encode_chroma,
@@ -2510,8 +2563,9 @@ static bool send_rdpgfx_avc420_update(
 )
 {
 	const unsigned int frame_height = client->server->height;
-	const unsigned int quality_level =
+	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
+	unsigned int encoder_quality_level = 0;
 	unsigned int coded_width = 0;
 	unsigned int coded_height = 0;
 	int64_t bit_rate = 0;
@@ -2551,19 +2605,28 @@ static bool send_rdpgfx_avc420_update(
 	rgba_stride = (size_t)frame_width * 4;
 	rgba_available_length = buf->len;
 	rgba = buf->data;
+	encoder_quality_level = client_video_encoder_quality_level(
+		client,
+		client->avc != NULL &&
+			client->avc_chroma == NULL &&
+			client->avc_width == coded_width &&
+			client->avc_height == coded_height,
+		client->avc_quality_level,
+		policy_quality_level
+	);
 
 	bit_rate = rf_rdp_core_rdpgfx_avc_bit_rate(
 		coded_width,
 		coded_height,
 		MAX(client->server->adaptive_fps, 1),
-		quality_level,
+		encoder_quality_level,
 		false
 	);
-	qp = rf_rdp_core_rdpgfx_avc_qp(quality_level, false);
-	quality = rf_rdp_core_rdpgfx_avc_quality(quality_level, false);
+	qp = rf_rdp_core_rdpgfx_avc_qp(encoder_quality_level, false);
+	quality = rf_rdp_core_rdpgfx_avc_quality(encoder_quality_level, false);
 	gop_size = rf_rdp_core_rdpgfx_avc_gop_size(
 		MAX(client->server->adaptive_fps, 1),
-		quality_level,
+		encoder_quality_level,
 		false
 	);
 
@@ -2585,8 +2648,10 @@ static bool send_rdpgfx_avc420_update(
 	    client->avc_width != coded_width ||
 	    client->avc_height != coded_height ||
 	    client->avc_bit_rate != bit_rate ||
-	    client->avc_gop_size != gop_size || client->avc_qp != qp) {
+	    client->avc_gop_size != gop_size || client->avc_qp != qp ||
+	    client->avc_quality_level != encoder_quality_level) {
 		client_reset_avc(client);
+		client->rdpgfx_update_logged = false;
 		client->avc = rf_rdp_avc_encoder_new_with_rate(
 			(uint16_t)coded_width,
 			(uint16_t)coded_height,
@@ -2601,6 +2666,8 @@ static bool send_rdpgfx_avc420_update(
 		client->avc_bit_rate = client->avc != NULL ? bit_rate : 0;
 		client->avc_gop_size = client->avc != NULL ? gop_size : 0;
 		client->avc_qp = client->avc != NULL ? qp : 0;
+		client->avc_quality_level =
+			client->avc != NULL ? encoder_quality_level : 0;
 		force_keyframe = true;
 	}
 	if (client->avc == NULL) {
@@ -3767,18 +3834,6 @@ static unsigned int rdpgfx_rfx_style_client_count(RfRDPServer *this)
 	return rfx_clients;
 }
 
-static void reset_rdpgfx_video_encoders(RfRDPServer *this)
-{
-	for (GList *l = this->clients; l != NULL; l = l->next) {
-		struct client *client = l->data;
-
-		if (client_can_use_rdpgfx(client)) {
-			client_reset_avc(client);
-			client->rdpgfx_update_logged = false;
-		}
-	}
-}
-
 static void maybe_log_stats(
 	RfRDPServer *this,
 	int64_t now,
@@ -3869,7 +3924,6 @@ static void maybe_log_stats(
 	}
 	if (this->rdpgfx_video_quality_level != previous_video_quality) {
 		this->rdpgfx_video_quality_last_change_time_us = now;
-		reset_rdpgfx_video_encoders(this);
 		g_message(
 			"RDP: RDPGFX graphics quality level changed from %u to %u.",
 			previous_video_quality,

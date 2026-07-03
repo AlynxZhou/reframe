@@ -1176,6 +1176,29 @@ bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
 	return max_quality_level == 0 || current_quality_level >= max_quality_level;
 }
 
+bool rf_rdp_core_should_rebuild_video_encoder_for_quality(
+	unsigned int encoder_quality_level,
+	unsigned int requested_quality_level,
+	unsigned int max_quality_level
+)
+{
+	if (max_quality_level > 0) {
+		if (encoder_quality_level > max_quality_level)
+			encoder_quality_level = max_quality_level;
+		if (requested_quality_level > max_quality_level)
+			requested_quality_level = max_quality_level;
+	}
+	if (encoder_quality_level == requested_quality_level)
+		return false;
+	if (requested_quality_level == 0)
+		return true;
+	if (max_quality_level > 0 && requested_quality_level >= max_quality_level)
+		return true;
+	if (requested_quality_level > encoder_quality_level)
+		return requested_quality_level - encoder_quality_level >= 2;
+	return false;
+}
+
 static bool video_quality_candidate_increases_pressure(
 	unsigned int candidate,
 	unsigned int current_level

@@ -612,6 +612,28 @@ static void test_select_codec_policy_uses_avc444_without_420(void)
 	) == RF_RDP_GFX_CODEC_AVC444_V2);
 }
 
+static void test_select_codec_policy_respects_avc_disabled(void)
+{
+	const struct rf_rdp_gfx_caps caps = {
+		.progressive = true,
+		.progressive_v2 = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const struct rf_rdp_gfx_server_codecs server = {
+		.avc420 = true,
+		.avc444 = true,
+		.progressive = true,
+		.remotefx = true,
+		.planar = true
+	};
+	const enum rf_rdp_gfx_codec selected =
+		rf_rdp_gfx_select_codec_policy(&caps, &server, false);
+
+	assert(selected == RF_RDP_GFX_CODEC_PROGRESSIVE);
+	assert(!rf_rdp_gfx_codec_is_video(selected));
+}
+
 static void test_select_codec_policy_keeps_av1_first_under_pressure(void)
 {
 	const struct rf_rdp_gfx_caps caps = {
@@ -1465,6 +1487,7 @@ int main(void)
 	test_select_codec_matrix_prefers_av1_when_available();
 	test_select_codec_policy_keeps_420_above_444();
 	test_select_codec_policy_uses_avc444_without_420();
+	test_select_codec_policy_respects_avc_disabled();
 	test_select_codec_policy_keeps_av1_first_under_pressure();
 	test_select_codec_matrix_falls_back_through_graphics_codecs();
 	test_parse_frame_acknowledge();
