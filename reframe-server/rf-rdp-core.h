@@ -256,6 +256,13 @@ bool rf_rdp_core_should_skip_avc444_delta_for_quality(
 	unsigned int quality_level
 );
 bool rf_rdp_core_rdpgfx_avc444_lc_index(uint8_t lc, unsigned int *index);
+bool rf_rdp_core_should_defer_avc444_chroma(
+	uint32_t frame_id,
+	unsigned int quality_level,
+	bool full_frame,
+	bool luma_changed,
+	bool chroma_changed
+);
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 	unsigned int width,
 	unsigned int height,

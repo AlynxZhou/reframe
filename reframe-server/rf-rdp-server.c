@@ -2279,6 +2279,14 @@ static bool send_rdpgfx_avc444_update(
 	}
 	if (!encode_luma && !encode_chroma)
 		return true;
+	if (rf_rdp_core_should_defer_avc444_chroma(
+		    client->rdpgfx_frame_id + 1u,
+		    quality_level,
+		    full_avc444,
+		    encode_luma,
+		    encode_chroma
+	    ))
+		encode_chroma = false;
 
 	if (encode_luma && encode_chroma) {
 		uint8_t encoded_lc = 0xff;

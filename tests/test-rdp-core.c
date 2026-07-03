@@ -1484,6 +1484,34 @@ static void test_rdpgfx_avc444_lc_stats_index(void)
 	));
 }
 
+static void test_rdpgfx_avc444_chroma_cadence_policy(void)
+{
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
+		1, 1, false, true, true
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
+		1, 3, true, true, true
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
+		1, 3, false, false, true
+	));
+	assert(rf_rdp_core_should_defer_avc444_chroma(
+		1, 2, false, true, true
+	));
+	assert(rf_rdp_core_should_defer_avc444_chroma(
+		2, 2, false, true, true
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
+		3, 2, false, true, true
+	));
+	assert(rf_rdp_core_should_defer_avc444_chroma(
+		4, 3, false, true, true
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
+		5, 3, false, true, true
+	));
+}
+
 int main(void)
 {
 	test_parse_client_info_shape();
@@ -1516,5 +1544,6 @@ int main(void)
 	test_rdpgfx_video_quality_policy_uses_qoe_latency();
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
 	test_rdpgfx_avc444_lc_stats_index();
+	test_rdpgfx_avc444_chroma_cadence_policy();
 	return 0;
 }
