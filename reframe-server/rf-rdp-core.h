@@ -176,6 +176,31 @@ bool rf_rdp_core_make_full_surface_rect(
 	uint16_t *width,
 	uint16_t *height
 );
+bool rf_rdp_core_fit_frame_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+);
+bool rf_rdp_core_map_update_rect_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t source_x,
+	uint16_t source_y,
+	uint16_t source_width,
+	uint16_t source_height,
+	bool full_frame,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+);
 bool rf_rdp_core_frame_should_render(
 	int64_t last_frame_time_us,
 	int64_t now_us,
@@ -208,6 +233,14 @@ bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
 	bool quality_auto_clients,
 	unsigned int current_quality_level,
 	unsigned int max_quality_level
+);
+bool rf_rdp_core_should_accept_desktop_resize(
+	bool resize_owner_present,
+	bool client_is_resize_owner,
+	unsigned int current_width,
+	unsigned int current_height,
+	unsigned int requested_width,
+	unsigned int requested_height
 );
 bool rf_rdp_core_should_rebuild_video_encoder_for_quality(
 	unsigned int encoder_quality_level,

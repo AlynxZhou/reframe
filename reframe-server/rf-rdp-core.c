@@ -1040,6 +1040,150 @@ bool rf_rdp_core_make_full_surface_rect(
 	return true;
 }
 
+bool rf_rdp_core_fit_frame_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+)
+{
+	unsigned int fit_width = 0;
+	unsigned int fit_height = 0;
+
+	if (x == NULL || y == NULL || width == NULL || height == NULL ||
+	    frame_width == 0 || frame_height == 0 ||
+	    client_width == 0 || client_height == 0 ||
+	    frame_width > UINT16_MAX || frame_height > UINT16_MAX ||
+	    client_width > UINT16_MAX || client_height > UINT16_MAX)
+		return false;
+
+	if ((uint64_t)client_width * frame_height >=
+	    (uint64_t)client_height * frame_width) {
+		fit_width = (unsigned int)(
+			(uint64_t)client_height * frame_width / frame_height
+		);
+		fit_height = client_height;
+	} else {
+		fit_width = client_width;
+		fit_height = (unsigned int)(
+			(uint64_t)client_width * frame_height / frame_width
+		);
+	}
+	if (fit_width == 0 || fit_height == 0 ||
+	    fit_width > client_width || fit_height > client_height)
+		return false;
+
+	*x = (uint16_t)((client_width - fit_width) / 2);
+	*y = (uint16_t)((client_height - fit_height) / 2);
+	*width = (uint16_t)fit_width;
+	*height = (uint16_t)fit_height;
+	return true;
+}
+
+bool rf_rdp_core_map_update_rect_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t source_x,
+	uint16_t source_y,
+	uint16_t source_width,
+	uint16_t source_height,
+	bool full_frame,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+)
+{
+	uint16_t viewport_x = 0;
+	uint16_t viewport_y = 0;
+	uint16_t viewport_width = 0;
+	uint16_t viewport_height = 0;
+	uint32_t source_right = (uint32_t)source_x + source_width;
+	uint32_t source_bottom = (uint32_t)source_y + source_height;
+	uint32_t mapped_x0 = 0;
+	uint32_t mapped_y0 = 0;
+	uint32_t mapped_x1 = 0;
+	uint32_t mapped_y1 = 0;
+
+	if (x == NULL || y == NULL || width == NULL || height == NULL ||
+	    frame_width == 0 || frame_height == 0 ||
+	    client_width == 0 || client_height == 0 ||
+	    frame_width > UINT16_MAX || frame_height > UINT16_MAX ||
+	    client_width > UINT16_MAX || client_height > UINT16_MAX ||
+	    source_width == 0 || source_height == 0)
+		return false;
+
+	if (full_frame) {
+		*x = 0;
+		*y = 0;
+		*width = (uint16_t)client_width;
+		*height = (uint16_t)client_height;
+		return true;
+	}
+
+	if (source_x >= frame_width || source_y >= frame_height)
+		return false;
+	if (source_right > frame_width)
+		source_right = frame_width;
+	if (source_bottom > frame_height)
+		source_bottom = frame_height;
+	if (source_right <= source_x || source_bottom <= source_y)
+		return false;
+
+	if (frame_width == client_width && frame_height == client_height) {
+		*x = source_x;
+		*y = source_y;
+		*width = (uint16_t)(source_right - source_x);
+		*height = (uint16_t)(source_bottom - source_y);
+		return true;
+	}
+
+	if (!rf_rdp_core_fit_frame_to_client_surface(
+		    frame_width,
+		    frame_height,
+		    client_width,
+		    client_height,
+		    &viewport_x,
+		    &viewport_y,
+		    &viewport_width,
+		    &viewport_height
+	    ))
+		return false;
+
+	mapped_x0 = viewport_x +
+		(uint32_t)((uint64_t)source_x * viewport_width / frame_width);
+	mapped_y0 = viewport_y +
+		(uint32_t)((uint64_t)source_y * viewport_height / frame_height);
+	mapped_x1 = viewport_x +
+		(uint32_t)(
+			((uint64_t)source_right * viewport_width + frame_width - 1) /
+			frame_width
+		);
+	mapped_y1 = viewport_y +
+		(uint32_t)(
+			((uint64_t)source_bottom * viewport_height + frame_height - 1) /
+			frame_height
+		);
+	if (mapped_x1 > client_width)
+		mapped_x1 = client_width;
+	if (mapped_y1 > client_height)
+		mapped_y1 = client_height;
+	if (mapped_x1 <= mapped_x0 || mapped_y1 <= mapped_y0)
+		return false;
+
+	*x = (uint16_t)mapped_x0;
+	*y = (uint16_t)mapped_y0;
+	*width = (uint16_t)(mapped_x1 - mapped_x0);
+	*height = (uint16_t)(mapped_y1 - mapped_y0);
+	return true;
+}
+
 static int64_t frame_interval_us(unsigned int max_fps)
 {
 	if (max_fps == 0)
@@ -1174,6 +1318,28 @@ bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
 	if (!quality_auto_clients)
 		return true;
 	return max_quality_level == 0 || current_quality_level >= max_quality_level;
+}
+
+bool rf_rdp_core_should_accept_desktop_resize(
+	bool resize_owner_present,
+	bool client_is_resize_owner,
+	unsigned int current_width,
+	unsigned int current_height,
+	unsigned int requested_width,
+	unsigned int requested_height
+)
+{
+	if (!resize_owner_present || client_is_resize_owner)
+		return true;
+	if (requested_width == 0 || requested_height == 0)
+		return false;
+	if (current_width == 0 || current_height == 0)
+		return true;
+
+	const uint64_t current_area = (uint64_t)current_width * current_height;
+	const uint64_t requested_area = (uint64_t)requested_width * requested_height;
+
+	return requested_area > current_area;
 }
 
 bool rf_rdp_core_should_rebuild_video_encoder_for_quality(

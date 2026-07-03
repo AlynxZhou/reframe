@@ -13,6 +13,39 @@ extern bool rf_rdp_core_should_defer_graphics_for_rdpgfx(
 	bool rdpgfx_disabled,
 	bool rdpgfx_caps_confirmed
 );
+bool rf_rdp_core_should_accept_desktop_resize(
+	bool resize_owner_present,
+	bool client_is_resize_owner,
+	unsigned int current_width,
+	unsigned int current_height,
+	unsigned int requested_width,
+	unsigned int requested_height
+);
+bool rf_rdp_core_fit_frame_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+);
+bool rf_rdp_core_map_update_rect_to_client_surface(
+	unsigned int frame_width,
+	unsigned int frame_height,
+	unsigned int client_width,
+	unsigned int client_height,
+	uint16_t source_x,
+	uint16_t source_y,
+	uint16_t source_width,
+	uint16_t source_height,
+	bool full_frame,
+	uint16_t *x,
+	uint16_t *y,
+	uint16_t *width,
+	uint16_t *height
+);
 struct rf_rect {
 	int x;
 	int y;
@@ -1175,6 +1208,128 @@ static void test_rdpgfx_video_encoder_quality_rebuild_policy(void)
 	assert(rf_rdp_core_should_rebuild_video_encoder_for_quality(1, 0, 3));
 }
 
+static void test_rdp_resize_owner_policy_keeps_secondary_clients_from_resizing(void)
+{
+	assert(rf_rdp_core_should_accept_desktop_resize(
+		false,
+		false,
+		0,
+		0,
+		1668,
+		759
+	));
+	assert(rf_rdp_core_should_accept_desktop_resize(
+		true,
+		true,
+		1668,
+		759,
+		1920,
+		1080
+	));
+	assert(rf_rdp_core_should_accept_desktop_resize(
+		true,
+		false,
+		1668,
+		759,
+		1920,
+		1080
+	));
+	assert(!rf_rdp_core_should_accept_desktop_resize(
+		true,
+		false,
+		1920,
+		1080,
+		1668,
+		759
+	));
+}
+
+static void test_client_surface_viewport_preserves_source_aspect(void)
+{
+	uint16_t x = 0;
+	uint16_t y = 0;
+	uint16_t width = 0;
+	uint16_t height = 0;
+
+	assert(rf_rdp_core_fit_frame_to_client_surface(
+		1920,
+		1080,
+		1668,
+		759,
+		&x,
+		&y,
+		&width,
+		&height
+	));
+	assert(x == 159);
+	assert(y == 0);
+	assert(width == 1349);
+	assert(height == 759);
+
+	assert(rf_rdp_core_fit_frame_to_client_surface(
+		1920,
+		1080,
+		1920,
+		1080,
+		&x,
+		&y,
+		&width,
+		&height
+	));
+	assert(x == 0);
+	assert(y == 0);
+	assert(width == 1920);
+	assert(height == 1080);
+}
+
+static void test_client_surface_update_rect_stays_inside_client_desktop(void)
+{
+	uint16_t x = 0;
+	uint16_t y = 0;
+	uint16_t width = 0;
+	uint16_t height = 0;
+
+	assert(rf_rdp_core_map_update_rect_to_client_surface(
+		1920,
+		1080,
+		1668,
+		759,
+		0,
+		96,
+		1920,
+		912,
+		false,
+		&x,
+		&y,
+		&width,
+		&height
+	));
+	assert(x == 159);
+	assert(y == 67);
+	assert(width == 1349);
+	assert(height == 642);
+
+	assert(rf_rdp_core_map_update_rect_to_client_surface(
+		1920,
+		1080,
+		1668,
+		759,
+		0,
+		96,
+		1920,
+		912,
+		true,
+		&x,
+		&y,
+		&width,
+		&height
+	));
+	assert(x == 0);
+	assert(y == 0);
+	assert(width == 1668);
+	assert(height == 759);
+}
+
 static void test_avc444_delta_policy_skips_large_damage(void)
 {
 	assert(rf_rdp_core_should_skip_avc444_delta(1920, 1080, 1920, 1080));
@@ -1860,6 +2015,9 @@ int main(void)
 	test_rdpgfx_quality_headroom_holds_fallback_fps_limit();
 	test_rdpgfx_ack_fps_policy_keeps_fps_until_queues_are_critical();
 	test_rdpgfx_video_encoder_quality_rebuild_policy();
+	test_rdp_resize_owner_policy_keeps_secondary_clients_from_resizing();
+	test_client_surface_viewport_preserves_source_aspect();
+	test_client_surface_update_rect_stays_inside_client_desktop();
 	test_avc444_delta_policy_skips_large_damage();
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();

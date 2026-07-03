@@ -61,6 +61,7 @@ struct _RfRDPServer {
 	GTlsCertificate *certificate;
 	GMutex lock;
 	GList *clients;
+	struct client *resize_owner;
 	char **ips;
 	char *tls_private_key_file;
 	char *tls_certificate_file;
@@ -72,6 +73,8 @@ struct _RfRDPServer {
 	char *clipboard_text;
 	GByteArray *last_frame;
 	unsigned int port;
+	unsigned int desktop_width;
+	unsigned int desktop_height;
 	unsigned int width;
 	unsigned int height;
 	unsigned int last_frame_width;
@@ -299,6 +302,7 @@ static bool send_graphics_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -408,6 +412,9 @@ static void set_client_desktop_size(
 	RfRDPServer *this = client->server;
 	unsigned int width = 0;
 	unsigned int height = 0;
+	unsigned int current_width = 0;
+	unsigned int current_height = 0;
+	bool accepted = false;
 
 	width = requested_width;
 	height = requested_height;
@@ -419,9 +426,40 @@ static void set_client_desktop_size(
 	client->desktop_width = width;
 	client->desktop_height = height;
 	g_mutex_lock(&this->lock);
-	this->width = width;
-	this->height = height;
+	if (rf_rdp_core_should_accept_desktop_resize(
+		    this->resize_owner != NULL,
+		    this->resize_owner == client,
+		    this->desktop_width,
+		    this->desktop_height,
+		    width,
+		    height
+	    )) {
+		if (this->resize_owner == NULL)
+			this->resize_owner = client;
+		else if (this->resize_owner != client)
+			g_message(
+				"RDP: Desktop resize ownership moved from %ux%u to larger client %ux%u.",
+				this->desktop_width,
+				this->desktop_height,
+				width,
+				height
+			);
+		this->resize_owner = client;
+		this->desktop_width = width;
+		this->desktop_height = height;
+		accepted = true;
+	}
+	current_width = this->desktop_width;
+	current_height = this->desktop_height;
 	g_mutex_unlock(&this->lock);
+	if (!accepted && width > 0 && height > 0)
+		g_message(
+			"RDP: Keeping desktop size %ux%u; secondary client requested %ux%u.",
+			current_width,
+			current_height,
+			width,
+			height
+		);
 }
 
 static GByteArray *read_tpkt(GInputStream *input)
@@ -445,10 +483,31 @@ static GByteArray *read_tpkt(GInputStream *input)
 	return pdu;
 }
 
+static struct client *largest_desktop_client(GList *clients)
+{
+	struct client *largest = NULL;
+	uint64_t largest_area = 0;
+
+	for (GList *l = clients; l != NULL; l = l->next) {
+		struct client *candidate = l->data;
+		const uint64_t area =
+			(uint64_t)candidate->desktop_width * candidate->desktop_height;
+
+		if (area > largest_area) {
+			largest = candidate;
+			largest_area = area;
+		}
+	}
+	return largest;
+}
+
 static void remove_client(struct client *client)
 {
 	RfRDPServer *this = client->server;
 	bool last_client = false;
+	bool resize_changed = false;
+	unsigned int resize_width = 0;
+	unsigned int resize_height = 0;
 
 	g_mutex_lock(&this->lock);
 	if (client->counted) {
@@ -462,16 +521,41 @@ static void remove_client(struct client *client)
 			this->next_render_time_us = -1;
 		}
 	}
+	if (this->resize_owner == client) {
+		this->resize_owner = NULL;
+		if (this->clients != NULL) {
+			struct client *next_owner = largest_desktop_client(this->clients);
+
+			this->resize_owner = next_owner;
+			if (next_owner->desktop_width > 0 &&
+			    next_owner->desktop_height > 0 &&
+			    (this->desktop_width != next_owner->desktop_width ||
+			     this->desktop_height != next_owner->desktop_height)) {
+				this->desktop_width = next_owner->desktop_width;
+				this->desktop_height = next_owner->desktop_height;
+				resize_width = this->desktop_width;
+				resize_height = this->desktop_height;
+				resize_changed = true;
+			}
+		}
+	}
 	g_mutex_unlock(&this->lock);
 
 	if (last_client)
 		rf_remote_server_handle_last_client(RF_REMOTE_SERVER(this));
+	else if (resize_changed)
+		rf_remote_server_handle_resize_event(
+			RF_REMOTE_SERVER(this),
+			resize_width,
+			resize_height
+		);
 }
 
 static void add_client(struct client *client)
 {
 	RfRDPServer *this = client->server;
 	bool first_client = false;
+	bool resize_owner = false;
 
 	g_mutex_lock(&this->lock);
 	if (!client->counted) {
@@ -502,6 +586,7 @@ static void add_client(struct client *client)
 				    client,
 				    this->last_frame,
 				    this->last_frame_width,
+				    this->last_frame_height,
 				    0,
 				    0,
 				    this->last_frame_width,
@@ -522,12 +607,13 @@ static void add_client(struct client *client)
 				g_io_stream_close(G_IO_STREAM(client->connection), NULL, NULL);
 			}
 		}
+		resize_owner = this->resize_owner == client;
 	}
 	g_mutex_unlock(&this->lock);
 
 	if (first_client)
 		rf_remote_server_handle_first_client(RF_REMOTE_SERVER(this));
-	if (client->desktop_width > 0 && client->desktop_height > 0)
+	if (resize_owner && client->desktop_width > 0 && client->desktop_height > 0)
 		rf_remote_server_handle_resize_event(
 			RF_REMOTE_SERVER(this),
 			client->desktop_width,
@@ -625,13 +711,21 @@ static void get_desktop_size(
 )
 {
 	RfRDPServer *this = client->server;
-	unsigned int current_width = 0;
-	unsigned int current_height = 0;
+	unsigned int current_width = client->desktop_width;
+	unsigned int current_height = client->desktop_height;
 
-	g_mutex_lock(&this->lock);
-	current_width = this->width;
-	current_height = this->height;
-	g_mutex_unlock(&this->lock);
+	if (current_width == 0 || current_height == 0) {
+		g_mutex_lock(&this->lock);
+		if (current_width == 0)
+			current_width = this->desktop_width;
+		if (current_height == 0)
+			current_height = this->desktop_height;
+		if (current_width == 0)
+			current_width = this->width;
+		if (current_height == 0)
+			current_height = this->height;
+		g_mutex_unlock(&this->lock);
+	}
 
 	if (current_width == 0)
 		current_width = 1920;
@@ -644,6 +738,98 @@ static void get_desktop_size(
 
 	*width = current_width;
 	*height = current_height;
+}
+
+static bool get_client_frame_size(
+	const struct client *client,
+	unsigned int frame_width,
+	unsigned int frame_height,
+	uint16_t *width,
+	uint16_t *height
+)
+{
+	unsigned int client_width = client->desktop_width;
+	unsigned int client_height = client->desktop_height;
+
+	if (width == NULL || height == NULL || frame_width == 0 || frame_height == 0)
+		return false;
+	if (client_width == 0)
+		client_width = frame_width;
+	if (client_height == 0)
+		client_height = frame_height;
+	if (client_width > UINT16_MAX || client_height > UINT16_MAX)
+		return false;
+
+	*width = (uint16_t)client_width;
+	*height = (uint16_t)client_height;
+	return *width > 0 && *height > 0;
+}
+
+static GByteArray *render_client_surface_frame(
+	const GByteArray *source,
+	unsigned int source_width,
+	unsigned int source_height,
+	uint16_t client_width,
+	uint16_t client_height
+)
+{
+	uint16_t viewport_x = 0;
+	uint16_t viewport_y = 0;
+	uint16_t viewport_width = 0;
+	uint16_t viewport_height = 0;
+	const size_t source_stride = (size_t)source_width * 4;
+	const size_t client_stride = (size_t)client_width * 4;
+	const size_t client_length = client_stride * client_height;
+	GByteArray *frame = NULL;
+
+	if (source == NULL || source->data == NULL || source_width == 0 ||
+	    source_height == 0 || client_width == 0 || client_height == 0 ||
+	    (size_t)source_width > SIZE_MAX / 4 ||
+	    (size_t)source_height > SIZE_MAX / source_stride ||
+	    source->len < source_stride * source_height ||
+	    client_stride == 0 || client_height > SIZE_MAX / client_stride)
+		return NULL;
+	if (!rf_rdp_core_fit_frame_to_client_surface(
+		    source_width,
+		    source_height,
+		    client_width,
+		    client_height,
+		    &viewport_x,
+		    &viewport_y,
+		    &viewport_width,
+		    &viewport_height
+	    ))
+		return NULL;
+
+	frame = g_byte_array_sized_new(client_length);
+	g_byte_array_set_size(frame, client_length);
+	for (uint16_t y = 0; y < client_height; ++y) {
+		uint8_t *row = frame->data + (size_t)y * client_stride;
+
+		for (uint16_t x = 0; x < client_width; ++x) {
+			row[(size_t)x * 4 + 0] = 0;
+			row[(size_t)x * 4 + 1] = 0;
+			row[(size_t)x * 4 + 2] = 0;
+			row[(size_t)x * 4 + 3] = 0xff;
+		}
+	}
+
+	for (uint16_t y = 0; y < viewport_height; ++y) {
+		const uint32_t src_y =
+			(uint32_t)((uint64_t)y * source_height / viewport_height);
+		const uint8_t *src_row =
+			source->data + (size_t)src_y * source_stride;
+		uint8_t *dst_row =
+			frame->data + (size_t)(viewport_y + y) * client_stride +
+			(size_t)viewport_x * 4;
+
+		for (uint16_t x = 0; x < viewport_width; ++x) {
+			const uint32_t src_x =
+				(uint32_t)((uint64_t)x * source_width / viewport_width);
+			memcpy(dst_row + (size_t)x * 4, src_row + (size_t)src_x * 4, 4);
+		}
+	}
+	return frame;
 }
 
 static bool write_core_packet(
@@ -1889,6 +2075,7 @@ static bool send_rdpgfx_av1_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -1896,7 +2083,6 @@ static bool send_rdpgfx_av1_update(
 	size_t *bytes_sent
 )
 {
-	const unsigned int frame_height = client->server->height;
 	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
 	unsigned int quality_level = 0;
@@ -2145,6 +2331,7 @@ static bool send_rdpgfx_avc444_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -2152,7 +2339,6 @@ static bool send_rdpgfx_avc444_update(
 	size_t *bytes_sent
 )
 {
-	const unsigned int frame_height = client->server->height;
 	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
 	unsigned int encoder_quality_level = 0;
@@ -2555,6 +2741,7 @@ static bool send_rdpgfx_avc420_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -2562,7 +2749,6 @@ static bool send_rdpgfx_avc420_update(
 	size_t *bytes_sent
 )
 {
-	const unsigned int frame_height = client->server->height;
 	const unsigned int policy_quality_level =
 		client->server->rdpgfx_video_quality_level;
 	unsigned int encoder_quality_level = 0;
@@ -2808,6 +2994,7 @@ static bool send_rdpgfx_progressive_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -2815,7 +3002,6 @@ static bool send_rdpgfx_progressive_update(
 	size_t *bytes_sent
 )
 {
-	const unsigned int frame_height = client->server->height;
 	const uint32_t right = (uint32_t)x + width;
 	const uint32_t bottom = (uint32_t)y + height;
 	const uint16_t codec_id = RF_RDP_GFX_CODECID_CAPROGRESSIVE;
@@ -2947,6 +3133,7 @@ static bool send_rdpgfx_rfx_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -2954,7 +3141,6 @@ static bool send_rdpgfx_rfx_update(
 	size_t *bytes_sent
 )
 {
-	const unsigned int frame_height = client->server->height;
 	const uint32_t right = (uint32_t)x + width;
 	const uint32_t bottom = (uint32_t)y + height;
 	g_autoptr(GByteArray) rfx = NULL;
@@ -3086,6 +3272,7 @@ static bool send_rdpgfx_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -3111,7 +3298,8 @@ static bool send_rdpgfx_update(
 	uint32_t frame_id = 0;
 
 	if (!client_can_use_rdpgfx(client) || width == 0 || height == 0 ||
-	    frame_width == 0 || right > UINT16_MAX || bottom > UINT16_MAX)
+	    frame_width == 0 || frame_height == 0 ||
+	    right > UINT16_MAX || bottom > UINT16_MAX)
 		return false;
 	if (uncompressed_length == 0 ||
 	    uncompressed_length / 4 / height != width)
@@ -3121,6 +3309,7 @@ static bool send_rdpgfx_update(
 		    client,
 		    buf,
 		    frame_width,
+		    frame_height,
 		    x,
 		    y,
 		    width,
@@ -3141,6 +3330,7 @@ static bool send_rdpgfx_update(
 		    client,
 		    buf,
 		    frame_width,
+		    frame_height,
 		    x,
 		    y,
 		    width,
@@ -3152,12 +3342,13 @@ static bool send_rdpgfx_update(
 		    client,
 		    buf,
 		    frame_width,
+		    frame_height,
 		    x,
 		    y,
 		    width,
 		    height,
 		    bytes_sent
-		    ))
+	    ))
 		return true;
 	if (!client_can_use_rdpgfx_avc420(client) &&
 	    !client->rdpgfx_avc_client_disabled_logged) {
@@ -3171,6 +3362,7 @@ static bool send_rdpgfx_update(
 		    client,
 		    buf,
 		    frame_width,
+		    frame_height,
 		    x,
 		    y,
 		    width,
@@ -3182,6 +3374,7 @@ static bool send_rdpgfx_update(
 		    client,
 		    buf,
 		    frame_width,
+		    frame_height,
 		    x,
 		    y,
 		    width,
@@ -3192,13 +3385,13 @@ static bool send_rdpgfx_update(
 
 	if (!client->rdpgfx_surface_ready ||
 	    client->rdpgfx_surface_width != frame_width ||
-	    client->rdpgfx_surface_height != client->server->height) {
-		if (frame_width > UINT16_MAX || client->server->height > UINT16_MAX)
+	    client->rdpgfx_surface_height != frame_height) {
+		if (frame_width > UINT16_MAX || frame_height > UINT16_MAX)
 			return false;
 		if (!send_rdpgfx_surface_setup(
 			    client,
 			    frame_width,
-			    client->server->height,
+			    frame_height,
 			    bytes_sent
 		    ))
 			return false;
@@ -3562,6 +3755,7 @@ static bool send_graphics_update(
 	struct client *client,
 	const GByteArray *buf,
 	unsigned int frame_width,
+	unsigned int frame_height,
 	uint16_t x,
 	uint16_t y,
 	uint16_t width,
@@ -3594,6 +3788,7 @@ static bool send_graphics_update(
 			    client,
 			    buf,
 			    frame_width,
+			    frame_height,
 			    x,
 			    y,
 			    width,
@@ -4064,6 +4259,8 @@ static void update(
 	uint16_t log_y = 0;
 	uint16_t log_w = 0;
 	uint16_t log_h = 0;
+	unsigned int log_frame_width = 0;
+	unsigned int log_frame_height = 0;
 	bool have_log_rect = false;
 	unsigned int full_clients = 0;
 	size_t bytes_sent = 0;
@@ -4089,12 +4286,40 @@ static void update(
 	g_mutex_lock(&this->lock);
 	this->width = width;
 	this->height = height;
+	const bool source_size_changed = this->last_frame != NULL &&
+		(this->last_frame_width != width || this->last_frame_height != height);
 	const int64_t start = g_get_monotonic_time();
 	unsigned int clients = 0;
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
+		uint16_t client_frame_width = 0;
+		uint16_t client_frame_height = 0;
+		uint16_t send_x = 0;
+		uint16_t send_y = 0;
+		uint16_t send_w = 0;
+		uint16_t send_h = 0;
+		unsigned int send_frame_width = width;
+		unsigned int send_frame_height = height;
+		const GByteArray *send_buf = buf;
+		g_autoptr(GByteArray) client_frame = NULL;
+
+		if (!get_client_frame_size(
+			    client,
+			    width,
+			    height,
+			    &client_frame_width,
+			    &client_frame_height
+		    )) {
+			g_warning("RDP: Ignoring client with invalid desktop size.");
+			continue;
+		}
 		const bool full_frame = client->needs_full_frame ||
-			client_needs_rdpgfx_surface(client, width, height);
+			source_size_changed ||
+			client_needs_rdpgfx_surface(
+				client,
+				client_frame_width,
+				client_frame_height
+			);
 
 		if (!rf_rdp_core_clip_update_rect(
 			    width,
@@ -4111,26 +4336,72 @@ static void update(
 				height);
 			continue;
 		}
-		if (!have_log_rect) {
-			log_x = x;
-			log_y = y;
-				log_w = w;
-				log_h = h;
-				log_mode = client_graphics_mode_name(client);
-				have_log_rect = true;
+		if (!rf_rdp_core_map_update_rect_to_client_surface(
+			    width,
+			    height,
+			    client_frame_width,
+			    client_frame_height,
+			    x,
+			    y,
+			    w,
+			    h,
+			    full_frame,
+			    &send_x,
+			    &send_y,
+			    &send_w,
+			    &send_h
+		    )) {
+			g_warning(
+				"RDP: Ignoring update that maps outside client surface %ux%u.",
+				client_frame_width,
+				client_frame_height
+			);
+			continue;
+		}
+		if (client_frame_width != width || client_frame_height != height) {
+			client_frame = render_client_surface_frame(
+				buf,
+				width,
+				height,
+				client_frame_width,
+				client_frame_height
+			);
+			if (client_frame == NULL) {
+				g_warning(
+					"RDP: Failed to render client-sized frame %ux%u.",
+					client_frame_width,
+					client_frame_height
+				);
+				g_io_stream_close(G_IO_STREAM(client->connection), NULL, NULL);
+				continue;
 			}
+			send_buf = client_frame;
+			send_frame_width = client_frame_width;
+			send_frame_height = client_frame_height;
+		}
+		if (!have_log_rect) {
+			log_x = send_x;
+			log_y = send_y;
+			log_w = send_w;
+			log_h = send_h;
+			log_frame_width = send_frame_width;
+			log_frame_height = send_frame_height;
+			log_mode = client_graphics_mode_name(client);
+			have_log_rect = true;
+		}
 		if (full_frame)
 			full_clients++;
 		clients++;
 		bool deferred = false;
 		if (!send_graphics_update(
 			    client,
-			    buf,
-			    width,
-			    x,
-			    y,
-			    w,
-			    h,
+			    send_buf,
+			    send_frame_width,
+			    send_frame_height,
+			    send_x,
+			    send_y,
+			    send_w,
+			    send_h,
 			    &bytes_sent,
 			    &deferred
 		    )) {
@@ -4151,8 +4422,8 @@ static void update(
 			g_message(
 				"RDP: Sent %s update %ux%u damage %u,%u %ux%u to %u client(s), %u full, in %" G_GINT64_FORMAT "ms.",
 				log_mode,
-				width,
-				height,
+				log_frame_width,
+				log_frame_height,
 				log_x,
 			log_y,
 			log_w,
