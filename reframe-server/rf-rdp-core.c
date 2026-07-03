@@ -1411,7 +1411,7 @@ bool rf_rdp_core_should_defer_avc444_chroma(
 	bool chroma_changed
 )
 {
-	if (full_frame || !luma_changed || !chroma_changed || quality_level < 2)
+	if (full_frame || !luma_changed || !chroma_changed || quality_level == 0)
 		return false;
 
 	const uint32_t cadence = quality_level >= 3 ? 5u : 3u;
@@ -1432,7 +1432,7 @@ bool rf_rdp_core_should_defer_avc444_chroma_for_damage(
 	uint64_t chroma_per_mille = 0;
 
 	if (full_frame || !luma_changed || !chroma_changed ||
-	    quality_level < 2 || damage_pixels == 0)
+	    quality_level == 0 || damage_pixels == 0)
 		return false;
 
 	if (chroma_changed_pixels >= damage_pixels)
