@@ -1446,6 +1446,135 @@ static void test_rdpgfx_video_quality_policy_uses_qoe_latency(void)
 	) == 0);
 }
 
+static void test_rdpgfx_video_quality_policy_holds_during_cooldown(void)
+{
+	const int64_t five_seconds = 5 * 1000000;
+	const int64_t ten_seconds = 10 * 1000000;
+	const int64_t sixteen_seconds = 16 * 1000000;
+	const uint64_t three_mb_per_second = 3 * 1024 * 1024;
+
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		3,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		0,
+		0,
+		true,
+		ten_seconds
+	) == 3);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		3,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		60,
+		0,
+		0,
+		0,
+		0,
+		true,
+		sixteen_seconds
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		2,
+		3,
+		7 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		26000,
+		60,
+		0,
+		0,
+		0,
+		0,
+		true,
+		ten_seconds
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		2,
+		3,
+		7 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		26000,
+		60,
+		0,
+		0,
+		0,
+		0,
+		true,
+		sixteen_seconds
+	) == 3);
+}
+
+static void test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows(void)
+{
+	const int64_t five_seconds = 5 * 1000000;
+	const int64_t no_recent_change = 0;
+	const uint64_t three_mb_per_second = 3 * 1024 * 1024;
+
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		3,
+		3,
+		256 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		7000,
+		3,
+		0,
+		0,
+		0,
+		0,
+		true,
+		no_recent_change
+	) == 3);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		2,
+		3,
+		8 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		42000,
+		2,
+		0,
+		0,
+		0,
+		0,
+		true,
+		no_recent_change
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		2,
+		3,
+		8 * 1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		42000,
+		30,
+		0,
+		0,
+		0,
+		0,
+		true,
+		no_recent_change
+	) == 3);
+}
+
 static void test_rdpgfx_avc444_only_used_without_avc420_fallback(void)
 {
 	assert(rf_rdp_core_should_use_avc444(true, false, 0));
@@ -1620,6 +1749,8 @@ int main(void)
 	test_rdpgfx_avc_quality_parameters();
 	test_rdpgfx_video_quality_policy();
 	test_rdpgfx_video_quality_policy_uses_qoe_latency();
+	test_rdpgfx_video_quality_policy_holds_during_cooldown();
+	test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows();
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
 	test_rdpgfx_avc444_lc_stats_index();
 	test_rdpgfx_avc444_chroma_cadence_policy();

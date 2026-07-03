@@ -88,6 +88,7 @@ struct _RfRDPServer {
 	uint64_t stats_avc444_lc[RDP_RDPGFX_AVC444_LC_STAT_COUNT];
 	unsigned int stats_min_target_fps;
 	unsigned int rdpgfx_video_quality_level;
+	int64_t rdpgfx_video_quality_last_change_time_us;
 	int configured_video_quality;
 	unsigned int max_video_quality_level;
 	unsigned int rdpgfx_target_bandwidth_mbps;
@@ -477,19 +478,20 @@ static void add_client(struct client *client)
 		if (first_client) {
 			this->updates_sent = 0;
 			this->next_render_time_us = -1;
+			this->rdpgfx_video_quality_last_change_time_us = 0;
 			this->stats_last_log_time_us = 0;
 			this->stats_frames_sent = 0;
-				this->stats_frames_skipped = 0;
-				this->stats_bytes_sent = 0;
-				this->stats_send_time_us = 0;
-				this->stats_min_target_fps = 0;
-				this->stats_max_rdpgfx_inflight = 0;
-				this->stats_max_rdpgfx_ack_queue_depth = 0;
-				this->stats_rdpgfx_zgfx_payloads = 0;
-				this->stats_rdpgfx_zgfx_saved_bytes = 0;
-			} else if (this->last_frame != NULL &&
-			 this->last_frame_width == client->desktop_width &&
-			 this->last_frame_height == client->desktop_height) {
+			this->stats_frames_skipped = 0;
+			this->stats_bytes_sent = 0;
+			this->stats_send_time_us = 0;
+			this->stats_min_target_fps = 0;
+			this->stats_max_rdpgfx_inflight = 0;
+			this->stats_max_rdpgfx_ack_queue_depth = 0;
+			this->stats_rdpgfx_zgfx_payloads = 0;
+			this->stats_rdpgfx_zgfx_saved_bytes = 0;
+		} else if (this->last_frame != NULL &&
+				 this->last_frame_width == client->desktop_width &&
+				 this->last_frame_height == client->desktop_height) {
 			bool deferred = false;
 
 			if (send_graphics_update(
@@ -3821,6 +3823,10 @@ static void maybe_log_stats(
 		this->stats_min_target_fps != 0 ?
 			this->stats_min_target_fps :
 			(this->adaptive_fps != 0 ? this->adaptive_fps : this->max_fps);
+	const int64_t video_quality_change_age_us =
+		this->rdpgfx_video_quality_last_change_time_us > 0 ?
+			now - this->rdpgfx_video_quality_last_change_time_us :
+			0;
 
 	this->adaptive_fps = rf_rdp_core_update_adaptive_fps(
 		this->adaptive_fps,
@@ -3834,7 +3840,7 @@ static void maybe_log_stats(
 	);
 	if (this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO) {
 		this->rdpgfx_video_quality_level =
-			rf_rdp_core_update_video_quality_level_with_qoe(
+			rf_rdp_core_update_video_quality_level_stable(
 				this->rdpgfx_video_quality_level,
 				this->max_video_quality_level,
 				this->stats_bytes_sent,
@@ -3847,7 +3853,8 @@ static void maybe_log_stats(
 				this->stats_max_rdpgfx_inflight,
 				this->stats_max_rdpgfx_qoe_time_diff_se,
 				this->stats_max_rdpgfx_qoe_time_diff_edr,
-				quality_clients > 0
+				quality_clients > 0,
+				video_quality_change_age_us
 			);
 	} else {
 		this->rdpgfx_video_quality_level =
@@ -3861,6 +3868,7 @@ static void maybe_log_stats(
 		);
 	}
 	if (this->rdpgfx_video_quality_level != previous_video_quality) {
+		this->rdpgfx_video_quality_last_change_time_us = now;
 		reset_rdpgfx_video_encoders(this);
 		g_message(
 			"RDP: RDPGFX graphics quality level changed from %u to %u.",
