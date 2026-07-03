@@ -1512,6 +1512,84 @@ static void test_rdpgfx_avc444_chroma_cadence_policy(void)
 	));
 }
 
+static void test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio(void)
+{
+	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		4,
+		3,
+		false,
+		true,
+		true,
+		1000,
+		40
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		5,
+		3,
+		false,
+		true,
+		true,
+		1000,
+		40
+	));
+
+	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		1,
+		3,
+		false,
+		true,
+		true,
+		1000,
+		150
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		3,
+		3,
+		false,
+		true,
+		true,
+		1000,
+		150
+	));
+
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		1,
+		3,
+		false,
+		true,
+		true,
+		1000,
+		350
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		1,
+		3,
+		true,
+		true,
+		true,
+		1000,
+		40
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		1,
+		1,
+		false,
+		true,
+		true,
+		1000,
+		40
+	));
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
+		1,
+		3,
+		false,
+		true,
+		true,
+		0,
+		40
+	));
+}
+
 int main(void)
 {
 	test_parse_client_info_shape();
@@ -1545,5 +1623,6 @@ int main(void)
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
 	test_rdpgfx_avc444_lc_stats_index();
 	test_rdpgfx_avc444_chroma_cadence_policy();
+	test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio();
 	return 0;
 }

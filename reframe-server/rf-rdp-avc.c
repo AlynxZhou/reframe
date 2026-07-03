@@ -833,12 +833,53 @@ bool rf_rdp_avc_compare_avc444_rect(
 	bool *chroma_changed
 )
 {
+	uint32_t luma_changed_pixels = 0;
+	uint32_t chroma_changed_pixels = 0;
+
+	return rf_rdp_avc_analyze_avc444_rect(
+		current_rgba,
+		current_rgba_length,
+		previous_rgba,
+		previous_rgba_length,
+		rgba_stride,
+		x,
+		y,
+		width,
+		height,
+		luma_changed,
+		chroma_changed,
+		&luma_changed_pixels,
+		&chroma_changed_pixels
+	);
+}
+
+bool rf_rdp_avc_analyze_avc444_rect(
+	const uint8_t *current_rgba,
+	size_t current_rgba_length,
+	const uint8_t *previous_rgba,
+	size_t previous_rgba_length,
+	size_t rgba_stride,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height,
+	bool *luma_changed,
+	bool *chroma_changed,
+	uint32_t *luma_changed_pixels,
+	uint32_t *chroma_changed_pixels
+)
+{
 	if (luma_changed != NULL)
 		*luma_changed = false;
 	if (chroma_changed != NULL)
 		*chroma_changed = false;
+	if (luma_changed_pixels != NULL)
+		*luma_changed_pixels = 0;
+	if (chroma_changed_pixels != NULL)
+		*chroma_changed_pixels = 0;
 	if (current_rgba == NULL || previous_rgba == NULL ||
 	    luma_changed == NULL || chroma_changed == NULL ||
+	    luma_changed_pixels == NULL || chroma_changed_pixels == NULL ||
 	    width == 0 || height == 0)
 		return false;
 	if ((uint32_t)x + width > UINT16_MAX ||
@@ -887,12 +928,14 @@ bool rf_rdp_avc_compare_avc444_rect(
 				&previous_u,
 				&previous_v
 			);
-			if (current_y != previous_y)
+			if (current_y != previous_y) {
 				*luma_changed = true;
-			if (current_u != previous_u || current_v != previous_v)
+				(*luma_changed_pixels)++;
+			}
+			if (current_u != previous_u || current_v != previous_v) {
 				*chroma_changed = true;
-			if (*luma_changed && *chroma_changed)
-				return true;
+				(*chroma_changed_pixels)++;
+			}
 		}
 	}
 	return true;

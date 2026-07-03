@@ -1360,6 +1360,38 @@ bool rf_rdp_core_should_defer_avc444_chroma(
 	return frame_id % cadence != 0;
 }
 
+bool rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	uint32_t frame_id,
+	unsigned int quality_level,
+	bool full_frame,
+	bool luma_changed,
+	bool chroma_changed,
+	uint32_t damage_pixels,
+	uint32_t chroma_changed_pixels
+)
+{
+	uint32_t cadence = 0;
+	uint64_t chroma_per_mille = 0;
+
+	if (full_frame || !luma_changed || !chroma_changed ||
+	    quality_level < 2 || damage_pixels == 0)
+		return false;
+
+	if (chroma_changed_pixels >= damage_pixels)
+		chroma_per_mille = 1000;
+	else
+		chroma_per_mille =
+			(uint64_t)chroma_changed_pixels * 1000ull / damage_pixels;
+	if (chroma_per_mille >= 250)
+		return false;
+
+	if (quality_level >= 3)
+		cadence = chroma_per_mille >= 100 ? 3u : 5u;
+	else
+		cadence = chroma_per_mille >= 100 ? 2u : 3u;
+	return frame_id % cadence != 0;
+}
+
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 	unsigned int width,
 	unsigned int height,

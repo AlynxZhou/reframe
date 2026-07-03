@@ -2150,6 +2150,8 @@ static bool send_rdpgfx_avc444_update(
 	uint16_t damage_y = y;
 	uint16_t damage_width = width;
 	uint16_t damage_height = height;
+	uint32_t damage_pixels = 0;
+	uint32_t chroma_changed_pixels = 0;
 
 	if (!rf_rdp_core_should_use_avc444(
 		    client_can_use_rdpgfx_avc444(client),
@@ -2257,34 +2259,43 @@ static bool send_rdpgfx_avc444_update(
 		damage_height,
 		quality_level
 	);
+	damage_pixels = (uint32_t)damage_width * damage_height;
 	if (full_avc444 || skip_avc444_delta) {
 		encode_luma = true;
 		encode_chroma = true;
-	} else if (!rf_rdp_avc_compare_avc444_rect(
-			   rgba,
-			   rgba_available_length,
-			   client->server->last_frame->data,
-			   client->server->last_frame->len,
-			   rgba_stride,
-			   damage_x,
-			   damage_y,
-			   damage_width,
-			   damage_height,
-			   &encode_luma,
-			   &encode_chroma
-		   )) {
-		encode_luma = true;
-		encode_chroma = true;
-		full_avc444 = true;
+	} else {
+		uint32_t luma_changed_pixels = 0;
+
+		if (!rf_rdp_avc_analyze_avc444_rect(
+			    rgba,
+			    rgba_available_length,
+			    client->server->last_frame->data,
+			    client->server->last_frame->len,
+			    rgba_stride,
+			    damage_x,
+			    damage_y,
+			    damage_width,
+			    damage_height,
+			    &encode_luma,
+			    &encode_chroma,
+			    &luma_changed_pixels,
+			    &chroma_changed_pixels
+		    )) {
+			encode_luma = true;
+			encode_chroma = true;
+			full_avc444 = true;
+		}
 	}
 	if (!encode_luma && !encode_chroma)
 		return true;
-	if (rf_rdp_core_should_defer_avc444_chroma(
+	if (rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		    client->rdpgfx_frame_id + 1u,
 		    quality_level,
 		    full_avc444,
 		    encode_luma,
-		    encode_chroma
+		    encode_chroma,
+		    damage_pixels,
+		    chroma_changed_pixels
 	    ))
 		encode_chroma = false;
 

@@ -263,6 +263,15 @@ bool rf_rdp_core_should_defer_avc444_chroma(
 	bool luma_changed,
 	bool chroma_changed
 );
+bool rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	uint32_t frame_id,
+	unsigned int quality_level,
+	bool full_frame,
+	bool luma_changed,
+	bool chroma_changed,
+	uint32_t damage_pixels,
+	uint32_t chroma_changed_pixels
+);
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 	unsigned int width,
 	unsigned int height,

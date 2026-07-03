@@ -62,6 +62,21 @@ bool rf_rdp_avc_compare_avc444_rect(
 	bool *luma_changed,
 	bool *chroma_changed
 );
+bool rf_rdp_avc_analyze_avc444_rect(
+	const uint8_t *current_rgba,
+	size_t current_rgba_length,
+	const uint8_t *previous_rgba,
+	size_t previous_rgba_length,
+	size_t rgba_stride,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height,
+	bool *luma_changed,
+	bool *chroma_changed,
+	uint32_t *luma_changed_pixels,
+	uint32_t *chroma_changed_pixels
+);
 bool rf_rdp_avc_encoder_encode_rgba(
 	RfRdpAvcEncoder *encoder,
 	const uint8_t *rgba,

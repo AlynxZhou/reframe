@@ -424,6 +424,69 @@ static void test_avc444_delta_ignores_changes_outside_damage(void)
 	assert(!chroma_changed);
 }
 
+static void test_avc444_delta_counts_changed_pixels_inside_damage(void)
+{
+	const uint8_t black[] = { 0x00, 0x00, 0x00, 0xff };
+	const uint8_t gray[] = { 0x80, 0x80, 0x80, 0xff };
+	const uint8_t red[] = { 0xff, 0x00, 0x00, 0xff };
+	const uint8_t green_same_luma[] = { 0x00, 0x4b, 0x00, 0xff };
+	uint8_t previous[4 * 4] = { 0 };
+	uint8_t current[4 * 4] = { 0 };
+	bool luma_changed = true;
+	bool chroma_changed = true;
+	uint32_t luma_changed_pixels = 99;
+	uint32_t chroma_changed_pixels = 99;
+
+	memcpy(previous + 0, black, sizeof(black));
+	memcpy(previous + 4, red, sizeof(red));
+	memcpy(previous + 8, black, sizeof(black));
+	memcpy(previous + 12, black, sizeof(black));
+	memcpy(current + 0, gray, sizeof(gray));
+	memcpy(current + 4, green_same_luma, sizeof(green_same_luma));
+	memcpy(current + 8, red, sizeof(red));
+	memcpy(current + 12, black, sizeof(black));
+
+	assert(rf_rdp_avc_analyze_avc444_rect(
+		current,
+		sizeof(current),
+		previous,
+		sizeof(previous),
+		2 * 4,
+		0,
+		0,
+		2,
+		2,
+		&luma_changed,
+		&chroma_changed,
+		&luma_changed_pixels,
+		&chroma_changed_pixels
+	));
+	assert(luma_changed);
+	assert(chroma_changed);
+	assert(luma_changed_pixels == 2);
+	assert(chroma_changed_pixels == 2);
+
+	assert(!rf_rdp_avc_analyze_avc444_rect(
+		current,
+		sizeof(current),
+		previous,
+		sizeof(previous),
+		2 * 4,
+		2,
+		0,
+		1,
+		1,
+		&luma_changed,
+		&chroma_changed,
+		&luma_changed_pixels,
+		&chroma_changed_pixels
+	));
+	assert(!luma_changed);
+	assert(!chroma_changed);
+	assert(luma_changed_pixels == 0);
+	assert(chroma_changed_pixels == 0);
+}
+
 static void test_avc444_encoder_outputs_luma_and_chroma_h264(void)
 {
 	const uint16_t width = 320;
@@ -690,6 +753,7 @@ int main(void)
 	test_avc444_signatures_detect_luma_and_chroma_changes();
 	test_avc444_delta_detects_changed_planes_inside_damage();
 	test_avc444_delta_ignores_changes_outside_damage();
+	test_avc444_delta_counts_changed_pixels_inside_damage();
 	test_avc444_encoder_outputs_luma_and_chroma_h264();
 	test_avc444_combined_encode_prepares_source_once();
 	test_avc444_chroma_encode_prepares_source_once();
