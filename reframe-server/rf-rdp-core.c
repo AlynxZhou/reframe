@@ -1176,6 +1176,22 @@ bool rf_rdp_core_should_limit_fallback_fps_for_quality_state(
 	return max_quality_level == 0 || current_quality_level >= max_quality_level;
 }
 
+static bool video_quality_candidate_increases_pressure(
+	unsigned int candidate,
+	unsigned int current_level
+)
+{
+	return candidate > current_level;
+}
+
+static bool video_quality_candidate_restores_full_quality(
+	unsigned int candidate,
+	unsigned int current_level
+)
+{
+	return candidate == 0 && current_level > 0;
+}
+
 unsigned int rf_rdp_core_update_video_quality_level(
 	unsigned int current_level,
 	unsigned int max_level,
@@ -1323,7 +1339,11 @@ unsigned int rf_rdp_core_update_video_quality_level_stable(
 	uint64_t min_sample_frames = expected_frames / 10;
 	if (min_sample_frames < 4)
 		min_sample_frames = 4;
-	if (observed_frames < min_sample_frames)
+	if (observed_frames < min_sample_frames &&
+	    video_quality_candidate_increases_pressure(candidate, current_level))
+		return current_level;
+	if (observed_frames > min_sample_frames &&
+	    video_quality_candidate_restores_full_quality(candidate, current_level))
 		return current_level;
 
 	if (time_since_last_change_us > 0 &&

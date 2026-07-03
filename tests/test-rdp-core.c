@@ -1519,10 +1519,11 @@ static void test_rdpgfx_video_quality_policy_holds_during_cooldown(void)
 	) == 3);
 }
 
-static void test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows(void)
+static void test_rdpgfx_video_quality_policy_handles_tiny_sample_windows(void)
 {
 	const int64_t five_seconds = 5 * 1000000;
 	const int64_t no_recent_change = 0;
+	const int64_t sixteen_seconds = 16 * 1000000;
 	const uint64_t three_mb_per_second = 3 * 1024 * 1024;
 
 	assert(rf_rdp_core_update_video_quality_level_stable(
@@ -1540,7 +1541,7 @@ static void test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows(void)
 		0,
 		true,
 		no_recent_change
-	) == 3);
+	) == 2);
 	assert(rf_rdp_core_update_video_quality_level_stable(
 		2,
 		3,
@@ -1573,6 +1574,54 @@ static void test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows(void)
 		true,
 		no_recent_change
 	) == 3);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		3,
+		3,
+		64 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		6000,
+		2,
+		0,
+		0,
+		0,
+		0,
+		true,
+		sixteen_seconds
+	) == 2);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		1,
+		3,
+		1024 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		8000,
+		120,
+		0,
+		7,
+		0,
+		0,
+		true,
+		sixteen_seconds
+	) == 1);
+	assert(rf_rdp_core_update_video_quality_level_stable(
+		1,
+		3,
+		64 * 1024,
+		five_seconds,
+		three_mb_per_second,
+		60,
+		6000,
+		2,
+		0,
+		0,
+		0,
+		0,
+		true,
+		sixteen_seconds
+	) == 0);
 }
 
 static void test_rdpgfx_avc444_only_used_without_avc420_fallback(void)
@@ -1801,7 +1850,7 @@ int main(void)
 	test_rdpgfx_video_quality_policy();
 	test_rdpgfx_video_quality_policy_uses_qoe_latency();
 	test_rdpgfx_video_quality_policy_holds_during_cooldown();
-	test_rdpgfx_video_quality_policy_ignores_tiny_sample_windows();
+	test_rdpgfx_video_quality_policy_handles_tiny_sample_windows();
 	test_rdpgfx_avc444_only_used_without_avc420_fallback();
 	test_rdpgfx_avc444_lc_stats_index();
 	test_rdpgfx_avc444_chroma_cadence_policy();
