@@ -658,7 +658,7 @@ static void test_select_codec_matrix_falls_back_through_graphics_codecs(void)
 		&caps,
 		&server,
 		false
-	) == RF_RDP_GFX_CODEC_PROGRESSIVE_V2);
+	) == RF_RDP_GFX_CODEC_PROGRESSIVE);
 
 	server.progressive = false;
 	assert(rf_rdp_gfx_select_codec(

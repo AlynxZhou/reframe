@@ -2698,14 +2698,8 @@ static bool send_rdpgfx_progressive_update(
 	const unsigned int frame_height = client->server->height;
 	const uint32_t right = (uint32_t)x + width;
 	const uint32_t bottom = (uint32_t)y + height;
-	const uint16_t codec_id =
-		client->rdpgfx_caps_version >= RF_RDP_GFX_CAPVERSION_10 ?
-			RF_RDP_GFX_CODECID_CAPROGRESSIVE_V2 :
-			RF_RDP_GFX_CODECID_CAPROGRESSIVE;
-	const char *codec_name =
-		codec_id == RF_RDP_GFX_CODECID_CAPROGRESSIVE_V2 ?
-			"Progressive v2" :
-			"Progressive";
+	const uint16_t codec_id = RF_RDP_GFX_CODECID_CAPROGRESSIVE;
+	const char *codec_name = "Progressive";
 	g_autoptr(GByteArray) progressive = NULL;
 	g_autofree uint8_t *gfx = NULL;
 	size_t wire_length = 0;

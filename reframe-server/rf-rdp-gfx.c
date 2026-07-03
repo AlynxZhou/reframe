@@ -532,9 +532,7 @@ enum rf_rdp_gfx_codec rf_rdp_gfx_select_codec(
 			RF_RDP_GFX_CODEC_AVC444_V2 :
 			RF_RDP_GFX_CODEC_AVC444;
 	if (server->progressive && caps->progressive)
-		return caps->progressive_v2 ?
-			RF_RDP_GFX_CODEC_PROGRESSIVE_V2 :
-			RF_RDP_GFX_CODEC_PROGRESSIVE;
+		return RF_RDP_GFX_CODEC_PROGRESSIVE;
 	if (server->remotefx && caps->remotefx)
 		return RF_RDP_GFX_CODEC_REMOTEFX;
 	if (server->planar && caps->planar)
