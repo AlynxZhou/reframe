@@ -571,23 +571,6 @@ bool rf_config_get_rdp_clipboard(RfConfig *this)
 	return clipboard;
 }
 
-unsigned int rf_config_get_rdp_max_fps(RfConfig *this)
-{
-	g_return_val_if_fail(RF_IS_CONFIG(this), 30);
-
-	g_autoptr(GError) error = NULL;
-	int max_fps = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_RDP, "max-fps", &error
-	);
-	if (error != NULL)
-		return 30;
-	if (max_fps < 0) {
-		g_warning("RDP: Invalid max-fps %d, using 30.", max_fps);
-		return 30;
-	}
-	return max_fps;
-}
-
 char *rf_config_get_rdp_avc_encoder(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);

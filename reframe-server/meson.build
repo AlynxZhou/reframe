@@ -94,6 +94,7 @@ if get_option('rdp')
     'rf-rdp-input.c',
     'rf-rdp-nsc.c',
     'rf-rdp-dvc.c',
+    'rf-rdp-cliprdr.c',
     'rf-rdp-gfx.c',
     'rf-rdp-rfx.c',
     'rf-rdp-planar.c',
@@ -109,6 +110,7 @@ if get_option('rdp')
     'rf-rdp-input.h',
     'rf-rdp-nsc.h',
     'rf-rdp-dvc.h',
+    'rf-rdp-cliprdr.h',
     'rf-rdp-gfx.h',
     'rf-rdp-rfx.h',
     'rf-rdp-planar.h',
@@ -192,6 +194,18 @@ if get_option('rdp')
     install: false
   )
   test('rdp-dvc', test_rdp_dvc)
+
+  test_rdp_cliprdr = executable(
+    'test-rdp-cliprdr',
+    sources: files(
+      '../tests/test-rdp-cliprdr.c',
+      'rf-rdp-cliprdr.c'
+    ),
+    dependencies: [glib],
+    include_directories: rdp_test_include_directories,
+    install: false
+  )
+  test('rdp-cliprdr', test_rdp_cliprdr)
 
   test_rdp_gfx = executable(
     'test-rdp-gfx',

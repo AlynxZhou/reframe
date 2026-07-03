@@ -140,6 +140,7 @@ static void test_parse_client_connect_initial_info(void)
 	assert(info.desktop_width == 1024);
 	assert(info.desktop_height == 768);
 	assert(info.channel_count == 3);
+	assert(info.cliprdr_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID);
 	assert(info.drdynvc_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + 2);
 }
 

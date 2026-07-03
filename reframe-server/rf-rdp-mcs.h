@@ -32,6 +32,7 @@ struct rf_rdp_mcs_client_info {
 	uint16_t desktop_width;
 	uint16_t desktop_height;
 	uint16_t channel_count;
+	uint16_t cliprdr_channel_id;
 	uint16_t drdynvc_channel_id;
 };
 

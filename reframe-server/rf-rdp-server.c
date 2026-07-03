@@ -4,6 +4,7 @@
 
 #include "rf-rdp-av1.h"
 #include "rf-rdp-avc.h"
+#include "rf-rdp-cliprdr.h"
 #include "rf-rdp-core.h"
 #include "rf-rdp-dvc.h"
 #include "rf-rdp-gfx.h"
@@ -119,6 +120,7 @@ struct client {
 	uint16_t desktop_width;
 	uint16_t desktop_height;
 	uint16_t channel_count;
+	uint16_t cliprdr_channel_id;
 	uint16_t drdynvc_channel_id;
 	uint16_t drdynvc_version;
 	uint16_t rdpgfx_surface_width;
@@ -166,6 +168,9 @@ struct client {
 	bool avc444_have_signature;
 	bool surface_fallback_logged;
 	bool bitmap_rle_logged;
+	bool cliprdr_caps_sent;
+	bool cliprdr_ready;
+	bool cliprdr_client_has_unicode_text;
 	bool drdynvc_capability_sent;
 	bool drdynvc_ready;
 	bool rdpgfx_create_sent;
@@ -1005,6 +1010,156 @@ static bool send_drdynvc_payload(
 	return send_drdynvc_payload_counted(client, payload, payload_length, NULL);
 }
 
+static bool send_static_channel_payload(
+	struct client *client,
+	uint16_t channel_id,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	uint8_t channel[8 + RF_RDP_DVC_CHANNEL_CHUNK_LENGTH] = { 0 };
+	const size_t channel_length = rf_rdp_dvc_write_channel_pdu(
+		channel,
+		sizeof(channel),
+		payload,
+		payload_length
+	);
+
+	if (channel_id == 0 || channel_length == 0 ||
+	    channel_length > RDP_MAX_MCS_PAYLOAD)
+		return false;
+
+	g_autofree uint8_t *packet = g_malloc0(15 + channel_length);
+	const size_t packet_length = rf_rdp_mcs_write_send_data_indication(
+		packet,
+		15 + channel_length,
+		RF_RDP_MCS_BASE_CHANNEL_ID,
+		channel_id,
+		channel,
+		channel_length
+	);
+
+	return packet_length > 0 &&
+		client_write_exact(client, packet, packet_length);
+}
+
+static bool send_cliprdr_payload(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	if (!client->server->clipboard || client->cliprdr_channel_id == 0)
+		return false;
+	return send_static_channel_payload(
+		client,
+		client->cliprdr_channel_id,
+		payload,
+		payload_length
+	);
+}
+
+static bool send_cliprdr_caps(struct client *client)
+{
+	uint8_t pdu[64] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_caps(pdu, sizeof(pdu));
+
+	if (length == 0 || !send_cliprdr_payload(client, pdu, length))
+		return false;
+	client->cliprdr_caps_sent = true;
+	g_message("RDP: cliprdr sent capabilities on static channel %u.",
+		client->cliprdr_channel_id);
+	return true;
+}
+
+static bool send_cliprdr_monitor_ready(struct client *client)
+{
+	uint8_t pdu[16] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_monitor_ready(
+		pdu,
+		sizeof(pdu)
+	);
+
+	return length > 0 && send_cliprdr_payload(client, pdu, length);
+}
+
+static bool send_cliprdr_format_list(struct client *client)
+{
+	uint8_t pdu[64] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_list(pdu, sizeof(pdu));
+
+	if (!client->cliprdr_ready)
+		return false;
+	if (length == 0 || !send_cliprdr_payload(client, pdu, length))
+		return false;
+	g_debug("RDP: cliprdr advertised Unicode text.");
+	return true;
+}
+
+static bool send_cliprdr_format_list_response(struct client *client, bool ok)
+{
+	uint8_t pdu[16] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_list_response(
+		pdu,
+		sizeof(pdu),
+		ok
+	);
+
+	return length > 0 && send_cliprdr_payload(client, pdu, length);
+}
+
+static bool send_cliprdr_format_data_request(
+	struct client *client,
+	uint32_t format_id
+)
+{
+	uint8_t pdu[16] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_data_request(
+		pdu,
+		sizeof(pdu),
+		format_id
+	);
+
+	return length > 0 && send_cliprdr_payload(client, pdu, length);
+}
+
+static bool send_cliprdr_format_data_response_text(
+	struct client *client,
+	const char *text
+)
+{
+	if (text == NULL) {
+		uint8_t fail[16] = { 0 };
+		const size_t fail_length =
+			rf_rdp_cliprdr_write_format_data_response_fail(
+				fail,
+				sizeof(fail)
+			);
+
+		return fail_length > 0 &&
+			send_cliprdr_payload(client, fail, fail_length);
+	}
+
+	const size_t capacity =
+		RF_RDP_CLIPRDR_HEADER_SIZE + (strlen(text) + 1) * 2;
+	g_autofree uint8_t *pdu = g_malloc0(capacity);
+	const size_t length = rf_rdp_cliprdr_write_format_data_response_text(
+		pdu,
+		capacity,
+		text
+	);
+
+	if (length == 0)
+		return false;
+	if (length > RF_RDP_DVC_CHANNEL_CHUNK_LENGTH) {
+		g_warning(
+			"RDP: cliprdr text response is too large for single static channel PDU."
+		);
+		return false;
+	}
+	return send_cliprdr_payload(client, pdu, length);
+}
+
 static bool send_rdpgfx_dvc_payload(
 	struct client *client,
 	const uint8_t *payload,
@@ -1203,6 +1358,37 @@ static void start_drdynvc(struct client *client)
 	client->drdynvc_capability_sent = true;
 	g_message("RDP: DVC sent capability request on static channel %u.",
 		client->drdynvc_channel_id);
+}
+
+static void maybe_send_cliprdr_cached_format_list(struct client *client)
+{
+	RfRDPServer *this = client->server;
+	bool has_text = false;
+
+	g_mutex_lock(&this->lock);
+	has_text = this->clipboard_text != NULL;
+	g_mutex_unlock(&this->lock);
+
+	if (has_text && !send_cliprdr_format_list(client))
+		g_warning("RDP: Failed to send cliprdr format list.");
+}
+
+static void start_cliprdr(struct client *client)
+{
+	RfRDPServer *this = client->server;
+
+	if (!this->clipboard)
+		return;
+	if (client->cliprdr_channel_id == 0) {
+		g_message("RDP: Client did not advertise cliprdr; clipboard disabled.");
+		return;
+	}
+	if (!send_cliprdr_caps(client)) {
+		g_warning("RDP: Failed to send cliprdr capabilities.");
+		return;
+	}
+	if (!send_cliprdr_monitor_ready(client))
+		g_warning("RDP: Failed to send cliprdr monitor ready.");
 }
 
 static bool send_rdpgfx_caps_confirm(
@@ -1783,11 +1969,15 @@ static bool handle_mcs_connect_sequence(struct client *client)
 			client_info.desktop_height
 			);
 			client->channel_count = client_info.channel_count;
+			client->cliprdr_channel_id = client_info.cliprdr_channel_id;
 			client->drdynvc_channel_id = client_info.drdynvc_channel_id;
 			g_message("RDP: Client desktop is %ux%u with %u static channels.",
 				client->desktop_width,
 				client->desktop_height,
 				client->channel_count);
+			if (client->cliprdr_channel_id != 0)
+				g_message("RDP: Client advertised cliprdr static channel %u.",
+					client->cliprdr_channel_id);
 			if (client->drdynvc_channel_id != 0)
 				g_message("RDP: Client advertised drdynvc static channel %u.",
 					client->drdynvc_channel_id);
@@ -2047,6 +2237,177 @@ static void handle_drdynvc_channel_pdu(
 		payload_length);
 }
 
+static void handle_cliprdr_format_data_response(
+	struct client *client,
+	const uint8_t *data,
+	size_t length,
+	uint16_t msg_flags
+)
+{
+	RfRDPServer *this = client->server;
+	g_autofree char *text =
+		rf_rdp_cliprdr_parse_format_data_response_text(
+			data,
+			length,
+			msg_flags
+		);
+	bool changed = false;
+
+	if (text == NULL) {
+		g_debug("RDP: cliprdr client format data response did not contain text.");
+		return;
+	}
+
+	g_mutex_lock(&this->lock);
+	if (g_strcmp0(this->clipboard_text, text) != 0) {
+		g_free(this->clipboard_text);
+		this->clipboard_text = g_strdup(text);
+		changed = true;
+	}
+	g_mutex_unlock(&this->lock);
+
+	if (changed)
+		rf_remote_server_handle_clipboard_text(
+			RF_REMOTE_SERVER(this),
+			text
+		);
+}
+
+static void handle_cliprdr_format_data_request(
+	struct client *client,
+	const uint8_t *data,
+	size_t length
+)
+{
+	RfRDPServer *this = client->server;
+	uint32_t format_id = 0;
+	g_autofree char *text = NULL;
+
+	if (!rf_rdp_cliprdr_parse_format_data_request(
+		    data,
+		    length,
+		    &format_id
+	    ) || format_id != RF_RDP_CLIPRDR_CF_UNICODETEXT) {
+		if (!send_cliprdr_format_data_response_text(client, NULL))
+			g_warning("RDP: Failed to send cliprdr data response failure.");
+		return;
+	}
+
+	g_mutex_lock(&this->lock);
+	if (this->clipboard_text != NULL)
+		text = g_strdup(this->clipboard_text);
+	g_mutex_unlock(&this->lock);
+
+	if (!send_cliprdr_format_data_response_text(client, text))
+		g_warning("RDP: Failed to send cliprdr Unicode text response.");
+}
+
+static void handle_cliprdr_format_list(
+	struct client *client,
+	const uint8_t *data,
+	size_t length
+)
+{
+	struct rf_rdp_cliprdr_format_list formats = { 0 };
+	const bool ok = rf_rdp_cliprdr_parse_format_list(
+		data,
+		length,
+		&formats
+	);
+
+	client->cliprdr_client_has_unicode_text = ok && formats.unicode_text;
+	if (!send_cliprdr_format_list_response(client, ok))
+		g_warning("RDP: Failed to send cliprdr format list response.");
+	if (!client->cliprdr_client_has_unicode_text)
+		return;
+	if (!send_cliprdr_format_data_request(
+		    client,
+		    RF_RDP_CLIPRDR_CF_UNICODETEXT
+	    ))
+		g_warning("RDP: Failed to request cliprdr Unicode text.");
+}
+
+static void handle_cliprdr_payload(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	struct rf_rdp_cliprdr_pdu pdu = { 0 };
+	const uint8_t *body = NULL;
+
+	if (!rf_rdp_cliprdr_parse_pdu(payload, payload_length, &pdu)) {
+		g_debug("RDP: Ignoring malformed cliprdr PDU length %zu.",
+			payload_length);
+		return;
+	}
+
+	body = payload + pdu.data_offset;
+	switch (pdu.msg_type) {
+	case RF_RDP_CLIPRDR_CB_CLIP_CAPS:
+		g_debug("RDP: cliprdr client capabilities received.");
+		break;
+	case RF_RDP_CLIPRDR_CB_MONITOR_READY:
+		client->cliprdr_ready = true;
+		g_message("RDP: cliprdr monitor ready.");
+		maybe_send_cliprdr_cached_format_list(client);
+		break;
+	case RF_RDP_CLIPRDR_CB_FORMAT_LIST:
+		handle_cliprdr_format_list(client, body, pdu.data_length);
+		break;
+	case RF_RDP_CLIPRDR_CB_FORMAT_LIST_RESPONSE:
+		if ((pdu.msg_flags & RF_RDP_CLIPRDR_CB_RESPONSE_OK) == 0)
+			g_debug("RDP: cliprdr client rejected server format list.");
+		break;
+	case RF_RDP_CLIPRDR_CB_FORMAT_DATA_REQUEST:
+		handle_cliprdr_format_data_request(client, body, pdu.data_length);
+		break;
+	case RF_RDP_CLIPRDR_CB_FORMAT_DATA_RESPONSE:
+		handle_cliprdr_format_data_response(
+			client,
+			body,
+			pdu.data_length,
+			pdu.msg_flags
+		);
+		break;
+	default:
+		g_debug("RDP: Ignoring unsupported cliprdr message type 0x%04x.",
+			pdu.msg_type);
+		break;
+	}
+}
+
+static void handle_cliprdr_channel_pdu(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	struct rf_rdp_dvc_channel_pdu channel = { 0 };
+
+	if (!rf_rdp_dvc_parse_channel_pdu(payload, payload_length, &channel)) {
+		g_debug("RDP: Ignoring malformed cliprdr static channel PDU length %zu.",
+			payload_length);
+		return;
+	}
+	if ((channel.flags & (
+		     RF_RDP_DVC_CHANNEL_FLAG_FIRST |
+		     RF_RDP_DVC_CHANNEL_FLAG_LAST
+	     )) != (
+		     RF_RDP_DVC_CHANNEL_FLAG_FIRST |
+		     RF_RDP_DVC_CHANNEL_FLAG_LAST
+	     )) {
+		g_debug("RDP: Ignoring fragmented cliprdr static channel PDU.");
+		return;
+	}
+
+	handle_cliprdr_payload(
+		client,
+		payload + channel.payload_offset,
+		channel.payload_length
+	);
+}
+
 static void handle_active_session(struct client *client)
 {
 	RfRDPServer *this = client->server;
@@ -2054,6 +2415,7 @@ static void handle_active_session(struct client *client)
 
 	g_message("RDP: Client reached active state.");
 	start_drdynvc(client);
+	start_cliprdr(client);
 	add_client(client);
 
 	while (this->running) {
@@ -2071,6 +2433,16 @@ static void handle_active_session(struct client *client)
 		    client->drdynvc_channel_id != 0 &&
 		    domain_pdu.channel_id == client->drdynvc_channel_id) {
 			handle_drdynvc_channel_pdu(
+				client,
+				pdu->data + domain_pdu.payload_offset,
+				domain_pdu.payload_length
+			);
+			continue;
+		}
+		if (domain_pdu.type == RF_RDP_MCS_PDU_SEND_DATA_REQUEST &&
+		    client->cliprdr_channel_id != 0 &&
+		    domain_pdu.channel_id == client->cliprdr_channel_id) {
+			handle_cliprdr_channel_pdu(
 				client,
 				pdu->data + domain_pdu.payload_offset,
 				domain_pdu.payload_length
@@ -4202,7 +4574,7 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, fps-limited-clients=%u, rdpgfx-video-clients=%u, rfx-style-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
+		"RDP: Stats configured-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, fps-limited-clients=%u, rdpgfx-video-clients=%u, rfx-style-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
@@ -4311,8 +4683,19 @@ static void send_clipboard_text(RfRemoteServer *super, const char *text)
 	if (!this->clipboard)
 		return;
 	g_mutex_lock(&this->lock);
+	if (g_strcmp0(this->clipboard_text, text) == 0) {
+		g_mutex_unlock(&this->lock);
+		return;
+	}
 	g_free(this->clipboard_text);
 	this->clipboard_text = g_strdup(text);
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		if (client->cliprdr_channel_id != 0 && client->cliprdr_ready &&
+		    !send_cliprdr_format_list(client))
+			g_warning("RDP: Failed to advertise clipboard text.");
+	}
 	g_mutex_unlock(&this->lock);
 }
 
@@ -4613,7 +4996,7 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 	this->graphics = rf_config_get_rdp_graphics(config);
 	this->avc_encoder = rf_config_get_rdp_avc_encoder(config);
 	this->clipboard = rf_config_get_rdp_clipboard(config);
-	this->max_fps = rf_config_get_rdp_max_fps(config);
+	this->max_fps = rf_config_get_fps(config);
 	this->adaptive_fps = this->max_fps;
 	this->configured_video_quality = rf_config_get_rdp_video_quality(config);
 	this->max_video_quality_level =
@@ -4635,7 +5018,7 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 		g_warning("RDP: Native NLA is not implemented yet.");
 	if (this->configured_video_quality == RF_CONFIG_RDP_VIDEO_QUALITY_AUTO)
 		g_message(
-			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is auto (max %u, target %u Mbps).",
+			"RDP: Graphics mode is %s, fps is %u, avc-encoder is %s, video-quality is auto (max %u, target %u Mbps).",
 			this->graphics,
 			this->max_fps,
 			this->avc_encoder,
@@ -4644,7 +5027,7 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 		);
 	else
 		g_message(
-			"RDP: Graphics mode is %s, max-fps is %u, avc-encoder is %s, video-quality is fixed %u, target is %u Mbps.",
+			"RDP: Graphics mode is %s, fps is %u, avc-encoder is %s, video-quality is fixed %u, target is %u Mbps.",
 			this->graphics,
 			this->max_fps,
 			this->avc_encoder,

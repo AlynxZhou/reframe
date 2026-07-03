@@ -50,7 +50,6 @@ char *rf_config_get_rdp_password(RfConfig *this);
 bool rf_config_get_rdp_nla(RfConfig *this);
 char *rf_config_get_rdp_graphics(RfConfig *this);
 bool rf_config_get_rdp_clipboard(RfConfig *this);
-unsigned int rf_config_get_rdp_max_fps(RfConfig *this);
 char *rf_config_get_rdp_avc_encoder(RfConfig *this);
 #define RF_CONFIG_RDP_VIDEO_QUALITY_AUTO (-1)
 int rf_config_get_rdp_video_quality(RfConfig *this);

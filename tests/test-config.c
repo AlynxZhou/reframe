@@ -16,28 +16,19 @@ static char *write_temp_config(const char *contents)
 	return g_steal_pointer(&path);
 }
 
-static void test_rdp_max_fps_default(void)
+static void test_fps_default(void)
 {
 	g_autoptr(RfConfig) config = rf_config_new("/nonexistent/reframe.conf");
 
-	assert(rf_config_get_rdp_max_fps(config) == 30);
+	assert(rf_config_get_fps(config) == 30);
 }
 
-static void test_rdp_max_fps_custom(void)
+static void test_fps_custom(void)
 {
-	g_autofree char *path = write_temp_config("[rdp]\nmax-fps=15\n");
+	g_autofree char *path = write_temp_config("[reframe]\nfps=60\n");
 	g_autoptr(RfConfig) config = rf_config_new(path);
 
-	assert(rf_config_get_rdp_max_fps(config) == 15);
-	unlink(path);
-}
-
-static void test_rdp_max_fps_zero_is_unlimited(void)
-{
-	g_autofree char *path = write_temp_config("[rdp]\nmax-fps=0\n");
-	g_autoptr(RfConfig) config = rf_config_new(path);
-
-	assert(rf_config_get_rdp_max_fps(config) == 0);
+	assert(rf_config_get_fps(config) == 60);
 	unlink(path);
 }
 
@@ -122,9 +113,8 @@ static void test_rdp_target_bandwidth_invalid_uses_default(void)
 
 int main(void)
 {
-	test_rdp_max_fps_default();
-	test_rdp_max_fps_custom();
-	test_rdp_max_fps_zero_is_unlimited();
+	test_fps_default();
+	test_fps_custom();
 	test_rdp_avc_encoder_default();
 	test_rdp_avc_encoder_custom();
 	test_rdp_video_quality_default_auto();
