@@ -37,6 +37,18 @@ GByteArray *rf_rdp_rfx_encode_rgba(
 	uint16_t width,
 	uint16_t height
 );
+GByteArray *rf_rdp_rfx_encode_progressive_rgba(
+	RfRdpRfxContext *context,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	uint16_t frame_width,
+	uint16_t frame_height,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height
+);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(RfRdpRfxContext, rf_rdp_rfx_context_free)
 

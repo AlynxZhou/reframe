@@ -20,6 +20,10 @@
 #define RF_RFX_CBT_REGION 0xcac1u
 #define RF_RFX_CBT_TILESET 0xcac2u
 #define RF_RFX_CBT_TILE 0xcac3u
+#define RF_RFX_PROGRESSIVE_WBT_FRAME_BEGIN 0xccc1u
+#define RF_RFX_PROGRESSIVE_WBT_FRAME_END 0xccc2u
+#define RF_RFX_PROGRESSIVE_WBT_REGION 0xccc4u
+#define RF_RFX_PROGRESSIVE_WBT_TILE_SIMPLE 0xccc5u
 #define RF_RFX_WF_MAGIC 0xcaccaccau
 #define RF_RFX_WF_VERSION_1_0 0x0100u
 #define RF_RFX_CT_TILE_64X64 0x0040u
@@ -101,6 +105,19 @@ static void append_u32_le(GByteArray *array, uint32_t value)
 	append_u8(array, (value >> 8) & 0xff);
 	append_u8(array, (value >> 16) & 0xff);
 	append_u8(array, (value >> 24) & 0xff);
+}
+
+static uint16_t read_u16_le(const uint8_t *data)
+{
+	return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+}
+
+static uint32_t read_u32_le(const uint8_t *data)
+{
+	return (uint32_t)data[0] |
+	       ((uint32_t)data[1] << 8) |
+	       ((uint32_t)data[2] << 16) |
+	       ((uint32_t)data[3] << 24);
 }
 
 static void patch_u32_le(GByteArray *array, size_t offset, uint32_t value)
@@ -708,17 +725,19 @@ static void prepare_tile_jobs(
 	size_t rgba_stride,
 	uint16_t frame_width,
 	uint16_t frame_height,
-	uint16_t x,
-	uint16_t y,
-	uint16_t end_x,
-	uint16_t end_y,
+	uint16_t source_origin_x,
+	uint16_t source_origin_y,
+	uint16_t first_tile_x_idx,
+	uint16_t first_tile_y_idx,
+	uint16_t tile_columns,
+	uint16_t tile_rows,
 	const uint32_t quants[RF_RFX_QUANT_COUNT]
 )
 {
 	uint16_t index = 0;
 
-	for (uint16_t tile_y = 0; tile_y <= end_y; ++tile_y) {
-		for (uint16_t tile_x = 0; tile_x <= end_x; ++tile_x) {
+	for (uint16_t tile_y = 0; tile_y < tile_rows; ++tile_y) {
+		for (uint16_t tile_x = 0; tile_x < tile_columns; ++tile_x) {
 			struct rfx_tile_job *job = jobs + index++;
 
 			job->rgba = rgba;
@@ -726,32 +745,30 @@ static void prepare_tile_jobs(
 			job->frame_width = frame_width;
 			job->frame_height = frame_height;
 			job->source_x = (uint16_t)(
-				(uint32_t)x + tile_x * RF_RFX_TILE_SIZE
+				(uint32_t)source_origin_x + tile_x * RF_RFX_TILE_SIZE
 			);
 			job->source_y = (uint16_t)(
-				(uint32_t)y + tile_y * RF_RFX_TILE_SIZE
+				(uint32_t)source_origin_y + tile_y * RF_RFX_TILE_SIZE
 			);
-			job->tile_x_idx = tile_x;
-			job->tile_y_idx = tile_y;
+			job->tile_x_idx = (uint16_t)(first_tile_x_idx + tile_x);
+			job->tile_y_idx = (uint16_t)(first_tile_y_idx + tile_y);
 			job->quants = quants;
 		}
 	}
 }
 
-static bool encode_tiles_serial(
-	GByteArray *array,
-	struct rfx_tile_job *jobs,
-	uint16_t tile_count
-)
+static bool encode_tiles_serial(struct rfx_tile_job *jobs, uint16_t tile_count)
 {
-	for (uint16_t i = 0; i < tile_count; ++i)
+	for (uint16_t i = 0; i < tile_count; ++i) {
 		encode_tile_job_sync(jobs + i);
-	return append_encoded_tiles(array, jobs, tile_count);
+		if (jobs[i].encoded == NULL)
+			return false;
+	}
+	return true;
 }
 
 static bool encode_tiles_parallel(
 	RfRdpRfxContext *context,
-	GByteArray *array,
 	struct rfx_tile_job *jobs,
 	uint16_t tile_count
 )
@@ -779,7 +796,23 @@ static bool encode_tiles_parallel(
 
 	g_cond_clear(&group.cond);
 	g_mutex_clear(&group.mutex);
-	return append_encoded_tiles(array, jobs, tile_count);
+	for (uint16_t i = 0; i < tile_count; ++i) {
+		if (jobs[i].encoded == NULL)
+			return false;
+	}
+	return true;
+}
+
+static bool encode_tiles(
+	RfRdpRfxContext *context,
+	struct rfx_tile_job *jobs,
+	uint16_t tile_count
+)
+{
+	if (context->thread_pool != NULL &&
+	    tile_count >= RF_RFX_PARALLEL_MIN_TILES)
+		return encode_tiles_parallel(context, jobs, tile_count);
+	return encode_tiles_serial(jobs, tile_count);
 }
 
 static bool append_tiles(
@@ -808,19 +841,176 @@ static bool append_tiles(
 		frame_height,
 		x,
 		y,
-		end_x,
-		end_y,
+		0,
+		0,
+		end_x + 1,
+		end_y + 1,
 		quants
 	);
 
-	if (context->thread_pool != NULL &&
-	    tile_count >= RF_RFX_PARALLEL_MIN_TILES)
-		ok = encode_tiles_parallel(context, array, jobs, tile_count);
-	else
-		ok = encode_tiles_serial(array, jobs, tile_count);
+	ok = encode_tiles(context, jobs, tile_count) &&
+		append_encoded_tiles(array, jobs, tile_count);
 
 	free_tile_jobs(jobs, tile_count);
 	return ok;
+}
+
+static void append_progressive_context(GByteArray *array)
+{
+	append_u16_le(array, RF_RFX_WBT_CONTEXT);
+	append_u32_le(array, 10);
+	append_u8(array, 0);
+	append_u16_le(array, RF_RFX_TILE_SIZE);
+	append_u8(array, 0);
+}
+
+static void append_progressive_frame_begin(GByteArray *array, uint32_t frame_idx)
+{
+	append_u16_le(array, RF_RFX_PROGRESSIVE_WBT_FRAME_BEGIN);
+	append_u32_le(array, 12);
+	append_u32_le(array, frame_idx);
+	append_u16_le(array, 1);
+}
+
+static void append_progressive_frame_end(GByteArray *array)
+{
+	append_u16_le(array, RF_RFX_PROGRESSIVE_WBT_FRAME_END);
+	append_u32_le(array, 6);
+}
+
+static void append_progressive_quant(
+	GByteArray *array,
+	const uint32_t quants[RF_RFX_QUANT_COUNT]
+)
+{
+	append_u8(array, (uint8_t)((quants[0] & 0x0f) | ((quants[2] & 0x0f) << 4)));
+	append_u8(array, (uint8_t)((quants[1] & 0x0f) | ((quants[3] & 0x0f) << 4)));
+	append_u8(array, (uint8_t)((quants[5] & 0x0f) | ((quants[4] & 0x0f) << 4)));
+	append_u8(array, (uint8_t)((quants[6] & 0x0f) | ((quants[8] & 0x0f) << 4)));
+	append_u8(array, (uint8_t)((quants[7] & 0x0f) | ((quants[9] & 0x0f) << 4)));
+}
+
+static bool append_progressive_encoded_tile(
+	GByteArray *array,
+	const GByteArray *tile
+)
+{
+	if (tile == NULL || tile->len < 19)
+		return false;
+	const uint8_t *data = tile->data;
+	const uint32_t tile_len = read_u32_le(data + 2);
+	const uint16_t y_length = read_u16_le(data + 13);
+	const uint16_t cb_length = read_u16_le(data + 15);
+	const uint16_t cr_length = read_u16_le(data + 17);
+	const size_t component_length =
+		(size_t)y_length + cb_length + cr_length;
+	const size_t block_len = 22 + component_length;
+
+	if (read_u16_le(data) != RF_RFX_CBT_TILE || tile_len != tile->len ||
+	    tile_len != 19 + component_length || block_len > UINT32_MAX)
+		return false;
+
+	append_u16_le(array, RF_RFX_PROGRESSIVE_WBT_TILE_SIMPLE);
+	append_u32_le(array, (uint32_t)block_len);
+	append_u8(array, data[6]);
+	append_u8(array, data[7]);
+	append_u8(array, data[8]);
+	append_u16_le(array, read_u16_le(data + 9));
+	append_u16_le(array, read_u16_le(data + 11));
+	append_u8(array, 0);
+	append_u16_le(array, y_length);
+	append_u16_le(array, cb_length);
+	append_u16_le(array, cr_length);
+	append_u16_le(array, 0);
+	g_byte_array_append(array, data + 19, component_length);
+	return true;
+}
+
+static bool append_progressive_encoded_tiles(
+	GByteArray *array,
+	struct rfx_tile_job *jobs,
+	uint16_t tile_count
+)
+{
+	for (uint16_t i = 0; i < tile_count; ++i) {
+		if (!append_progressive_encoded_tile(array, jobs[i].encoded))
+			return false;
+	}
+	return true;
+}
+
+static bool append_progressive_region(
+	RfRdpRfxContext *context,
+	GByteArray *array,
+	const uint8_t *rgba,
+	size_t rgba_stride,
+	uint16_t frame_width,
+	uint16_t frame_height,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height
+)
+{
+	const uint16_t start_tile_x = x / RF_RFX_TILE_SIZE;
+	const uint16_t start_tile_y = y / RF_RFX_TILE_SIZE;
+	const uint16_t end_tile_x = (uint16_t)(((uint32_t)x + width - 1) / RF_RFX_TILE_SIZE);
+	const uint16_t end_tile_y = (uint16_t)(((uint32_t)y + height - 1) / RF_RFX_TILE_SIZE);
+	const uint16_t tile_columns = (uint16_t)(end_tile_x - start_tile_x + 1);
+	const uint16_t tile_rows = (uint16_t)(end_tile_y - start_tile_y + 1);
+	const uint32_t tile_count_32 = (uint32_t)tile_columns * tile_rows;
+	uint32_t quants[RF_RFX_QUANT_COUNT] = { 0 };
+	struct rfx_tile_job *jobs = NULL;
+	bool ok = false;
+
+	if (tile_count_32 == 0 || tile_count_32 > UINT16_MAX)
+		return false;
+	const uint16_t tile_count = (uint16_t)tile_count_32;
+	const size_t block = begin_block(array, RF_RFX_PROGRESSIVE_WBT_REGION);
+
+	memcpy(quants, context->quants, sizeof(quants));
+	append_u8(array, RF_RFX_TILE_SIZE);
+	append_u16_le(array, 1);
+	append_u8(array, 1);
+	append_u8(array, 0);
+	append_u8(array, 0);
+	append_u16_le(array, tile_count);
+	const size_t tiles_size_offset = array->len;
+	append_u32_le(array, 0);
+	append_u16_le(array, x);
+	append_u16_le(array, y);
+	append_u16_le(array, width);
+	append_u16_le(array, height);
+	append_progressive_quant(array, quants);
+
+	jobs = g_new0(struct rfx_tile_job, tile_count);
+	prepare_tile_jobs(
+		jobs,
+		rgba,
+		rgba_stride,
+		frame_width,
+		frame_height,
+		(uint16_t)(start_tile_x * RF_RFX_TILE_SIZE),
+		(uint16_t)(start_tile_y * RF_RFX_TILE_SIZE),
+		start_tile_x,
+		start_tile_y,
+		tile_columns,
+		tile_rows,
+		quants
+	);
+
+	const size_t tiles_start = array->len;
+	ok = encode_tiles(context, jobs, tile_count) &&
+		append_progressive_encoded_tiles(array, jobs, tile_count);
+	free_tile_jobs(jobs, tile_count);
+	if (!ok)
+		return false;
+
+	const size_t tiles_size = array->len - tiles_start;
+	if (tiles_size > UINT32_MAX)
+		return false;
+	patch_u32_le(array, tiles_size_offset, (uint32_t)tiles_size);
+	return end_block(array, block);
 }
 
 static bool append_tileset(
@@ -1073,6 +1263,67 @@ GByteArray *rf_rdp_rfx_encode_rgba(
 		return NULL;
 	}
 	append_frame_end(array);
+	context->send_headers = false;
+	context->width = frame_width;
+	context->height = frame_height;
+	context->frame_idx = frame_idx + 1;
+	return array;
+}
+
+GByteArray *rf_rdp_rfx_encode_progressive_rgba(
+	RfRdpRfxContext *context,
+	const uint8_t *rgba,
+	size_t rgba_length,
+	size_t rgba_stride,
+	uint16_t frame_width,
+	uint16_t frame_height,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height
+)
+{
+	if (context == NULL ||
+	    !validate_input(
+		    rgba,
+		    rgba_length,
+		    rgba_stride,
+		    frame_width,
+		    frame_height,
+		    x,
+		    y,
+		    width,
+		    height
+	    ))
+		return NULL;
+
+	const bool size_changed =
+		context->width != frame_width || context->height != frame_height;
+	const uint32_t frame_idx = size_changed ? 0 : context->frame_idx;
+
+	GByteArray *array = g_byte_array_sized_new(
+		(size_t)width * height * 2 + 256
+	);
+	append_sync(array);
+	append_progressive_context(array);
+	append_progressive_frame_begin(array, frame_idx);
+	if (!append_progressive_region(
+		    context,
+		    array,
+		    rgba,
+		    rgba_stride,
+		    frame_width,
+		    frame_height,
+		    x,
+		    y,
+		    width,
+		    height
+	    )) {
+		g_byte_array_unref(array);
+		return NULL;
+	}
+	append_progressive_frame_end(array);
+
 	context->send_headers = false;
 	context->width = frame_width;
 	context->height = frame_height;

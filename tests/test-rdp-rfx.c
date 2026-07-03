@@ -16,6 +16,10 @@
 #define CBT_TILESET 0xcac2u
 #define CBT_TILE 0xcac3u
 #define WF_MAGIC 0xcaccaccau
+#define PWBT_FRAME_BEGIN 0xccc1u
+#define PWBT_FRAME_END 0xccc2u
+#define PWBT_REGION 0xccc4u
+#define PWBT_TILE_SIMPLE 0xccc5u
 
 static uint16_t read_u16_le(const uint8_t *data)
 {
@@ -144,6 +148,117 @@ static void assert_region_and_first_tile_are_surface_relative(
 
 	assert(saw_region);
 	assert(saw_tileset);
+}
+
+static void assert_progressive_simple_message(
+	const GByteArray *message,
+	uint16_t expected_x,
+	uint16_t expected_y,
+	uint16_t expected_width,
+	uint16_t expected_height,
+	uint16_t expected_tiles,
+	uint16_t expected_first_tile_x,
+	uint16_t expected_first_tile_y
+)
+{
+	size_t offset = 0;
+	bool saw_sync = false;
+	bool saw_context = false;
+	bool saw_frame_begin = false;
+	bool saw_region = false;
+	bool saw_frame_end = false;
+
+	while (offset < message->len) {
+		assert(message->len - offset >= 6);
+		const uint16_t block_type = read_u16_le(message->data + offset);
+		const uint32_t block_len = read_u32_le(message->data + offset + 2);
+
+		assert(block_len >= 6);
+		assert(block_len <= message->len - offset);
+
+		if (block_type == WBT_SYNC) {
+			assert(block_len == 12);
+			assert(read_u32_le(message->data + offset + 6) == WF_MAGIC);
+			saw_sync = true;
+		} else if (block_type == WBT_CONTEXT) {
+			assert(block_len == 10);
+			assert(read_u8(message->data + offset + 6) == 0);
+			assert(read_u16_le(message->data + offset + 7) == 64);
+			assert(read_u8(message->data + offset + 9) == 0);
+			saw_context = true;
+		} else if (block_type == PWBT_FRAME_BEGIN) {
+			assert(block_len == 12);
+			assert(read_u16_le(message->data + offset + 10) == 1);
+			saw_frame_begin = true;
+		} else if (block_type == PWBT_REGION) {
+			assert(block_len >= 18 + 8 + 5);
+			assert(read_u8(message->data + offset + 6) == 64);
+			assert(read_u16_le(message->data + offset + 7) == 1);
+			assert(read_u8(message->data + offset + 9) == 1);
+			assert(read_u8(message->data + offset + 10) == 0);
+			assert(read_u8(message->data + offset + 11) == 0);
+			assert(read_u16_le(message->data + offset + 12) == expected_tiles);
+			assert(read_u16_le(message->data + offset + 18) == expected_x);
+			assert(read_u16_le(message->data + offset + 20) == expected_y);
+			assert(read_u16_le(message->data + offset + 22) == expected_width);
+			assert(read_u16_le(message->data + offset + 24) == expected_height);
+			assert(read_u8(message->data + offset + 26) == 0x66);
+			assert(read_u8(message->data + offset + 27) == 0x66);
+			assert(read_u8(message->data + offset + 28) == 0x77);
+			assert(read_u8(message->data + offset + 29) == 0x88);
+			assert(read_u8(message->data + offset + 30) == 0x98);
+
+			const uint32_t tiles_data_size =
+				read_u32_le(message->data + offset + 14);
+			size_t tile_offset = offset + 18 + 8 + 5;
+			const size_t tiles_data_end = tile_offset + tiles_data_size;
+
+			assert(tiles_data_end == offset + block_len);
+			for (uint16_t i = 0; i < expected_tiles; ++i) {
+				assert(tiles_data_end - tile_offset >= 22);
+				assert(read_u16_le(message->data + tile_offset) ==
+				       PWBT_TILE_SIMPLE);
+				const uint32_t tile_len =
+					read_u32_le(message->data + tile_offset + 2);
+				const uint16_t y_len =
+					read_u16_le(message->data + tile_offset + 14);
+				const uint16_t cb_len =
+					read_u16_le(message->data + tile_offset + 16);
+				const uint16_t cr_len =
+					read_u16_le(message->data + tile_offset + 18);
+				const uint16_t tail_len =
+					read_u16_le(message->data + tile_offset + 20);
+
+				assert(read_u8(message->data + tile_offset + 6) == 0);
+				assert(read_u8(message->data + tile_offset + 7) == 0);
+				assert(read_u8(message->data + tile_offset + 8) == 0);
+				if (i == 0) {
+					assert(read_u16_le(message->data + tile_offset + 9) ==
+					       expected_first_tile_x);
+					assert(read_u16_le(message->data + tile_offset + 11) ==
+					       expected_first_tile_y);
+				}
+				assert(read_u8(message->data + tile_offset + 13) == 0);
+				assert(tail_len == 0);
+				assert(tile_len == (uint32_t)22 + y_len + cb_len + cr_len);
+				assert(tile_len <= tiles_data_end - tile_offset);
+				tile_offset += tile_len;
+			}
+			assert(tile_offset == tiles_data_end);
+			saw_region = true;
+		} else if (block_type == PWBT_FRAME_END) {
+			assert(block_len == 6);
+			saw_frame_end = true;
+		}
+
+		offset += block_len;
+	}
+
+	assert(saw_sync);
+	assert(saw_context);
+	assert(saw_frame_begin);
+	assert(saw_region);
+	assert(saw_frame_end);
 }
 
 static void copy_tileset_quants(
@@ -334,6 +449,56 @@ static void test_encode_damage_rect_uses_surface_relative_message_coords(void)
 	assert_region_and_first_tile_are_surface_relative(message);
 }
 
+static void test_encode_progressive_simple_writes_rdpegfx_blocks(void)
+{
+	g_autoptr(RfRdpRfxContext) context = rf_rdp_rfx_context_new();
+	uint8_t rgba[65 * 65 * 4] = { 0 };
+
+	assert(context != NULL);
+	fill_frame(rgba, 65, 65);
+
+	g_autoptr(GByteArray) message = rf_rdp_rfx_encode_progressive_rgba(
+		context,
+		rgba,
+		sizeof(rgba),
+		65 * 4,
+		65,
+		65,
+		0,
+		0,
+		65,
+		65
+	);
+
+	assert(message != NULL);
+	assert_progressive_simple_message(message, 0, 0, 65, 65, 4, 0, 0);
+}
+
+static void test_encode_progressive_damage_rect_uses_surface_tile_grid(void)
+{
+	g_autoptr(RfRdpRfxContext) context = rf_rdp_rfx_context_new();
+	uint8_t rgba[128 * 96 * 4] = { 0 };
+
+	assert(context != NULL);
+	fill_frame(rgba, 128, 96);
+
+	g_autoptr(GByteArray) message = rf_rdp_rfx_encode_progressive_rgba(
+		context,
+		rgba,
+		sizeof(rgba),
+		128 * 4,
+		128,
+		96,
+		70,
+		65,
+		17,
+		19
+	);
+
+	assert(message != NULL);
+	assert_progressive_simple_message(message, 70, 65, 17, 19, 1, 1, 1);
+}
+
 static void test_quality_level_changes_quant_table_and_reduces_size(void)
 {
 	g_autoptr(RfRdpRfxContext) high = rf_rdp_rfx_context_new();
@@ -439,6 +604,8 @@ int main(void)
 	test_encode_first_frame_writes_headers_and_tiles();
 	test_encode_second_frame_omits_headers();
 	test_encode_damage_rect_uses_surface_relative_message_coords();
+	test_encode_progressive_simple_writes_rdpegfx_blocks();
+	test_encode_progressive_damage_rect_uses_surface_tile_grid();
 	test_quality_level_changes_quant_table_and_reduces_size();
 	test_parallel_encoding_matches_single_thread_output();
 	return 0;

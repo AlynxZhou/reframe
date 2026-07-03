@@ -898,6 +898,35 @@ static void test_write_wire_to_surface_remotefx_codec_id(void)
 	assert(memcmp(out + 25, rfx, sizeof(rfx)) == 0);
 }
 
+static void test_write_wire_to_surface_progressive_uses_wts2(void)
+{
+	uint8_t out[128] = { 0 };
+	const uint8_t progressive[] = {
+		0xc0, 0xcc, 0x0c, 0x00, 0x00, 0x00,
+		0xca, 0xac, 0xcc, 0xca, 0x00, 0x01
+	};
+
+	const size_t length = rf_rdp_gfx_write_wire_to_surface_2(
+		out,
+		sizeof(out),
+		1,
+		RF_RDP_GFX_CODECID_CAPROGRESSIVE,
+		7,
+		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888,
+		progressive,
+		sizeof(progressive)
+	);
+
+	assert(length == RF_RDP_GFX_HEADER_SIZE + 13 + sizeof(progressive));
+	assert_header(out, length, RF_RDP_GFX_CMDID_WIRETOSURFACE_2);
+	assert(read_u16_le(out + 8) == 1);
+	assert(read_u16_le(out + 10) == RF_RDP_GFX_CODECID_CAPROGRESSIVE);
+	assert(read_u32_le(out + 12) == 7);
+	assert(out[16] == RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888);
+	assert(read_u32_le(out + 17) == sizeof(progressive));
+	assert(memcmp(out + 21, progressive, sizeof(progressive)) == 0);
+}
+
 static void test_write_avc420_bitmap_stream(void)
 {
 	uint8_t out[64] = { 0 };
@@ -1439,6 +1468,7 @@ int main(void)
 	test_write_wire_to_surface_uncompressed();
 	test_write_wire_to_surface_planar_codec_id();
 	test_write_wire_to_surface_remotefx_codec_id();
+	test_write_wire_to_surface_progressive_uses_wts2();
 	test_write_avc420_bitmap_stream();
 	test_write_wire_to_surface_avc420();
 	test_write_avc444_bitmap_stream_single_bitstream();

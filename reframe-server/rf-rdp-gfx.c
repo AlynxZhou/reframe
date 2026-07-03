@@ -826,6 +826,39 @@ size_t rf_rdp_gfx_write_wire_to_surface_1(
 	return RF_RDP_GFX_HEADER_SIZE + payload_length;
 }
 
+size_t rf_rdp_gfx_write_wire_to_surface_2(
+	uint8_t *data,
+	size_t capacity,
+	uint16_t surface_id,
+	uint16_t codec_id,
+	uint32_t codec_context_id,
+	uint8_t pixel_format,
+	const uint8_t *bitmap_data,
+	size_t bitmap_data_length
+)
+{
+	const size_t payload_length = 13 + bitmap_data_length;
+
+	if (bitmap_data == NULL || bitmap_data_length == 0 ||
+	    bitmap_data_length > UINT32_MAX)
+		return 0;
+	if (!write_header(
+		    data,
+		    capacity,
+		    RF_RDP_GFX_CMDID_WIRETOSURFACE_2,
+		    payload_length
+	    ))
+		return 0;
+
+	write_u16_le(data + 8, surface_id);
+	write_u16_le(data + 10, codec_id);
+	write_u32_le(data + 12, codec_context_id);
+	data[16] = pixel_format;
+	write_u32_le(data + 17, (uint32_t)bitmap_data_length);
+	memcpy(data + 21, bitmap_data, bitmap_data_length);
+	return RF_RDP_GFX_HEADER_SIZE + payload_length;
+}
+
 size_t rf_rdp_gfx_write_avc420_bitmap_stream(
 	uint8_t *data,
 	size_t capacity,

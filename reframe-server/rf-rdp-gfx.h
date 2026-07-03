@@ -8,6 +8,7 @@
 #define RF_RDP_GFX_HEADER_SIZE 8u
 
 #define RF_RDP_GFX_CMDID_WIRETOSURFACE_1 0x0001u
+#define RF_RDP_GFX_CMDID_WIRETOSURFACE_2 0x0002u
 #define RF_RDP_GFX_CMDID_CREATESURFACE 0x0009u
 #define RF_RDP_GFX_CMDID_STARTFRAME 0x000bu
 #define RF_RDP_GFX_CMDID_ENDFRAME 0x000cu
@@ -187,6 +188,16 @@ size_t rf_rdp_gfx_write_wire_to_surface_1(
 	uint16_t top,
 	uint16_t right,
 	uint16_t bottom,
+	const uint8_t *bitmap_data,
+	size_t bitmap_data_length
+);
+size_t rf_rdp_gfx_write_wire_to_surface_2(
+	uint8_t *data,
+	size_t capacity,
+	uint16_t surface_id,
+	uint16_t codec_id,
+	uint32_t codec_context_id,
+	uint8_t pixel_format,
 	const uint8_t *bitmap_data,
 	size_t bitmap_data_length
 );

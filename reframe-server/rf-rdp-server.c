@@ -169,6 +169,7 @@ struct client {
 	bool rdpgfx_disabled;
 	bool rdpgfx_av1_available;
 	bool rdpgfx_avc420_available;
+	bool rdpgfx_progressive_available;
 	bool rdpgfx_remotefx_available;
 	bool rdpgfx_update_logged;
 	bool rdpgfx_wait_logged;
@@ -210,6 +211,7 @@ static struct rf_rdp_gfx_server_codecs rdpgfx_server_codecs(RfRDPServer *this)
 		.avc420 = true,
 		.avc444 = rdpgfx_avc444_supported(this),
 	#endif
+		.progressive = true,
 		.remotefx = true,
 		.planar = true
 	};
@@ -982,6 +984,7 @@ static bool send_rdpgfx_caps_confirm(
 	client->rdpgfx_av1_available = use_av1;
 	client->av1_mode = av1_mode;
 	client->rdpgfx_avc420_available = caps->avc420;
+	client->rdpgfx_progressive_available = caps->progressive;
 	client->rdpgfx_remotefx_available = caps->remotefx;
 	confirmed_caps.selected_version = confirm_version;
 	confirmed_caps.selected_flags = confirm_flags;
@@ -1126,6 +1129,13 @@ static bool client_can_use_rdpgfx_rfx(const struct client *client)
 	return client_can_use_rdpgfx(client) &&
 	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
 	       client->rdpgfx_remotefx_available;
+}
+
+static bool client_can_use_rdpgfx_progressive(const struct client *client)
+{
+	return client_can_use_rdpgfx(client) &&
+	       client->rdpgfx_caps_version != RF_RDP_GFX_CAPVERSION_FRDP_1 &&
+	       client->rdpgfx_progressive_available;
 }
 
 static bool client_needs_rdpgfx_surface(
@@ -2674,6 +2684,151 @@ static bool send_rdpgfx_avc420_update(
 	return true;
 }
 
+static bool send_rdpgfx_progressive_update(
+	struct client *client,
+	const GByteArray *buf,
+	unsigned int frame_width,
+	uint16_t x,
+	uint16_t y,
+	uint16_t width,
+	uint16_t height,
+	size_t *bytes_sent
+)
+{
+	const unsigned int frame_height = client->server->height;
+	const uint32_t right = (uint32_t)x + width;
+	const uint32_t bottom = (uint32_t)y + height;
+	const uint16_t codec_id =
+		client->rdpgfx_caps_version >= RF_RDP_GFX_CAPVERSION_10 ?
+			RF_RDP_GFX_CODECID_CAPROGRESSIVE_V2 :
+			RF_RDP_GFX_CODECID_CAPROGRESSIVE;
+	const char *codec_name =
+		codec_id == RF_RDP_GFX_CODECID_CAPROGRESSIVE_V2 ?
+			"Progressive v2" :
+			"Progressive";
+	g_autoptr(GByteArray) progressive = NULL;
+	g_autofree uint8_t *gfx = NULL;
+	size_t wire_length = 0;
+	size_t raw_capacity = 0;
+	size_t offset = 0;
+	size_t length = 0;
+	uint32_t frame_id = 0;
+
+	if (!client_can_use_rdpgfx_progressive(client) || frame_width == 0 ||
+	    frame_height == 0 || width == 0 || height == 0 ||
+	    frame_width > UINT16_MAX || frame_height > UINT16_MAX ||
+	    right > UINT16_MAX || bottom > UINT16_MAX)
+		return false;
+	if (buf == NULL || buf->data == NULL ||
+	    buf->len < (size_t)frame_width * frame_height * 4)
+		return false;
+
+	if (!client->rdpgfx_surface_ready ||
+	    client->rdpgfx_surface_width != frame_width ||
+	    client->rdpgfx_surface_height != frame_height) {
+		if (!send_rdpgfx_surface_setup(
+			    client,
+			    (uint16_t)frame_width,
+			    (uint16_t)frame_height,
+			    bytes_sent
+		    ))
+			return false;
+		rf_rdp_rfx_context_reset(client->rfx);
+	}
+
+	if (client->rfx == NULL) {
+		client->rfx = rf_rdp_rfx_context_new();
+		if (client->rfx == NULL)
+			return false;
+	}
+	rf_rdp_rfx_context_set_quality_level(
+		client->rfx,
+		client->server->rdpgfx_video_quality_level,
+		client->server->max_video_quality_level
+	);
+
+	progressive = rf_rdp_rfx_encode_progressive_rgba(
+		client->rfx,
+		buf->data,
+		buf->len,
+		(size_t)frame_width * 4,
+		(uint16_t)frame_width,
+		(uint16_t)frame_height,
+		x,
+		y,
+		width,
+		height
+	);
+	if (progressive == NULL || progressive->len == 0)
+		return false;
+
+	wire_length = RF_RDP_GFX_HEADER_SIZE + 13 + progressive->len;
+	if (wire_length > SIZE_MAX - (RF_RDP_GFX_HEADER_SIZE + 8) -
+	    (RF_RDP_GFX_HEADER_SIZE + 4))
+		return false;
+	raw_capacity =
+		(RF_RDP_GFX_HEADER_SIZE + 8) + wire_length +
+		(RF_RDP_GFX_HEADER_SIZE + 4);
+	if (raw_capacity < wire_length)
+		return false;
+
+	gfx = g_malloc(raw_capacity);
+	frame_id = ++client->rdpgfx_frame_id;
+	if (frame_id == 0)
+		frame_id = ++client->rdpgfx_frame_id;
+
+	length = rf_rdp_gfx_write_start_frame(
+		gfx + offset,
+		raw_capacity - offset,
+		frame_id,
+		(uint32_t)(g_get_monotonic_time() / 1000)
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	length = rf_rdp_gfx_write_wire_to_surface_2(
+		gfx + offset,
+		raw_capacity - offset,
+		RDP_RDPGFX_SURFACE_ID,
+		codec_id,
+		0,
+		RF_RDP_GFX_PIXEL_FORMAT_XRGB_8888,
+		progressive->data,
+		progressive->len
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	length = rf_rdp_gfx_write_end_frame(
+		gfx + offset,
+		raw_capacity - offset,
+		frame_id
+	);
+	if (length == 0)
+		return false;
+	offset += length;
+
+	if (!send_rdpgfx_gfx_payload(client, gfx, offset, bytes_sent, false))
+		return false;
+
+	if (!client->rdpgfx_update_logged) {
+		g_message(
+			"RDP: RDPGFX %s updates active, rect %u,%u %ux%u, quality=%u, tile-threads=%u.",
+			codec_name,
+			x,
+			y,
+			width,
+			height,
+			rf_rdp_rfx_context_get_quality_level(client->rfx),
+			rf_rdp_rfx_context_get_thread_count(client->rfx)
+		);
+		client->rdpgfx_update_logged = true;
+	}
+	return true;
+}
+
 static bool send_rdpgfx_rfx_update(
 	struct client *client,
 	const GByteArray *buf,
@@ -2888,16 +3043,27 @@ static bool send_rdpgfx_update(
 		    width,
 		    height,
 		    bytes_sent
-	    ))
+		    ))
 		return true;
 	if (!client_can_use_rdpgfx_avc420(client) &&
 	    !client->rdpgfx_avc_client_disabled_logged) {
 		g_message(
-			"RDP: Client did not enable AVC420 (caps flags=0x%08x); using RemoteFX/PLANAR RDPGFX fallback.",
+			"RDP: Client did not enable AVC420 (caps flags=0x%08x); using Progressive/RemoteFX/PLANAR RDPGFX fallback.",
 			client->rdpgfx_caps_flags
 		);
 		client->rdpgfx_avc_client_disabled_logged = true;
 	}
+	if (send_rdpgfx_progressive_update(
+		    client,
+		    buf,
+		    frame_width,
+		    x,
+		    y,
+		    width,
+		    height,
+		    bytes_sent
+	    ))
+		return true;
 	if (send_rdpgfx_rfx_update(
 		    client,
 		    buf,
@@ -3538,7 +3704,7 @@ static unsigned int rdpgfx_video_client_count(RfRDPServer *this)
 	return video_clients;
 }
 
-static unsigned int rdpgfx_rfx_client_count(RfRDPServer *this)
+static unsigned int rdpgfx_rfx_style_client_count(RfRDPServer *this)
 {
 	unsigned int rfx_clients = 0;
 
@@ -3546,7 +3712,9 @@ static unsigned int rdpgfx_rfx_client_count(RfRDPServer *this)
 		struct client *client = l->data;
 
 		if (client_can_use_rdpgfx(client) &&
-		    client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_REMOTEFX)
+		    (client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_REMOTEFX ||
+		     client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_PROGRESSIVE ||
+		     client->rdpgfx_policy_codec == RF_RDP_GFX_CODEC_PROGRESSIVE_V2))
 			rfx_clients++;
 	}
 	return rfx_clients;
@@ -3583,7 +3751,7 @@ static void maybe_log_stats(
 	const int64_t interval_us = now - this->stats_last_log_time_us;
 	const unsigned int limited_clients = bitmap_limited_client_count(this);
 	const unsigned int video_clients = rdpgfx_video_client_count(this);
-	const unsigned int rfx_clients = rdpgfx_rfx_client_count(this);
+	const unsigned int rfx_clients = rdpgfx_rfx_style_client_count(this);
 	const unsigned int quality_clients = video_clients + rfx_clients;
 	const unsigned int rfx_limited_clients = MIN(limited_clients, rfx_clients);
 	const unsigned int non_quality_limited_clients =
@@ -3656,7 +3824,7 @@ static void maybe_log_stats(
 		);
 	}
 	g_message(
-		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, fps-limited-clients=%u, rdpgfx-video-clients=%u, rfx-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
+		"RDP: Stats max-fps=%u, effective-fps=%u, target-fps-min=%u, video-quality=%u, target-bandwidth=%uMbps, sent=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", limited-clients=%u, fps-limited-clients=%u, rdpgfx-video-clients=%u, rfx-style-clients=%u, full-frame-clients=%u, rdpgfx-inflight-max=%u, ack-depth-max=%u, qoe-se/edr-max=%u/%u, zgfx=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (payloads/saved-bytes), avg-send=%" G_GUINT64_FORMAT "ms, avc444-lc=%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT "/%" G_GUINT64_FORMAT " (both/single/chroma).",
 		this->max_fps,
 		this->adaptive_fps,
 		this->stats_min_target_fps,
