@@ -90,6 +90,23 @@ size_t rf_rdp_dvc_write_channel_pdu(
 	size_t payload_length
 )
 {
+	return rf_rdp_dvc_write_channel_pdu_with_flags(
+		data,
+		capacity,
+		payload,
+		payload_length,
+		0
+	);
+}
+
+size_t rf_rdp_dvc_write_channel_pdu_with_flags(
+	uint8_t *data,
+	size_t capacity,
+	const uint8_t *payload,
+	size_t payload_length,
+	uint32_t extra_flags
+)
+{
 	if (data == NULL || (payload == NULL && payload_length > 0) ||
 	    payload_length > RF_RDP_DVC_CHANNEL_CHUNK_LENGTH ||
 	    capacity < 8 + payload_length)
@@ -98,7 +115,8 @@ size_t rf_rdp_dvc_write_channel_pdu(
 	write_u32_le(data, payload_length);
 	write_u32_le(
 		data + 4,
-		RF_RDP_DVC_CHANNEL_FLAG_FIRST | RF_RDP_DVC_CHANNEL_FLAG_LAST
+		RF_RDP_DVC_CHANNEL_FLAG_FIRST | RF_RDP_DVC_CHANNEL_FLAG_LAST |
+			extra_flags
 	);
 	if (payload_length > 0)
 		memcpy(data + 8, payload, payload_length);

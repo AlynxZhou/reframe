@@ -134,6 +134,31 @@ static void test_static_channel_wrapper(void)
 	));
 }
 
+static void test_static_channel_wrapper_with_show_protocol(void)
+{
+	uint8_t out[32] = { 0 };
+	const uint8_t payload[] = { 0x07, 0x00, 0x00, 0x00 };
+	struct rf_rdp_dvc_channel_pdu channel = { 0 };
+
+	const size_t length = rf_rdp_dvc_write_channel_pdu_with_flags(
+		out,
+		sizeof(out),
+		payload,
+		sizeof(payload),
+		RF_RDP_DVC_CHANNEL_FLAG_SHOW_PROTOCOL
+	);
+	assert(length == 8 + sizeof(payload));
+	assert(rf_rdp_dvc_parse_channel_pdu(out, length, &channel));
+	assert(channel.payload_offset == 8);
+	assert(channel.payload_length == sizeof(payload));
+	assert(channel.total_length == sizeof(payload));
+	assert(channel.flags == (
+		RF_RDP_DVC_CHANNEL_FLAG_FIRST |
+		RF_RDP_DVC_CHANNEL_FLAG_LAST |
+		RF_RDP_DVC_CHANNEL_FLAG_SHOW_PROTOCOL
+	));
+}
+
 static void test_write_data_pdu(void)
 {
 	uint8_t out[32] = { 0 };
@@ -181,6 +206,7 @@ int main(void)
 	test_parse_capability_response();
 	test_parse_data_pdu();
 	test_static_channel_wrapper();
+	test_static_channel_wrapper_with_show_protocol();
 	test_write_data_pdu();
 	test_write_data_first_pdu();
 	return 0;

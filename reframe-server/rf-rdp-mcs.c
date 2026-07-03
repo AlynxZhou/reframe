@@ -389,32 +389,33 @@ bool rf_rdp_mcs_parse_connect_initial(
 			info->desktop_width = read_u16_le(data + offset + 8);
 			info->desktop_height = read_u16_le(data + offset + 10);
 			offset += block_length - 1;
-			} else if (type == CS_NET && block_length >= 8) {
-				const uint32_t channel_count =
-					read_u32_le(data + offset + 4);
+		} else if (type == CS_NET && block_length >= 8) {
+			const uint32_t channel_count = read_u32_le(data + offset + 4);
 
-				if (channel_count > RF_RDP_MCS_MAX_CHANNELS)
-					return false;
-				if (block_length >= 8 + channel_count * 12) {
-						for (uint32_t i = 0; i < channel_count; ++i) {
-							const uint8_t *name =
-								data + offset + 8 + i * 12;
+			if (channel_count > RF_RDP_MCS_MAX_CHANNELS)
+				return false;
+			if (block_length >= 8 + channel_count * 12) {
+				for (uint32_t i = 0; i < channel_count; ++i) {
+					const uint8_t *name = data + offset + 8 + i * 12;
+					const uint32_t options = read_u32_le(name + 8);
 
-							if (memcmp(name, "cliprdr", 7) == 0 &&
-							    name[7] == '\0') {
-								info->cliprdr_channel_id =
-									RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
-							}
-							if (memcmp(name, "drdynvc", 7) == 0 &&
-							    name[7] == '\0') {
-								info->drdynvc_channel_id =
-								RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
-						}
+					if (memcmp(name, "cliprdr", 7) == 0 &&
+					    name[7] == '\0') {
+						info->cliprdr_channel_id =
+							RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
+						info->cliprdr_channel_options = options;
+					}
+					if (memcmp(name, "drdynvc", 7) == 0 &&
+					    name[7] == '\0') {
+						info->drdynvc_channel_id =
+							RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
+						info->drdynvc_channel_options = options;
 					}
 				}
-				info->channel_count = channel_count;
-				offset += block_length - 1;
 			}
+			info->channel_count = channel_count;
+			offset += block_length - 1;
+		}
 	}
 
 	return info->desktop_width > 0 && info->desktop_height > 0;

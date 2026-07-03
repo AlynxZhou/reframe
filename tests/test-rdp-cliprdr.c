@@ -79,7 +79,13 @@ static void test_write_monitor_ready(void)
 
 static void test_write_format_list(void)
 {
-	uint8_t out[64] = { 0 };
+	uint8_t out[192] = { 0 };
+	const uint32_t expected_formats[] = {
+		RF_RDP_CLIPRDR_CF_UNICODETEXT,
+		RF_RDP_CLIPRDR_CF_TEXT,
+		RF_RDP_CLIPRDR_CF_OEMTEXT,
+		RF_RDP_CLIPRDR_CF_LOCALE
+	};
 	struct rf_rdp_cliprdr_format_list formats = { 0 };
 	const size_t length = rf_rdp_cliprdr_write_format_list(out, sizeof(out));
 
@@ -88,14 +94,18 @@ static void test_write_format_list(void)
 		length,
 		RF_RDP_CLIPRDR_CB_FORMAT_LIST,
 		0,
-		36
+		144
 	);
-	assert(read_u32_le(out + 8) == RF_RDP_CLIPRDR_CF_UNICODETEXT);
-	for (size_t i = 12; i < length; ++i)
-		assert(out[i] == 0);
+	for (size_t i = 0; i < G_N_ELEMENTS(expected_formats); ++i) {
+		const size_t offset = RF_RDP_CLIPRDR_HEADER_SIZE + i * 36;
+
+		assert(read_u32_le(out + offset) == expected_formats[i]);
+		for (size_t j = 4; j < 36; ++j)
+			assert(out[offset + j] == 0);
+	}
 	assert(rf_rdp_cliprdr_parse_format_list(
 		out + RF_RDP_CLIPRDR_HEADER_SIZE,
-		36,
+		144,
 		&formats
 	));
 	assert(formats.unicode_text);
@@ -174,6 +184,44 @@ static void test_write_and_parse_unicode_text_response(void)
 	assert(g_strcmp0(text, "A\xce\xbb") == 0);
 }
 
+static void test_write_utf8_text_response(void)
+{
+	uint8_t out[64] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_data_response_utf8_text(
+		out,
+		sizeof(out),
+		"A\xce\xbb"
+	);
+
+	assert_header(
+		out,
+		length,
+		RF_RDP_CLIPRDR_CB_FORMAT_DATA_RESPONSE,
+		RF_RDP_CLIPRDR_CB_RESPONSE_OK,
+		4
+	);
+	assert(memcmp(out + RF_RDP_CLIPRDR_HEADER_SIZE, "A\xce\xbb", 4) == 0);
+}
+
+static void test_write_locale_response(void)
+{
+	uint8_t out[16] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_data_response_locale(
+		out,
+		sizeof(out),
+		0x00000409
+	);
+
+	assert_header(
+		out,
+		length,
+		RF_RDP_CLIPRDR_CB_FORMAT_DATA_RESPONSE,
+		RF_RDP_CLIPRDR_CB_RESPONSE_OK,
+		4
+	);
+	assert(read_u32_le(out + RF_RDP_CLIPRDR_HEADER_SIZE) == 0x00000409);
+}
+
 static void test_parse_long_format_list(void)
 {
 	const uint8_t pdu[] = {
@@ -198,6 +246,8 @@ int main(void)
 	test_write_format_list();
 	test_write_responses_and_request();
 	test_write_and_parse_unicode_text_response();
+	test_write_utf8_text_response();
+	test_write_locale_response();
 	test_parse_long_format_list();
 	return 0;
 }

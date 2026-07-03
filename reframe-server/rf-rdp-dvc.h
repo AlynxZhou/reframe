@@ -17,6 +17,7 @@
 
 #define RF_RDP_DVC_CHANNEL_FLAG_FIRST 0x00000001u
 #define RF_RDP_DVC_CHANNEL_FLAG_LAST 0x00000002u
+#define RF_RDP_DVC_CHANNEL_FLAG_SHOW_PROTOCOL 0x00000010u
 #define RF_RDP_DVC_CHANNEL_CHUNK_LENGTH 1600u
 
 struct rf_rdp_dvc_create_response {
@@ -47,6 +48,13 @@ size_t rf_rdp_dvc_write_channel_pdu(
 	size_t capacity,
 	const uint8_t *payload,
 	size_t payload_length
+);
+size_t rf_rdp_dvc_write_channel_pdu_with_flags(
+	uint8_t *data,
+	size_t capacity,
+	const uint8_t *payload,
+	size_t payload_length,
+	uint32_t extra_flags
 );
 bool rf_rdp_dvc_parse_channel_pdu(
 	const uint8_t *data,

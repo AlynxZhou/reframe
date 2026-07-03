@@ -203,7 +203,14 @@ size_t rf_rdp_cliprdr_write_monitor_ready(uint8_t *data, size_t capacity)
 
 size_t rf_rdp_cliprdr_write_format_list(uint8_t *data, size_t capacity)
 {
-	const size_t payload_length = 36;
+	const size_t format_count = 4;
+	const uint32_t formats[] = {
+		RF_RDP_CLIPRDR_CF_UNICODETEXT,
+		RF_RDP_CLIPRDR_CF_TEXT,
+		RF_RDP_CLIPRDR_CF_OEMTEXT,
+		RF_RDP_CLIPRDR_CF_LOCALE
+	};
+	const size_t payload_length = format_count * 36;
 
 	if (!write_header(
 		    data,
@@ -214,8 +221,10 @@ size_t rf_rdp_cliprdr_write_format_list(uint8_t *data, size_t capacity)
 	    ))
 		return 0;
 
-	write_u32_le(data + 8, RF_RDP_CLIPRDR_CF_UNICODETEXT);
-	memset(data + 12, 0, 32);
+	for (size_t i = 0; i < format_count; ++i) {
+		write_u32_le(data + 8 + i * 36, formats[i]);
+		memset(data + 8 + i * 36 + 4, 0, 32);
+	}
 	return RF_RDP_CLIPRDR_HEADER_SIZE + payload_length;
 }
 
@@ -284,6 +293,49 @@ size_t rf_rdp_cliprdr_write_format_data_response_text(
 	for (size_t i = 0; i < (size_t)items_written + 1; ++i)
 		write_u16_le(data + RF_RDP_CLIPRDR_HEADER_SIZE + i * 2, utf16[i]);
 	return RF_RDP_CLIPRDR_HEADER_SIZE + payload_length;
+}
+
+size_t rf_rdp_cliprdr_write_format_data_response_utf8_text(
+	uint8_t *data,
+	size_t capacity,
+	const char *text
+)
+{
+	size_t payload_length = 0;
+
+	if (data == NULL || text == NULL)
+		return 0;
+
+	payload_length = strlen(text) + 1;
+	if (!write_header(
+		    data,
+		    capacity,
+		    RF_RDP_CLIPRDR_CB_FORMAT_DATA_RESPONSE,
+		    RF_RDP_CLIPRDR_CB_RESPONSE_OK,
+		    payload_length
+	    ))
+		return 0;
+
+	memcpy(data + RF_RDP_CLIPRDR_HEADER_SIZE, text, payload_length);
+	return RF_RDP_CLIPRDR_HEADER_SIZE + payload_length;
+}
+
+size_t rf_rdp_cliprdr_write_format_data_response_locale(
+	uint8_t *data,
+	size_t capacity,
+	uint32_t locale_id
+)
+{
+	if (!write_header(
+		    data,
+		    capacity,
+		    RF_RDP_CLIPRDR_CB_FORMAT_DATA_RESPONSE,
+		    RF_RDP_CLIPRDR_CB_RESPONSE_OK,
+		    4
+	    ))
+		return 0;
+	write_u32_le(data + RF_RDP_CLIPRDR_HEADER_SIZE, locale_id);
+	return RF_RDP_CLIPRDR_HEADER_SIZE + 4;
 }
 
 size_t rf_rdp_cliprdr_write_format_data_response_fail(

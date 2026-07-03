@@ -125,11 +125,11 @@ static void test_parse_client_connect_initial_info(void)
 		0x03, 0xc0, 0x2c, 0x00,
 		0x03, 0x00, 0x00, 0x00,
 		'c', 'l', 'i', 'p', 'r', 'd', 'r', '\0',
-		0x80, 0x00, 0x00, 0xc0,
+		0x80, 0x00, 0x20, 0xc0,
 		'r', 'd', 'p', 'd', 'r', '\0', '\0', '\0',
 		0x80, 0x80, 0x00, 0xc0,
 		'd', 'r', 'd', 'y', 'n', 'v', 'c', '\0',
-		0x80, 0x80, 0x00, 0xc0,
+		0x80, 0x80, 0x20, 0xc0,
 		0x02, 0xc0, 0x0c, 0x00,
 		0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00
@@ -142,6 +142,10 @@ static void test_parse_client_connect_initial_info(void)
 	assert(info.channel_count == 3);
 	assert(info.cliprdr_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID);
 	assert(info.drdynvc_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + 2);
+	assert((info.cliprdr_channel_options &
+		RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL) != 0);
+	assert((info.drdynvc_channel_options &
+		RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL) != 0);
 }
 
 static void test_write_connect_response_with_channels(void)

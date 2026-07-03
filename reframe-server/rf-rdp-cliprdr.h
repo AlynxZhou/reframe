@@ -23,7 +23,10 @@
 #define RF_RDP_CLIPRDR_CAPS_VERSION_1 1u
 #define RF_RDP_CLIPRDR_CAPS_VERSION_2 2u
 
+#define RF_RDP_CLIPRDR_CF_TEXT 1u
+#define RF_RDP_CLIPRDR_CF_OEMTEXT 7u
 #define RF_RDP_CLIPRDR_CF_UNICODETEXT 13u
+#define RF_RDP_CLIPRDR_CF_LOCALE 16u
 
 struct rf_rdp_cliprdr_pdu {
 	size_t data_offset;
@@ -73,6 +76,16 @@ size_t rf_rdp_cliprdr_write_format_data_response_text(
 	uint8_t *data,
 	size_t capacity,
 	const char *text
+);
+size_t rf_rdp_cliprdr_write_format_data_response_utf8_text(
+	uint8_t *data,
+	size_t capacity,
+	const char *text
+);
+size_t rf_rdp_cliprdr_write_format_data_response_locale(
+	uint8_t *data,
+	size_t capacity,
+	uint32_t locale_id
 );
 size_t rf_rdp_cliprdr_write_format_data_response_fail(
 	uint8_t *data,

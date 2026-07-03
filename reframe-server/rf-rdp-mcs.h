@@ -9,6 +9,7 @@
 #define RF_RDP_MCS_GLOBAL_CHANNEL_ID 1003u
 #define RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID 1004u
 #define RF_RDP_MCS_MAX_CHANNELS 31u
+#define RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL 0x00200000u
 
 enum rf_rdp_mcs_domain_pdu_type {
 	RF_RDP_MCS_PDU_ERECT_DOMAIN_REQUEST = 1,
@@ -34,6 +35,8 @@ struct rf_rdp_mcs_client_info {
 	uint16_t channel_count;
 	uint16_t cliprdr_channel_id;
 	uint16_t drdynvc_channel_id;
+	uint32_t cliprdr_channel_options;
+	uint32_t drdynvc_channel_options;
 };
 
 bool rf_rdp_mcs_parse_connect_initial(
