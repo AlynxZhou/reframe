@@ -1,4 +1,6 @@
 #include <stdbool.h>
+#include <sys/stat.h>
+
 #include <gio/gunixsocketaddress.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -29,18 +31,30 @@ on_clipboard_text_msg(RfSession *this, GSocketConnection *connection)
 	g_autofree char *msg = NULL;
 	size_t length = 0;
 	ssize_t ret = 0;
+	gsize read = 0;
 	g_autoptr(GError) error = NULL;
 	GInputStream *is =
 		g_io_stream_get_input_stream(G_IO_STREAM(connection));
 
-	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
-	if (ret <= 0)
+	if (!g_input_stream_read_all(
+		    is,
+		    &length,
+		    sizeof(length),
+		    &read,
+		    NULL,
+		    &error
+	    ) || read != sizeof(length)) {
+		ret = error != NULL ? -1 : 0;
 		goto out;
+	}
 
 	msg = g_malloc0(length);
-	ret = g_input_stream_read(is, msg, length, NULL, &error);
-	if (ret <= 0)
+	if (!g_input_stream_read_all(is, msg, length, &read, NULL, &error) ||
+	    read != length) {
+		ret = error != NULL ? -1 : 0;
 		goto out;
+	}
+	ret = read;
 
 	g_signal_emit(this, sigs[SIG_CLIPBOARD_TEXT], 0, msg);
 
@@ -50,7 +64,7 @@ out:
 			"Failed to receive clipboard text: %s.", error->message
 		);
 	else if (ret > 0)
-		g_debug("Clipboard: Received text %s.", msg);
+		g_message("Session: Received clipboard text length %zu.", length);
 	return ret;
 }
 
@@ -223,6 +237,7 @@ int rf_session_start(RfSession *this)
 	);
 	this->service = g_socket_service_new();
 	g_remove(socket_path);
+	const mode_t previous_umask = umask(0007);
 	g_socket_listener_add_address(
 		G_SOCKET_LISTENER(this->service),
 		this->address,
@@ -232,6 +247,7 @@ int rf_session_start(RfSession *this)
 		NULL,
 		&error
 	);
+	umask(previous_umask);
 	rf_set_group(socket_path);
 	g_chmod(socket_path, 0660);
 	if (error != NULL) {
@@ -295,12 +311,14 @@ void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
 		return;
 
 	size_t length = strlen(text) + 1;
+	unsigned int sessions = 0;
 	GHashTableIter it;
 	void *key;
 	void *value;
 	g_hash_table_iter_init(&it, this->sockets);
 	while (g_hash_table_iter_next(&it, &key, &value)) {
 		ssize_t ret = 0;
+		gsize written = 0;
 		g_autoptr(GError) error = NULL;
 		GSocketConnection *connection =
 			g_socket_connection_factory_create_connection(key);
@@ -311,7 +329,18 @@ void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
 		);
 		if (ret <= 0)
 			goto next;
-		ret = g_output_stream_write(os, text, length, NULL, &error);
+		if (!g_output_stream_write_all(
+			    os,
+			    text,
+			    length,
+			    &written,
+			    NULL,
+			    &error
+		    ) || written != length) {
+			ret = error != NULL ? -1 : 0;
+			goto next;
+		}
+		ret = written;
 	next:
 		if (ret <= 0) {
 			if (ret < 0)
@@ -323,8 +352,15 @@ void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
 				g_message("ReFrame Session disconnected.");
 			g_source_destroy(value);
 			g_hash_table_iter_remove(&it);
+		} else {
+			sessions++;
 		}
 	}
+	g_message(
+		"Session: Sent clipboard text length %zu to %u session(s).",
+		length,
+		sessions
+	);
 }
 
 void rf_session_auth(RfSession *this, pid_t pid, bool ok)

@@ -55,14 +55,29 @@ ssize_t rf_send_header(
 	GError **error
 )
 {
-	ssize_t ret = 0;
+	gsize written = 0;
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(connection));
-	ret = g_output_stream_write(os, &type, sizeof(type), NULL, error);
-	if (ret <= 0)
-		return ret;
-	ret = g_output_stream_write(os, &length, sizeof(length), NULL, error);
-	return ret;
+
+	if (!g_output_stream_write_all(
+		    os,
+		    &type,
+		    sizeof(type),
+		    &written,
+		    NULL,
+		    error
+	    ))
+		return -1;
+	if (!g_output_stream_write_all(
+		    os,
+		    &length,
+		    sizeof(length),
+		    &written,
+		    NULL,
+		    error
+	    ))
+		return -1;
+	return written;
 }
 
 const char *rf_plane_type(uint32_t type)

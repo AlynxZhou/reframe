@@ -1,5 +1,6 @@
 sources = files(
-  'main.c'
+  'main.c',
+  'rf-clipboard-text.c'
 )
 
 dependencies = []
@@ -21,3 +22,12 @@ executable(
   include_directories: include_directories,
   install: true
 )
+
+test_clipboard_text = executable(
+  'test-clipboard-text',
+  '../tests/test-clipboard-text.c',
+  'rf-clipboard-text.c',
+  dependencies: [glib],
+  include_directories: include_directories
+)
+test('clipboard-text', test_clipboard_text)
