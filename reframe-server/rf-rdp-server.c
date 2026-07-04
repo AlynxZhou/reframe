@@ -19,6 +19,7 @@
 #include "rf-rdp-planar.h"
 #include "rf-rdp-proto.h"
 #include "rf-rdp-rfx.h"
+#include "rf-rdp-rdpsnd.h"
 #include "rf-rdp-server.h"
 
 #define RDP_MAX_MCS_PAYLOAD 0x7fffu
@@ -88,6 +89,7 @@ struct _RfRDPServer {
 	char *graphics;
 	char *avc_encoder;
 	char *clipboard_socket_path;
+	char *rdp_audio_socket_path;
 	char *clipboard_text;
 	struct rf_clipboard_rich_payload rich_clipboard;
 	GByteArray *clipboard_wire;
@@ -115,6 +117,9 @@ struct _RfRDPServer {
 	int configured_video_quality;
 	unsigned int max_video_quality_level;
 	unsigned int rdpgfx_target_bandwidth_mbps;
+	unsigned int audio_sample_rate;
+	unsigned int audio_channels;
+	unsigned int audio_frame_ms;
 	uint64_t rdpgfx_target_bytes_per_second;
 	uint32_t stats_max_rdpgfx_inflight;
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
@@ -124,6 +129,7 @@ struct _RfRDPServer {
 	uint64_t stats_rdpgfx_zgfx_saved_bytes;
 	bool nla;
 	bool clipboard;
+	bool audio;
 	bool running;
 };
 G_DEFINE_TYPE(RfRDPServer, rf_rdp_server, RF_TYPE_REMOTE_SERVER)
@@ -153,6 +159,7 @@ struct client {
 	uint32_t cliprdr_client_webp_format_id;
 	uint32_t cliprdr_client_bmp_format_id;
 	struct rf_rdp_cliprdr_format_list cliprdr_client_formats;
+	struct rf_rdp_rdpsnd_client_formats rdpsnd_client_formats;
 	uint16_t drdynvc_version;
 	uint16_t rdpgfx_surface_width;
 	uint16_t rdpgfx_surface_height;
@@ -183,8 +190,10 @@ struct client {
 	unsigned int av1_quality_level;
 	unsigned int avc_quality_level;
 	enum rf_rdp_av1_mode av1_mode;
+	int rdpsnd_selected_format;
 	uint8_t av1_qp;
 	uint8_t avc_qp;
+	uint8_t rdpsnd_block_no;
 	uint16_t av1_width;
 	uint16_t av1_height;
 	uint16_t avc_width;
@@ -204,6 +213,11 @@ struct client {
 	bool cliprdr_ready;
 	bool cliprdr_client_caps_received;
 	bool cliprdr_client_has_unicode_text;
+	bool rdpsnd_ready;
+	bool rdpsnd_formats_sent;
+	bool rdpsnd_client_formats_received;
+	bool rdpsnd_training_confirmed;
+	bool rdpsnd_quality_mode_received;
 	bool drdynvc_capability_sent;
 	bool drdynvc_ready;
 	bool rdpgfx_create_sent;
@@ -1111,6 +1125,23 @@ static bool send_static_channel_payload(
 	return true;
 }
 
+static bool send_rdpsnd_payload(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	if (!client->server->audio || client->rdpsnd_channel_id == 0)
+		return false;
+	return send_static_channel_payload(
+		client,
+		client->rdpsnd_channel_id,
+		client->rdpsnd_channel_options,
+		payload,
+		payload_length
+	);
+}
+
 static bool send_cliprdr_payload(
 	struct client *client,
 	const uint8_t *payload,
@@ -1669,6 +1700,110 @@ static void start_drdynvc(struct client *client)
 	client->drdynvc_capability_sent = true;
 	g_message("RDP: DVC sent capability request on static channel %u.",
 		client->drdynvc_channel_id);
+}
+
+static struct rf_rdp_rdpsnd_audio_format rdpsnd_pcm_format(
+	unsigned int sample_rate,
+	unsigned int channels
+)
+{
+	return (struct rf_rdp_rdpsnd_audio_format){
+		.tag = RF_RDP_RDPSND_WAVE_FORMAT_PCM,
+		.channels = channels,
+		.samples_per_sec = sample_rate,
+		.avg_bytes_per_sec = sample_rate * channels * 2,
+		.block_align = channels * 2,
+		.bits_per_sample = 16
+	};
+}
+
+static bool start_rdpsnd(struct client *client)
+{
+	RfRDPServer *this = client->server;
+	uint8_t pdu[128] = { 0 };
+	struct rf_rdp_rdpsnd_audio_format formats[2] = { 0 };
+	size_t format_count = 0;
+	size_t length = 0;
+
+	if (!this->audio)
+		return false;
+	if (client->rdpsnd_channel_id == 0) {
+		g_message("RDP: Client did not advertise rdpsnd; audio disabled.");
+		return false;
+	}
+
+	formats[format_count++] = rdpsnd_pcm_format(
+		this->audio_sample_rate,
+		this->audio_channels
+	);
+	if (this->audio_sample_rate != 44100)
+		formats[format_count++] = rdpsnd_pcm_format(44100, this->audio_channels);
+
+	length = rf_rdp_rdpsnd_write_server_formats(
+		pdu,
+		sizeof(pdu),
+		formats,
+		format_count,
+		client->rdpsnd_block_no
+	);
+	if (length == 0 || !send_rdpsnd_payload(client, pdu, length)) {
+		g_warning("RDP: Failed to send rdpsnd server formats.");
+		return false;
+	}
+
+	client->rdpsnd_formats_sent = true;
+	g_message(
+		"RDP: rdpsnd sent %zu server PCM format(s), preferred=%u Hz/%u channel(s).",
+		format_count,
+		this->audio_sample_rate,
+		this->audio_channels
+	);
+	return true;
+}
+
+static bool G_GNUC_UNUSED send_rdpsnd_pcm(
+	struct client *client,
+	const uint8_t *pcm,
+	size_t pcm_length,
+	uint16_t timestamp
+)
+{
+	uint8_t info[RF_RDP_RDPSND_WAVE_INFO_LENGTH] = { 0 };
+	g_autofree uint8_t *wave_data = NULL;
+	size_t info_length = 0;
+	size_t data_length = 0;
+
+	if (!client->rdpsnd_ready || client->rdpsnd_selected_format < 0 ||
+	    pcm == NULL || pcm_length < 4)
+		return false;
+
+	info_length = rf_rdp_rdpsnd_write_wave_info(
+		info,
+		sizeof(info),
+		client->rdpsnd_block_no,
+		(uint16_t)client->rdpsnd_selected_format,
+		timestamp,
+		pcm,
+		pcm_length
+	);
+	if (info_length == 0 || !send_rdpsnd_payload(client, info, info_length))
+		return false;
+
+	if (pcm_length > 4) {
+		wave_data = g_malloc(pcm_length - 4);
+		data_length = rf_rdp_rdpsnd_write_wave_data(
+			wave_data,
+			pcm_length - 4,
+			pcm,
+			pcm_length
+		);
+		if (data_length == 0 ||
+		    !send_rdpsnd_payload(client, wave_data, data_length))
+			return false;
+	}
+
+	client->rdpsnd_block_no++;
+	return true;
 }
 
 static void maybe_send_cliprdr_cached_format_list(struct client *client)
@@ -3142,6 +3277,139 @@ static void handle_cliprdr_channel_pdu(
 	);
 }
 
+static bool rdpsnd_extract_static_payload(
+	const uint8_t *payload,
+	size_t payload_length,
+	const uint8_t **body,
+	size_t *body_length
+)
+{
+	struct rf_rdp_dvc_channel_pdu channel = { 0 };
+
+	if (body == NULL || body_length == NULL)
+		return false;
+	*body = NULL;
+	*body_length = 0;
+	if (payload == NULL || payload_length < 4)
+		return false;
+
+	if (rf_rdp_dvc_parse_channel_pdu(payload, payload_length, &channel) &&
+	    (channel.flags & RF_RDP_DVC_CHANNEL_FLAG_FIRST) != 0 &&
+	    (channel.flags & RF_RDP_DVC_CHANNEL_FLAG_LAST) != 0) {
+		*body = payload + channel.payload_offset;
+		*body_length = channel.payload_length;
+		return *body_length >= 4;
+	}
+
+	*body = payload;
+	*body_length = payload_length;
+	return true;
+}
+
+static void handle_rdpsnd_client_formats(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	if (!rf_rdp_rdpsnd_parse_client_formats(
+		    payload,
+		    payload_length,
+		    &client->rdpsnd_client_formats
+	    )) {
+		g_message("RDP: Ignoring malformed rdpsnd client formats.");
+		return;
+	}
+
+	client->rdpsnd_client_formats_received = true;
+	client->rdpsnd_selected_format = rf_rdp_rdpsnd_choose_pcm_format(
+		&client->rdpsnd_client_formats,
+		client->server->audio_sample_rate,
+		client->server->audio_channels
+	);
+	client->rdpsnd_ready =
+		client->rdpsnd_selected_format >= 0 &&
+		client->rdpsnd_client_formats.version <
+			RF_RDP_RDPSND_CHANNEL_VERSION_WIN_7;
+
+	g_message(
+		"RDP: rdpsnd client formats=%zu version=%u selected=%d ready=%s.",
+		client->rdpsnd_client_formats.format_count,
+		client->rdpsnd_client_formats.version,
+		client->rdpsnd_selected_format,
+		yes_no(client->rdpsnd_ready)
+	);
+}
+
+static void handle_rdpsnd_channel_pdu(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length
+)
+{
+	const uint8_t *body = NULL;
+	size_t body_length = 0;
+
+	if (!rdpsnd_extract_static_payload(
+		    payload,
+		    payload_length,
+		    &body,
+		    &body_length
+	    )) {
+		g_message("RDP: Ignoring malformed rdpsnd static channel PDU.");
+		return;
+	}
+
+	switch (body[0]) {
+	case RF_RDP_RDPSND_SNDC_FORMATS:
+		handle_rdpsnd_client_formats(client, body, body_length);
+		break;
+	case RF_RDP_RDPSND_SNDC_QUALITYMODE:
+		client->rdpsnd_quality_mode_received = true;
+		client->rdpsnd_ready = client->rdpsnd_selected_format >= 0;
+		g_message("RDP: rdpsnd client quality mode received; ready=%s.",
+			yes_no(client->rdpsnd_ready));
+		break;
+	case RF_RDP_RDPSND_SNDC_TRAINING: {
+		uint16_t timestamp = 0;
+		uint16_t pack_size = 0;
+
+		client->rdpsnd_training_confirmed =
+			rf_rdp_rdpsnd_parse_training_confirm(
+				body,
+				body_length,
+				&timestamp,
+				&pack_size
+			);
+		g_message(
+			"RDP: rdpsnd training confirm ok=%s timestamp=%u pack-size=%u.",
+			yes_no(client->rdpsnd_training_confirmed),
+			timestamp,
+			pack_size
+		);
+		break;
+	}
+	case RF_RDP_RDPSND_SNDC_WAVECONFIRM: {
+		uint16_t timestamp = 0;
+		uint8_t block_no = 0;
+
+		if (rf_rdp_rdpsnd_parse_wave_confirm(
+			    body,
+			    body_length,
+			    &timestamp,
+			    &block_no
+		    ))
+			g_debug("RDP: rdpsnd wave confirm block=%u timestamp=%u.",
+				block_no,
+				timestamp);
+		break;
+	}
+	default:
+		g_debug("RDP: Ignoring rdpsnd message type 0x%02x.", body[0]);
+		break;
+	}
+}
+
 static void handle_active_session(struct client *client)
 {
 	RfRDPServer *this = client->server;
@@ -3149,6 +3417,7 @@ static void handle_active_session(struct client *client)
 
 	g_message("RDP: Client reached active state.");
 	start_drdynvc(client);
+	start_rdpsnd(client);
 	start_cliprdr(client);
 	add_client(client);
 
@@ -3167,6 +3436,16 @@ static void handle_active_session(struct client *client)
 		    client->drdynvc_channel_id != 0 &&
 		    domain_pdu.channel_id == client->drdynvc_channel_id) {
 			handle_drdynvc_channel_pdu(
+				client,
+				pdu->data + domain_pdu.payload_offset,
+				domain_pdu.payload_length
+			);
+			continue;
+		}
+		if (domain_pdu.type == RF_RDP_MCS_PDU_SEND_DATA_REQUEST &&
+		    client->rdpsnd_channel_id != 0 &&
+		    domain_pdu.channel_id == client->rdpsnd_channel_id) {
+			handle_rdpsnd_channel_pdu(
 				client,
 				pdu->data + domain_pdu.payload_offset,
 				domain_pdu.payload_length
@@ -5231,6 +5510,7 @@ static gboolean on_incoming(
 
 	client->server = this;
 	client->rdpgfx_channel_id = RDP_RDPGFX_DVC_CHANNEL_ID;
+	client->rdpsnd_selected_format = -1;
 	g_mutex_init(&client->write_lock);
 	client->connection = g_object_ref(connection);
 	client->stream = g_object_ref(G_IO_STREAM(connection));
@@ -5645,6 +5925,17 @@ static void set_rdp_clipboard_socket_path(
 	this->clipboard_socket_path = g_strdup(socket_path);
 }
 
+static void set_rdp_audio_socket_path(
+	RfRemoteServer *super,
+	const char *socket_path
+)
+{
+	RfRDPServer *this = RF_RDP_SERVER(super);
+
+	g_free(this->rdp_audio_socket_path);
+	this->rdp_audio_socket_path = g_strdup(socket_path);
+}
+
 static void send_clipboard_text(RfRemoteServer *super, const char *text)
 {
 	RfRDPServer *this = RF_RDP_SERVER(super);
@@ -5911,6 +6202,7 @@ static void finalize(GObject *o)
 	g_free(this->graphics);
 	g_free(this->avc_encoder);
 	g_free(this->clipboard_socket_path);
+	g_free(this->rdp_audio_socket_path);
 	g_free(this->clipboard_text);
 	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
 	g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
@@ -5933,6 +6225,7 @@ static void rf_rdp_server_class_init(RfRDPServerClass *klass)
 	r_class->stop = stop;
 	r_class->set_desktop_name = set_desktop_name;
 	r_class->set_rdp_clipboard_socket_path = set_rdp_clipboard_socket_path;
+	r_class->set_rdp_audio_socket_path = set_rdp_audio_socket_path;
 	r_class->send_clipboard_text = send_clipboard_text;
 	r_class->should_render_frame = should_render_frame;
 	r_class->update = update;
@@ -5956,6 +6249,9 @@ static void rf_rdp_server_init(RfRDPServer *this)
 	this->adaptive_fps = this->max_fps;
 	this->next_render_time_us = -1;
 	this->clipboard = true;
+	this->audio_sample_rate = 48000;
+	this->audio_channels = 2;
+	this->audio_frame_ms = 20;
 	this->configured_video_quality = RF_CONFIG_RDP_VIDEO_QUALITY_AUTO;
 	this->max_video_quality_level = RDP_RDPGFX_MAX_VIDEO_QUALITY_LEVEL;
 	this->rdpgfx_target_bandwidth_mbps =
@@ -5982,6 +6278,10 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 	this->graphics = rf_config_get_rdp_graphics(config);
 	this->avc_encoder = rf_config_get_rdp_avc_encoder(config);
 	this->clipboard = rf_config_get_rdp_clipboard(config);
+	this->audio = rf_config_get_rdp_audio(config);
+	this->audio_sample_rate = rf_config_get_rdp_audio_sample_rate(config);
+	this->audio_channels = rf_config_get_rdp_audio_channels(config);
+	this->audio_frame_ms = rf_config_get_rdp_audio_frame_ms(config);
 	this->max_fps = rf_config_get_fps(config);
 	this->adaptive_fps = this->max_fps;
 	this->configured_video_quality = rf_config_get_rdp_video_quality(config);
@@ -6020,5 +6320,12 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 			this->rdpgfx_video_quality_level,
 			this->rdpgfx_target_bandwidth_mbps
 		);
+	g_message(
+		"RDP: Audio is %s, preferred format is %u Hz/%u channel(s)/16-bit, frame-ms=%u.",
+		this->audio ? "enabled" : "disabled",
+		this->audio_sample_rate,
+		this->audio_channels,
+		this->audio_frame_ms
+	);
 	return RF_REMOTE_SERVER(this);
 }

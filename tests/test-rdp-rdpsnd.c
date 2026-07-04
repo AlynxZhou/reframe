@@ -198,7 +198,7 @@ static void test_wave_info_and_data_layout(void)
 
 	assert(info_length == RF_RDP_RDPSND_WAVE_INFO_LENGTH);
 	assert(info[0] == RF_RDP_RDPSND_SNDC_WAVE);
-	assert(read_u16_le(info + 2) == 12);
+	assert(read_u16_le(info + 2) == 8 + sizeof(pcm));
 	assert(read_u16_le(info + 4) == 1234);
 	assert(read_u16_le(info + 6) == 0);
 	assert(info[8] == 7);
@@ -223,7 +223,7 @@ static void test_wave_packet_layout(void)
 
 	assert(length == RF_RDP_RDPSND_WAVE_INFO_LENGTH + sizeof(pcm) - 4);
 	assert(out[0] == RF_RDP_RDPSND_SNDC_WAVE);
-	assert(read_u16_le(out + 2) == 12);
+	assert(read_u16_le(out + 2) == 8 + sizeof(pcm));
 	assert(read_u16_le(out + 4) == 1234);
 	assert(read_u16_le(out + 6) == 0);
 	assert(out[8] == 7);

@@ -332,9 +332,14 @@ size_t rf_rdp_rdpsnd_write_wave_info(
 )
 {
 	if (data == NULL || capacity < RF_RDP_RDPSND_WAVE_INFO_LENGTH ||
-	    pcm == NULL || pcm_length < 4)
+	    pcm == NULL || pcm_length < 4 || pcm_length > UINT16_MAX - 8u)
 		return 0;
-	if (!write_header(data, capacity, RF_RDP_RDPSND_SNDC_WAVE, 12))
+	if (!write_header(
+		    data,
+		    capacity,
+		    RF_RDP_RDPSND_SNDC_WAVE,
+		    (uint16_t)(8u + pcm_length)
+	    ))
 		return 0;
 
 	write_u16_le(data + 4, timestamp);
