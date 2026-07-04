@@ -1354,20 +1354,20 @@ static void test_avc444_delta_policy_skips_large_damage(void)
 		1080,
 		1920,
 		1080,
-		1
+		3
 	));
 	assert(!rf_rdp_core_should_skip_avc444_delta_for_quality(
 		1920,
 		1080,
 		1920,
 		1080,
-		2
+		4
 	));
 	assert(!rf_rdp_core_should_skip_avc444_delta_for_quality(
 		1920,
 		1080,
-		1920,
-		1080,
+		320,
+		180,
 		3
 	));
 }
@@ -1375,13 +1375,13 @@ static void test_avc444_delta_policy_skips_large_damage(void)
 static void test_rdpgfx_avc_quality_parameters(void)
 {
 	assert(rf_rdp_core_rdpgfx_avc_bit_rate(1920, 1088, 60, 3, false) == 5013504);
-	assert(rf_rdp_core_rdpgfx_avc_bit_rate(1920, 1088, 60, 3, true) == 3133440);
+	assert(rf_rdp_core_rdpgfx_avc_bit_rate(1920, 1088, 60, 3, true) == 5640192);
 	assert(rf_rdp_core_rdpgfx_avc_qp(3, false) == 38);
-	assert(rf_rdp_core_rdpgfx_avc_qp(3, true) == 42);
+	assert(rf_rdp_core_rdpgfx_avc_qp(3, true) == 36);
 	assert(rf_rdp_core_rdpgfx_avc_quality(3, false) == 55);
-	assert(rf_rdp_core_rdpgfx_avc_quality(3, true) == 58);
+	assert(rf_rdp_core_rdpgfx_avc_quality(3, true) == 64);
 	assert(rf_rdp_core_rdpgfx_avc_gop_size(60, 3, false) == 240);
-	assert(rf_rdp_core_rdpgfx_avc_gop_size(60, 3, true) == 300);
+	assert(rf_rdp_core_rdpgfx_avc_gop_size(60, 3, true) == 120);
 }
 
 static void test_rdpgfx_video_quality_policy(void)
@@ -1848,7 +1848,7 @@ static void test_rdpgfx_avc444_chroma_cadence_policy(void)
 	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		1, 0, false, true, true
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma(
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		1, 1, false, true, true
 	));
 	assert(!rf_rdp_core_should_defer_avc444_chroma(
@@ -1860,16 +1860,16 @@ static void test_rdpgfx_avc444_chroma_cadence_policy(void)
 	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		1, 3, false, false, true
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma(
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		1, 2, false, true, true
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma(
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		2, 2, false, true, true
 	));
 	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		3, 2, false, true, true
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma(
+	assert(!rf_rdp_core_should_defer_avc444_chroma(
 		4, 3, false, true, true
 	));
 	assert(!rf_rdp_core_should_defer_avc444_chroma(
@@ -1879,7 +1879,7 @@ static void test_rdpgfx_avc444_chroma_cadence_policy(void)
 
 static void test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio(void)
 {
-	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		4,
 		3,
 		false,
@@ -1898,7 +1898,7 @@ static void test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio(void)
 		40
 	));
 
-	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		1,
 		3,
 		false,
@@ -1944,7 +1944,7 @@ static void test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio(void)
 		1000,
 		40
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		1,
 		1,
 		false,
@@ -1962,7 +1962,7 @@ static void test_rdpgfx_avc444_chroma_cadence_uses_chroma_damage_ratio(void)
 		1000,
 		40
 	));
-	assert(rf_rdp_core_should_defer_avc444_chroma_for_damage(
+	assert(!rf_rdp_core_should_defer_avc444_chroma_for_damage(
 		1,
 		1,
 		false,

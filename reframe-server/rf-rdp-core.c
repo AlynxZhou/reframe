@@ -1589,7 +1589,7 @@ bool rf_rdp_core_should_skip_avc444_delta_for_quality(
 	if (frame_width == 0 || frame_height == 0 ||
 	    damage_width == 0 || damage_height == 0)
 		return false;
-	if (quality_level >= 2)
+	if (quality_level > 3)
 		return false;
 
 	const uint64_t frame_pixels = (uint64_t)frame_width * frame_height;
@@ -1628,11 +1628,12 @@ bool rf_rdp_core_should_defer_avc444_chroma(
 	bool chroma_changed
 )
 {
-	if (full_frame || !luma_changed || !chroma_changed || quality_level == 0)
-		return false;
-
-	const uint32_t cadence = quality_level >= 3 ? 5u : 3u;
-	return frame_id % cadence != 0;
+	(void)frame_id;
+	(void)quality_level;
+	(void)full_frame;
+	(void)luma_changed;
+	(void)chroma_changed;
+	return false;
 }
 
 bool rf_rdp_core_should_defer_avc444_chroma_for_damage(
@@ -1645,26 +1646,14 @@ bool rf_rdp_core_should_defer_avc444_chroma_for_damage(
 	uint32_t chroma_changed_pixels
 )
 {
-	uint32_t cadence = 0;
-	uint64_t chroma_per_mille = 0;
-
-	if (full_frame || !luma_changed || !chroma_changed ||
-	    quality_level == 0 || damage_pixels == 0)
-		return false;
-
-	if (chroma_changed_pixels >= damage_pixels)
-		chroma_per_mille = 1000;
-	else
-		chroma_per_mille =
-			(uint64_t)chroma_changed_pixels * 1000ull / damage_pixels;
-	if (chroma_per_mille >= 250)
-		return false;
-
-	if (quality_level >= 3)
-		cadence = chroma_per_mille >= 100 ? 3u : 5u;
-	else
-		cadence = chroma_per_mille >= 100 ? 2u : 3u;
-	return frame_id % cadence != 0;
+	(void)frame_id;
+	(void)quality_level;
+	(void)full_frame;
+	(void)luma_changed;
+	(void)chroma_changed;
+	(void)damage_pixels;
+	(void)chroma_changed_pixels;
+	return false;
 }
 
 int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
@@ -1676,7 +1665,7 @@ int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 )
 {
 	static const unsigned int avc420_scale_percent[] = { 100, 75, 55, 40 };
-	static const unsigned int avc444_scale_percent[] = { 100, 70, 45, 25 };
+	static const unsigned int avc444_scale_percent[] = { 100, 70, 45, 45 };
 	const unsigned int *scale_percent =
 		avc444 ? avc444_scale_percent : avc420_scale_percent;
 	const size_t scale_count = avc444 ?
@@ -1701,7 +1690,7 @@ int64_t rf_rdp_core_rdpgfx_avc_bit_rate(
 uint8_t rf_rdp_core_rdpgfx_avc_qp(unsigned int quality_level, bool avc444)
 {
 	static const uint8_t avc420_qp[] = { 26, 30, 34, 38 };
-	static const uint8_t avc444_qp[] = { 26, 31, 36, 42 };
+	static const uint8_t avc444_qp[] = { 26, 31, 36, 36 };
 	const uint8_t *qp = avc444 ? avc444_qp : avc420_qp;
 	const size_t qp_count =
 		avc444 ? ARRAY_LEN(avc444_qp) : ARRAY_LEN(avc420_qp);
@@ -1738,7 +1727,7 @@ unsigned int rf_rdp_core_rdpgfx_avc_gop_size(
 )
 {
 	static const unsigned int avc420_multiplier[] = { 1, 2, 3, 4 };
-	static const unsigned int avc444_multiplier[] = { 1, 2, 4, 5 };
+	static const unsigned int avc444_multiplier[] = { 1, 2, 2, 2 };
 	const unsigned int *multiplier =
 		avc444 ? avc444_multiplier : avc420_multiplier;
 	const size_t multiplier_count = avc444 ?
@@ -1748,7 +1737,7 @@ unsigned int rf_rdp_core_rdpgfx_avc_gop_size(
 		quality_level :
 		(unsigned int)multiplier_count - 1;
 	uint64_t gop = (uint64_t)(fps > 0 ? fps : 1u) * multiplier[level];
-	const uint64_t max_gop = avc444 ? 300 : 240;
+	const uint64_t max_gop = avc444 ? 120 : 240;
 
 	if (gop > max_gop)
 		gop = max_gop;
