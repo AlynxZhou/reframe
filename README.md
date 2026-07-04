@@ -168,16 +168,13 @@ $ meson compile -C build-rdp
 
 # Usage
 
-> **Security Suggestion**: VNC data streams may not be encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
-
-1. Run `systemctl start reframe-server@example.service`.
-2. Try connecting to it with a VNC client via port `5933`.
+## Common Setup
 
 If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. If it cannot find your monitor, you need to manually select monitor via DRM card and connector. If you can see screen content, but cannot control it, you need to manually load `uinput` kernel module (`modprobe uinput`).
 
 You need to disconnect and restart it once you modify any monitor settings.
 
-## Select Monitor via DRM Card and Connector
+### Select Monitor via DRM Card and Connector
 
 1. Find your DRM card name (e.g., `card0`) and connector name (e.g., `DP-1`) in `/sys/class/drm/`.
 2. Copy and modify the example configuration.
@@ -187,21 +184,7 @@ You need to disconnect and restart it once you modify any monitor settings.
 3. Set `card` and `connector` values.
 4. Set the value of `rotation` to the angle you rotate your monitor.
 
-If you cannot resize your VNC client window, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
-
-Then start the ReFrame Server systemd service so it will listen to VNC clients.
-
-```
-# systemctl start reframe-server@DP-1.service
-```
-
-ReFrame Server systemd service should automatically pull ReFrame systemd socket, which will trigger the privileged ReFrame Streamer systemd service on demand. If not, start the ReFrame systemd socket manually.
-
-```
-# systemctl start reframe@DP-1.socket
-```
-
-## Multi-monitor
+### Multi-monitor
 
 If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make pointer position mapping work.
 
@@ -223,7 +206,47 @@ You need to keep the same multi-monitor layout for **both user session and displ
 # cp /home/YOURUSER/.config/monitors.xml /etc/xdg/monitors.xml
 ```
 
-## Specific IP Addresses
+### Headless Setup
+
+This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.
+
+1. **Choose an unused connector**: For example add kernel parameter `video="DP-1:D"` to enable `DP-1`.
+2. **Set resolution via EDID override**: You can dump your real monitor's EDID from `/sys/class/drm/card*-*/edid` or download a virtual one, put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it. **If you have early KMS, also add those EDID binaries to your initramfs.**
+
+Then you can reboot your system, and come back to modify the configuration.
+
+### Automatic Wakeup
+
+Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content.
+
+This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event.
+
+If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
+
+## VNC Backend
+
+> **Security Suggestion**: VNC data streams may not be encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
+
+VNC is the default remote protocol. For the default example configuration:
+
+1. Run `systemctl start reframe-server@example.service`.
+2. Try connecting to it with a VNC client via port `5933`.
+
+If you cannot resize your VNC client window, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
+
+For a selected connector, start the ReFrame Server systemd service so it will listen to VNC clients.
+
+```
+# systemctl start reframe-server@DP-1.service
+```
+
+ReFrame Server systemd service should automatically pull ReFrame systemd socket, which will trigger the privileged ReFrame Streamer systemd service on demand. If not, start the ReFrame systemd socket manually.
+
+```
+# systemctl start reframe@DP-1.socket
+```
+
+### Specific IP Addresses
 
 If you don't want to accpet incoming connections from all IP addresses, for example, you want to only accept incoming connections from your LAN or VPN, you can set the value of `ip` to a `;` seperated list like this:
 
@@ -235,24 +258,7 @@ This is supported with libvncserver and neatvnc stable (`>=1.0.0`), with neatvnc
 
 Leaving it empty will accept all incoming connections from all IP addresses.
 
-## Headless Setup
-
-This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.
-
-1. **Choose an unused connector**: For example add kernel parameter `video="DP-1:D"` to enable `DP-1`.
-2. **Set resolution via EDID override**: You can dump your real monitor's EDID from `/sys/class/drm/card*-*/edid` or download a virtual one, put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it. **If you have early KMS, also add those EDID binaries to your initramfs.**
-
-Then you can reboot your system, and come back to modify the configuration.
-
-## Automatic Wakeup
-
-Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content.
-
-This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event.
-
-If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
-
-## Clipboard Text Sync
+### Clipboard Text Sync
 
 You need to add your user to `reframe` group to use clipboard text sync.
 
