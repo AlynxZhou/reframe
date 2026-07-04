@@ -48,6 +48,7 @@ executable(
   sources: sources,
   dependencies: dependencies,
   include_directories: include_directories,
+  install_rpath: libdir,
   install: true
 )
 
@@ -71,6 +72,7 @@ shared_module(
   sources: lvnc_sources,
   dependencies: lvnc_dependencies,
   include_directories: include_directories,
+  install_rpath: libdir,
   install: true,
   install_dir: moduledir / 'vnc'
 )
@@ -149,6 +151,7 @@ if get_option('rdp')
     dependencies: rdp_dependencies,
     include_directories: include_directories,
     c_args: rdp_avc_c_args + rdp_cliprdr_c_args,
+    install_rpath: libdir,
     install: true,
     install_dir: moduledir / 'rdp'
   )

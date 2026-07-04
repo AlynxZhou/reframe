@@ -25,7 +25,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 
 ## What ReFrame May Support in Future
 
-- More RDP virtual channels, such as audio or device redirection.
+- More RDP virtual channels, such as device redirection.
 
 ## What ReFrame Won't Support
 
@@ -145,6 +145,7 @@ If you want to build the native RDP server module (`-D rdp=true`), you will also
 - libpng
 - libtiff
 - gdk-pixbuf
+- PipeWire (`libpipewire-0.3`) for RDP remote audio output
 - ffmpeg libraries (`libavcodec`, `libavutil`, `libswscale`) for AVC/H.264 and AV1 RDPGFX encoders
 
 ### Build
@@ -301,6 +302,10 @@ avc-encoder=auto
 video-quality=auto
 video-quality-max=3
 target-bandwidth-mbps=20
+audio=true
+audio-sample-rate=48000
+audio-channels=2
+audio-frame-ms=20
 ```
 
 RDP requires TLS credentials. ReFrame does not generate them automatically; for local testing you can create a self-signed certificate:
@@ -328,6 +333,18 @@ For clipboard sync, add your desktop user to the `reframe` group, then log out a
 ```
 
 The RDP clipboard helper is installed as an XDG autostart entry and supports text, HTML, and common image formats. Wayland clipboard image sync needs a running user session and a working Wayland clipboard provider.
+
+For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`.
+
+If you need to start it manually:
+
+```
+$ /usr/bin/reframe-rdp-audio \
+  --socket-dir=/run/reframe-rdp-audio \
+  --sample-rate=48000 \
+  --channels=2 \
+  --frame-ms=20
+```
 
 ### FreeRDP Client for RDPGFX/AV1 Testing
 
@@ -377,6 +394,7 @@ $ SDL_VIDEO_MAC_FULLSCREEN_SPACES=0 /opt/homebrew/bin/sdl-freerdp \
   /size:1920x1080 /window-position:40x40 \
   -dynamic-resolution -toggle-fullscreen \
   /mouse:grab:off \
+  /sound:sys:mac \
   /gfx:AV1:on,AVC420:on,AVC444:on,frame-ack:on \
   /log-level:WARN
 ```

@@ -40,6 +40,7 @@
 #define RDP_RDPGFX_AVC444_LC_STAT_COUNT 3u
 #define RDP_RDPGFX_CODEC_PROBE_WIDTH 320u
 #define RDP_RDPGFX_CODEC_PROBE_HEIGHT 240u
+#define RDP_AUDIO_STATS_INTERVAL_US (10 * G_USEC_PER_SEC)
 
 static unsigned int align16(unsigned int value)
 {
@@ -115,7 +116,12 @@ struct _RfRDPServer {
 	uint64_t stats_bytes_sent;
 	uint64_t stats_send_time_us;
 	uint64_t stats_avc444_lc[RDP_RDPGFX_AVC444_LC_STAT_COUNT];
+	uint64_t audio_stats_frames;
+	uint64_t audio_stats_bytes;
+	uint64_t audio_stats_dropped;
+	int64_t audio_stats_last_log_time_us;
 	unsigned int stats_min_target_fps;
+	unsigned int audio_stats_clients;
 	unsigned int rdpgfx_video_quality_level;
 	int64_t rdpgfx_video_quality_last_change_time_us;
 	int configured_video_quality;
@@ -1819,6 +1825,68 @@ static bool send_rdpsnd_pcm(
 	return true;
 }
 
+static const struct rf_rdp_rdpsnd_audio_format *client_rdpsnd_selected_format(
+	const struct client *client
+)
+{
+	if (client == NULL || client->rdpsnd_selected_format < 0 ||
+	    (size_t)client->rdpsnd_selected_format >=
+		    client->rdpsnd_client_formats.format_count)
+		return NULL;
+	return &client->rdpsnd_client_formats.formats[client->rdpsnd_selected_format];
+}
+
+static bool audio_frame_matches_client_format(
+	const struct rf_rdp_audio_pcm_header *header,
+	const struct rf_rdp_rdpsnd_audio_format *format
+)
+{
+	if (header == NULL || format == NULL)
+		return false;
+	return format->tag == RF_RDP_RDPSND_WAVE_FORMAT_PCM &&
+	       header->sample_rate == format->samples_per_sec &&
+	       header->channels == format->channels &&
+	       format->bits_per_sample == 16 &&
+	       format->block_align == header->channels * 2;
+}
+
+static void update_audio_stats(
+	RfRDPServer *this,
+	const struct rf_rdp_audio_pcm_header *header,
+	unsigned int clients,
+	unsigned int sent,
+	unsigned int dropped
+)
+{
+	const int64_t now = g_get_monotonic_time();
+
+	g_mutex_lock(&this->audio_lock);
+	this->audio_stats_frames += sent;
+	this->audio_stats_bytes += (uint64_t)header->pcm_length * sent;
+	this->audio_stats_dropped += dropped;
+	this->audio_stats_clients = clients;
+	if (this->audio_stats_last_log_time_us == 0)
+		this->audio_stats_last_log_time_us = now;
+	if (now - this->audio_stats_last_log_time_us >=
+	    RDP_AUDIO_STATS_INTERVAL_US) {
+		g_message(
+			"RDP: Audio stats frames=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", dropped=%" G_GUINT64_FORMAT ", clients=%u, format=%uHz/%uch frame=%ums.",
+			this->audio_stats_frames,
+			this->audio_stats_bytes,
+			this->audio_stats_dropped,
+			this->audio_stats_clients,
+			header->sample_rate,
+			header->channels,
+			header->frame_ms
+		);
+		this->audio_stats_frames = 0;
+		this->audio_stats_bytes = 0;
+		this->audio_stats_dropped = 0;
+		this->audio_stats_last_log_time_us = now;
+	}
+	g_mutex_unlock(&this->audio_lock);
+}
+
 static void send_audio_to_clients(
 	RfRDPServer *this,
 	const struct rf_rdp_audio_pcm_header *header,
@@ -1827,6 +1895,7 @@ static void send_audio_to_clients(
 {
 	unsigned int attempted = 0;
 	unsigned int sent = 0;
+	unsigned int dropped = 0;
 	const uint16_t timestamp = (uint16_t)(header->timestamp_us / 1000u);
 
 	if (pcm == NULL || header == NULL)
@@ -1835,14 +1904,31 @@ static void send_audio_to_clients(
 	g_mutex_lock(&this->lock);
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
+		const struct rf_rdp_rdpsnd_audio_format *format = NULL;
 
 		if (!client->rdpsnd_ready)
 			continue;
+		format = client_rdpsnd_selected_format(client);
 		attempted++;
+		if (!audio_frame_matches_client_format(header, format)) {
+			dropped++;
+			if (format != NULL)
+				g_debug(
+					"RDP: Dropping audio frame %u Hz/%u ch; selected client format is %u Hz/%u ch.",
+					header->sample_rate,
+					header->channels,
+					format->samples_per_sec,
+					format->channels
+				);
+			continue;
+		}
 		if (send_rdpsnd_pcm(client, pcm->data, pcm->len, timestamp))
 			sent++;
+		else
+			dropped++;
 	}
 	g_mutex_unlock(&this->lock);
+	update_audio_stats(this, header, attempted, sent, dropped);
 
 	if (attempted > 0 && sent == 0)
 		g_debug("RDP: Failed to send audio frame to %u ready client(s).",

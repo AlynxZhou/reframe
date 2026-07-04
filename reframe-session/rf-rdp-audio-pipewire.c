@@ -18,6 +18,7 @@
 
 struct audio_capture {
 	const char *socket_path;
+	const char *target;
 	GSocketConnection *connection;
 	GOutputStream *output;
 	GByteArray *frame;
@@ -196,6 +197,7 @@ static bool valid_audio_options(
 
 bool rf_rdp_audio_pipewire_run(
 	const char *socket_path,
+	const char *target,
 	unsigned int sample_rate,
 	unsigned int channels,
 	unsigned int frame_ms
@@ -203,6 +205,7 @@ bool rf_rdp_audio_pipewire_run(
 {
 	struct audio_capture capture = {
 		.socket_path = socket_path,
+		.target = target,
 		.sample_rate = sample_rate,
 		.channels = channels,
 		.frame_ms = frame_ms,
@@ -221,6 +224,7 @@ bool rf_rdp_audio_pipewire_run(
 		.channels = channels
 	);
 	const struct spa_pod *params[1] = { NULL };
+	struct pw_properties *properties = NULL;
 
 	if (socket_path == NULL || !valid_audio_options(sample_rate, channels, frame_ms)) {
 		g_warning("RDP audio: Invalid options.");
@@ -237,17 +241,21 @@ bool rf_rdp_audio_pipewire_run(
 	if (capture.loop == NULL)
 		goto fail;
 
+	properties = pw_properties_new(
+		PW_KEY_MEDIA_TYPE, "Audio",
+		PW_KEY_MEDIA_CATEGORY, "Capture",
+		PW_KEY_MEDIA_ROLE, "Screen",
+		PW_KEY_NODE_NAME, "reframe-rdp-audio",
+		PW_KEY_NODE_DESCRIPTION, "ReFrame RDP Audio",
+		PW_KEY_STREAM_CAPTURE_SINK, "true",
+		NULL
+	);
+	if (target != NULL && target[0] != '\0')
+		pw_properties_set(properties, PW_KEY_TARGET_OBJECT, target);
 	capture.stream = pw_stream_new_simple(
 		pw_main_loop_get_loop(capture.loop),
 		"reframe-rdp-audio",
-		pw_properties_new(
-			PW_KEY_MEDIA_TYPE, "Audio",
-			PW_KEY_MEDIA_CATEGORY, "Capture",
-			PW_KEY_MEDIA_ROLE, "Screen",
-			PW_KEY_NODE_NAME, "reframe-rdp-audio",
-			PW_KEY_NODE_DESCRIPTION, "ReFrame RDP Audio",
-			NULL
-		),
+		properties,
 		&stream_events,
 		&capture
 	);

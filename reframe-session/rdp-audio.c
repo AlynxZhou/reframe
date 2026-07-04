@@ -9,6 +9,7 @@ int main(int argc, char **argv)
 {
 	g_autofree char *socket_path = NULL;
 	g_autofree char *socket_dir = NULL;
+	g_autofree char *target = NULL;
 	g_autoptr(GError) error = NULL;
 	unsigned int sample_rate = 48000;
 	unsigned int channels = 2;
@@ -18,6 +19,8 @@ int main(int argc, char **argv)
 		  &socket_path, "RDP audio socket path.", "SOCKET" },
 		{ "socket-dir", 'd', G_OPTION_FLAG_NONE, G_OPTION_ARG_FILENAME,
 		  &socket_dir, "RDP audio socket dir to communicate.", "DIR" },
+		{ "target", 't', G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+		  &target, "PipeWire target object name or serial.", "TARGET" },
 		{ "sample-rate", 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_INT,
 		  &sample_rate, "PCM sample rate.", "HZ" },
 		{ "channels", 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_INT,
@@ -58,6 +61,7 @@ int main(int argc, char **argv)
 
 	return rf_rdp_audio_pipewire_run(
 		socket_path,
+		target,
 		sample_rate,
 		channels,
 		frame_ms

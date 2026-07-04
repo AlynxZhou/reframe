@@ -52,6 +52,7 @@ executable(
   sources: sources,
   dependencies: dependencies,
   include_directories: include_directories,
+  install_rpath: libdir,
   install: true
 )
 
@@ -60,6 +61,7 @@ executable(
   sources: rdp_clipboard_sources + rdp_clipboard_protocol_sources,
   dependencies: rdp_clipboard_dependencies,
   include_directories: include_directories,
+  install_rpath: libdir,
   install: true
 )
 
@@ -72,6 +74,7 @@ if have_rdp_audio
     ),
     dependencies: dependencies + [pipewire],
     include_directories: include_directories,
+    install_rpath: libdir,
     install: true
   )
 endif
