@@ -114,16 +114,18 @@ static void test_parse_channel_join_request(void)
 static void test_parse_client_connect_initial_info(void)
 {
 	const uint8_t pdu[] = {
-		0x03, 0x00, 0x00, 0x50,
+		0x03, 0x00, 0x00, 0x5c,
 		0x02, 0xf0, 0x80,
 		0x7f, 0x65, 0x82, 0x00,
-		0x44,
+		0x50,
 		0x34, 0x12, 0x20, 0x00,
 		0x01, 0xc0, 0x0c, 0x00,
 		0x04, 0x00, 0x08, 0x00,
 		0x00, 0x04, 0x00, 0x03,
-		0x03, 0xc0, 0x2c, 0x00,
-		0x03, 0x00, 0x00, 0x00,
+		0x03, 0xc0, 0x38, 0x00,
+		0x04, 0x00, 0x00, 0x00,
+		'r', 'd', 'p', 's', 'n', 'd', '\0', '\0',
+		0x80, 0x00, 0x20, 0xc0,
 		'c', 'l', 'i', 'p', 'r', 'd', 'r', '\0',
 		0x80, 0x00, 0x20, 0xc0,
 		'r', 'd', 'p', 'd', 'r', '\0', '\0', '\0',
@@ -139,9 +141,12 @@ static void test_parse_client_connect_initial_info(void)
 	assert(rf_rdp_mcs_parse_connect_initial(pdu, sizeof(pdu), &info));
 	assert(info.desktop_width == 1024);
 	assert(info.desktop_height == 768);
-	assert(info.channel_count == 3);
-	assert(info.cliprdr_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID);
-	assert(info.drdynvc_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + 2);
+	assert(info.channel_count == 4);
+	assert(info.rdpsnd_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID);
+	assert(info.cliprdr_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + 1);
+	assert(info.drdynvc_channel_id == RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + 3);
+	assert((info.rdpsnd_channel_options &
+		RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL) != 0);
 	assert((info.cliprdr_channel_options &
 		RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL) != 0);
 	assert((info.drdynvc_channel_options &

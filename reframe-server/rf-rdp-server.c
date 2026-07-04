@@ -139,8 +139,10 @@ struct client {
 	uint16_t desktop_width;
 	uint16_t desktop_height;
 	uint16_t channel_count;
+	uint16_t rdpsnd_channel_id;
 	uint16_t cliprdr_channel_id;
 	uint16_t drdynvc_channel_id;
+	uint32_t rdpsnd_channel_options;
 	uint32_t cliprdr_channel_options;
 	uint32_t drdynvc_channel_options;
 	uint32_t cliprdr_requested_format_id;
@@ -2284,8 +2286,11 @@ static bool handle_mcs_connect_sequence(struct client *client)
 			client_info.desktop_height
 			);
 			client->channel_count = client_info.channel_count;
+			client->rdpsnd_channel_id = client_info.rdpsnd_channel_id;
 			client->cliprdr_channel_id = client_info.cliprdr_channel_id;
 			client->drdynvc_channel_id = client_info.drdynvc_channel_id;
+			client->rdpsnd_channel_options =
+				client_info.rdpsnd_channel_options;
 			client->cliprdr_channel_options =
 				client_info.cliprdr_channel_options;
 			client->drdynvc_channel_options =
@@ -2294,6 +2299,12 @@ static bool handle_mcs_connect_sequence(struct client *client)
 				client->desktop_width,
 				client->desktop_height,
 				client->channel_count);
+			if (client->rdpsnd_channel_id != 0)
+				g_message(
+					"RDP: Client advertised rdpsnd static channel %u options=0x%08x.",
+					client->rdpsnd_channel_id,
+					client->rdpsnd_channel_options
+				);
 			if (client->cliprdr_channel_id != 0)
 				g_message(
 					"RDP: Client advertised cliprdr static channel %u options=0x%08x.",

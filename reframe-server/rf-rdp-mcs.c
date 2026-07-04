@@ -396,11 +396,17 @@ bool rf_rdp_mcs_parse_connect_initial(
 				return false;
 			if (block_length >= 8 + channel_count * 12) {
 				for (uint32_t i = 0; i < channel_count; ++i) {
-					const uint8_t *name = data + offset + 8 + i * 12;
-					const uint32_t options = read_u32_le(name + 8);
+						const uint8_t *name = data + offset + 8 + i * 12;
+						const uint32_t options = read_u32_le(name + 8);
 
-					if (memcmp(name, "cliprdr", 7) == 0 &&
-					    name[7] == '\0') {
+						if (memcmp(name, "rdpsnd", 6) == 0 &&
+						    name[6] == '\0') {
+							info->rdpsnd_channel_id =
+								RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
+							info->rdpsnd_channel_options = options;
+						}
+						if (memcmp(name, "cliprdr", 7) == 0 &&
+						    name[7] == '\0') {
 						info->cliprdr_channel_id =
 							RF_RDP_MCS_FIRST_DYNAMIC_CHANNEL_ID + i;
 						info->cliprdr_channel_options = options;
