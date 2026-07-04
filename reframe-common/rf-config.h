@@ -26,6 +26,7 @@ int rf_config_get_monitor_y(RfConfig *this);
 unsigned int rf_config_get_default_width(RfConfig *this);
 unsigned int rf_config_get_default_height(RfConfig *this);
 bool rf_config_get_resize(RfConfig *this);
+bool rf_config_get_share(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
 enum rf_damage_type rf_config_get_damage(RfConfig *this);

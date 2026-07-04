@@ -17,6 +17,7 @@ struct _RfLVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	bool share;
 	bool running;
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
@@ -145,8 +146,16 @@ static int on_incoming(
 	}
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	g_debug("VNC: Got new connection %p.", socket);
-	if (++this->clients == 1)
+	++this->clients;
+	if (this->clients == 1) {
 		rf_vnc_server_handle_first_client(super);
+	} else if (!this->share) {
+		--this->clients;
+		g_message(
+			"VNC: Incoming connection is refused because multiple connections are prohibited."
+		);
+		return false;
+	}
 	// Don't attach source on new client hook, because it may be called
 	// before we set client data.
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
@@ -249,6 +258,11 @@ static void start(RfVNCServer *super)
 	g_message(
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
+	);
+	this->share = rf_config_get_share(this->config);
+	g_message(
+		"VNC: Multiple connections will be %s.",
+		this->share ? "allowed" : "prohibited"
 	);
 
 	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);

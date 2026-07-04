@@ -24,6 +24,7 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	bool resize;
+	bool share;
 	char *username;
 	bool allow_broken_crypto;
 	char *rsa_private_key_file;
@@ -135,13 +136,23 @@ static void on_new_client(struct nvnc_client *client)
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
+	++this->clients;
+	if (this->clients == 1) {
+		rf_vnc_server_handle_first_client(super);
+	} else if (!this->share) {
+		--this->clients;
+		nvnc_client_close(client);
+		g_message(
+			"VNC: Incoming connection is refused because multiple connections are prohibited."
+		);
+		return;
+	}
+
 #ifndef NEATVNC_UNSTABLE_API
 	nvnc_client_set_userdata(client, client, on_client_gone);
 #else
 	nvnc_set_client_cleanup_fn(client, (nvnc_client_fn)on_client_gone);
 #endif
-	if (++this->clients == 1)
-		rf_vnc_server_handle_first_client(super);
 }
 
 #ifndef NEATVNC_UNSTABLE_API
@@ -237,6 +248,11 @@ static void start(RfVNCServer *super)
 	g_message(
 		"VNC: Client resizing will be %s.",
 		this->resize ? "allowed" : "prohibited"
+	);
+	this->share = rf_config_get_share(this->config);
+	g_message(
+		"VNC: Multiple connections will be %s.",
+		this->share ? "allowed" : "prohibited"
 	);
 	this->username = rf_config_get_neatvnc_username(this->config);
 	this->allow_broken_crypto =

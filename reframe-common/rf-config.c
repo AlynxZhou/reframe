@@ -190,6 +190,19 @@ bool rf_config_get_resize(RfConfig *this)
 	return resize;
 }
 
+bool rf_config_get_share(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), true);
+
+	g_autoptr(GError) error = NULL;
+	int share = g_key_file_get_boolean(
+		this->f, RF_CONFIG_GROUP_REFRAME, "share", &error
+	);
+	if (error != NULL)
+		return true;
+	return share;
+}
+
 bool rf_config_get_cursor(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
