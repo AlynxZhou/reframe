@@ -15,6 +15,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 ## What ReFrame Currently Supports
 
 - **VNC**
+- **RDP** (native server backend)
 - **Wayland**/X11/**TTY**
 - Intel/AMD/**NVIDIA**/[Even **Raspberry Pi**!](https://reframe.alynx.one/#rpi)/[Enter more GPUs that can run a general Wayland compositor…]
 - Pointer/Keyboard
@@ -24,7 +25,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 
 ## What ReFrame May Support in Future
 
-- **RDP**: PRs are always welcome.
+- More RDP virtual channels, such as audio or device redirection.
 
 ## What ReFrame Won't Support
 
@@ -139,6 +140,13 @@ The default VNC implementation is libvncserver, if you want to build the optiona
 - zlib
 - ffmpeg
 
+If you want to build the native RDP server module (`-D rdp=true`), you will also need:
+
+- libpng
+- libtiff
+- gdk-pixbuf
+- ffmpeg libraries (`libavcodec`, `libavutil`, `libswscale`) for AVC/H.264 and AV1 RDPGFX encoders
+
 ### Build
 
 ```
@@ -146,6 +154,16 @@ $ git clone --recurse-submodules https://github.com/AlynxZhou/reframe.git
 $ cd reframe
 $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 # meson install
+```
+
+To build with the native RDP backend enabled:
+
+```
+$ git clone --recurse-submodules https://github.com/AlynxZhou/reframe.git
+$ cd reframe
+$ meson setup build-rdp --prefix=/usr -D rdp=true
+$ meson compile -C build-rdp
+# meson install -C build-rdp
 ```
 
 # Usage
@@ -247,6 +265,123 @@ If you set other username than `reframe` while building, the group name should b
 This is implemented by putting a desktop file to XDG autostart dir to start `reframe-session` with your session and handle your clipboard. `reframe-session` talks with `reframe-server` via sockets in directory `/run/reframe-session`, if you are not using systemd, or you changed the directory via `reframe-server`'s argument, don't forget to modify the XDG autostart file to change argument for `reframe-session`
 
 You have to restart `reframe-session` once you update it, because the binary is changed. This could be done via log out and log in again.
+
+## Native RDP Backend
+
+The RDP backend is selected through the common remote protocol setting. Copy the example configuration first:
+
+```
+# cp /etc/reframe/example.conf /etc/reframe/DP-1.conf
+```
+
+Then set the remote protocol to RDP and fill the RDP section:
+
+```ini
+[remote]
+protocol=rdp
+
+[rdp]
+ip=
+port=3389
+tls-private-key-file=/etc/reframe/rdp.key
+tls-certificate-file=/etc/reframe/rdp.crt
+username=
+domain=
+password=
+nla=false
+graphics=auto
+clipboard=true
+avc-encoder=auto
+video-quality=auto
+video-quality-max=3
+target-bandwidth-mbps=20
+```
+
+RDP requires TLS credentials. ReFrame does not generate them automatically; for local testing you can create a self-signed certificate:
+
+```
+# openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout /etc/reframe/rdp.key \
+  -out /etc/reframe/rdp.crt \
+  -days 3650 \
+  -subj "/CN=reframe-rdp"
+# chmod 0600 /etc/reframe/rdp.key
+```
+
+Start the server for the selected connector:
+
+```
+# systemctl start reframe-server@DP-1.service
+# systemctl start reframe@DP-1.socket
+```
+
+For clipboard sync, add your desktop user to the `reframe` group, then log out and log in again:
+
+```
+# gpasswd -a YOURUSER reframe
+```
+
+The RDP clipboard helper is installed as an XDG autostart entry and supports text, HTML, and common image formats. Wayland clipboard image sync needs a running user session and a working Wayland clipboard provider.
+
+### FreeRDP Client for RDPGFX/AV1 Testing
+
+FreeRDP is a useful client for testing RDPGFX codecs. If you enable FreeRDP's experimental AV1 support, build it with libaom as well; otherwise the client may advertise AV1 but fail to decode RDPGFX AV1 frames.
+
+On macOS with Homebrew:
+
+```
+$ brew install cmake ninja pkg-config openssl ffmpeg sdl3 sdl3_ttf sdl3_image aom
+$ git clone https://github.com/FreeRDP/FreeRDP.git
+$ cd FreeRDP
+$ cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=/opt/homebrew \
+  -DWITH_CLIENT_SDL=ON \
+  -DWITH_CLIENT_SDL2=OFF \
+  -DWITH_CLIENT_SDL3=ON \
+  -DWITH_FFMPEG=ON \
+  -DWITH_VIDEOTOOLBOX=ON \
+  -DWITH_GFX_AV1=ON \
+  -DWITH_AOM=ON
+$ cmake --build build --target install --parallel
+```
+
+Confirm the installed client has the expected codecs:
+
+```
+$ /opt/homebrew/bin/sdl-freerdp /buildconfig | tr ' ' '\n' | grep -E 'WITH_AOM|WITH_GFX_AV1|WITH_VIDEOTOOLBOX|WITH_CLIENT_SDL[23]'
+```
+
+The output should include:
+
+```
+WITH_AOM=ON
+WITH_GFX_AV1=ON
+WITH_VIDEOTOOLBOX=ON
+WITH_CLIENT_SDL2=OFF
+WITH_CLIENT_SDL3=ON
+```
+
+Example 1920x1080 windowed connection:
+
+```
+$ SDL_VIDEO_MAC_FULLSCREEN_SPACES=0 /opt/homebrew/bin/sdl-freerdp \
+  /v:SERVER_IP:3389 \
+  /u:USERNAME /p:PASSWORD /cert:ignore \
+  /size:1920x1080 /window-position:40x40 \
+  -dynamic-resolution -toggle-fullscreen \
+  /mouse:grab:off \
+  /gfx:AV1:on,AVC420:on,AVC444:on,frame-ack:on \
+  /log-level:WARN
+```
+
+For troubleshooting codec negotiation, temporarily disable one codec at a time, for example:
+
+```
+$ /opt/homebrew/bin/sdl-freerdp /v:SERVER_IP:3389 /u:USERNAME /p:PASSWORD /cert:ignore /gfx:AV1:off,AVC420:on,AVC444:off,frame-ack:on
+```
+
+If the client logs `rdpgfx_decode failed` followed by `ChannelId ... not found`, the RDPGFX dynamic channel was closed after a decode failure. Check that the client was built with the decoder it advertised, especially `WITH_AOM=ON` when using AV1.
 
 # Comparison with Other Linux Remote Desktop
 
