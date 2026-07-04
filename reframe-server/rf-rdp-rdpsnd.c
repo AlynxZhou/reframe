@@ -361,11 +361,12 @@ size_t rf_rdp_rdpsnd_write_wave_data(
 {
 	if (pcm_length <= 4)
 		return 0;
-	if (data == NULL || pcm == NULL || capacity < pcm_length - 4)
+	if (data == NULL || pcm == NULL || capacity < pcm_length)
 		return 0;
 
-	memcpy(data, pcm + 4, pcm_length - 4);
-	return pcm_length - 4;
+	memset(data, 0, 4);
+	memcpy(data + 4, pcm + 4, pcm_length - 4);
+	return pcm_length;
 }
 
 size_t rf_rdp_rdpsnd_write_wave(
@@ -403,6 +404,43 @@ size_t rf_rdp_rdpsnd_write_wave(
 	if (pcm_length > 4 && data_length == 0)
 		return 0;
 	return info_length + data_length;
+}
+
+size_t rf_rdp_rdpsnd_write_wave2(
+	uint8_t *data,
+	size_t capacity,
+	uint8_t block_no,
+	uint16_t format_no,
+	uint16_t timestamp,
+	uint32_t audio_timestamp,
+	const uint8_t *pcm,
+	size_t pcm_length
+)
+{
+	const size_t header_length = 16;
+	const size_t body_size = 12 + pcm_length;
+	const size_t total_size = header_length + pcm_length;
+
+	if (data == NULL || pcm == NULL || pcm_length == 0 ||
+	    body_size > UINT16_MAX || capacity < total_size)
+		return 0;
+	if (!write_header(
+		    data,
+		    capacity,
+		    RF_RDP_RDPSND_SNDC_WAVE2,
+		    (uint16_t)body_size
+	    ))
+		return 0;
+
+	write_u16_le(data + 4, timestamp);
+	write_u16_le(data + 6, format_no);
+	data[8] = block_no;
+	data[9] = 0;
+	data[10] = 0;
+	data[11] = 0;
+	write_u32_le(data + 12, audio_timestamp);
+	memcpy(data + header_length, pcm, pcm_length);
+	return total_size;
 }
 
 size_t rf_rdp_rdpsnd_write_close(uint8_t *data, size_t capacity)

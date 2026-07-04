@@ -71,9 +71,22 @@ static void test_rejects_invalid_pcm_format(void)
 	g_clear_error(&error);
 }
 
+static void test_detects_silent_pcm(void)
+{
+	const uint8_t silence[8] = { 0 };
+	const uint8_t low_noise[8] = { 1, 0, 0xff, 0xff, 2, 0, 0xfe, 0xff };
+	const uint8_t signal[8] = { 0x00, 0x10, 0, 0, 0, 0, 0, 0 };
+
+	assert(rf_rdp_audio_pcm_is_silent(silence, sizeof(silence), 4));
+	assert(rf_rdp_audio_pcm_is_silent(low_noise, sizeof(low_noise), 4));
+	assert(!rf_rdp_audio_pcm_is_silent(signal, sizeof(signal), 4));
+	assert(!rf_rdp_audio_pcm_is_silent(signal, 7, 4));
+}
+
 int main(void)
 {
 	test_roundtrip_pcm_message();
 	test_rejects_invalid_pcm_format();
+	test_detects_silent_pcm();
 	return 0;
 }

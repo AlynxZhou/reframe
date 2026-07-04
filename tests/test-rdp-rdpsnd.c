@@ -203,8 +203,9 @@ static void test_wave_info_and_data_layout(void)
 	assert(read_u16_le(info + 6) == 0);
 	assert(info[8] == 7);
 	assert(memcmp(info + 12, pcm, 4) == 0);
-	assert(rest_length == sizeof(pcm) - 4);
-	assert(memcmp(rest, pcm + 4, sizeof(pcm) - 4) == 0);
+	assert(rest_length == sizeof(pcm));
+	assert(memcmp(rest, "\0\0\0\0", 4) == 0);
+	assert(memcmp(rest + 4, pcm + 4, sizeof(pcm) - 4) == 0);
 }
 
 static void test_wave_packet_layout(void)
@@ -221,14 +222,40 @@ static void test_wave_packet_layout(void)
 		sizeof(pcm)
 	);
 
-	assert(length == RF_RDP_RDPSND_WAVE_INFO_LENGTH + sizeof(pcm) - 4);
+	assert(length == RF_RDP_RDPSND_WAVE_INFO_LENGTH + sizeof(pcm));
 	assert(out[0] == RF_RDP_RDPSND_SNDC_WAVE);
 	assert(read_u16_le(out + 2) == 8 + sizeof(pcm));
 	assert(read_u16_le(out + 4) == 1234);
 	assert(read_u16_le(out + 6) == 0);
 	assert(out[8] == 7);
 	assert(memcmp(out + 12, pcm, 4) == 0);
-	assert(memcmp(out + 16, pcm + 4, sizeof(pcm) - 4) == 0);
+	assert(memcmp(out + 16, "\0\0\0\0", 4) == 0);
+	assert(memcmp(out + 20, pcm + 4, sizeof(pcm) - 4) == 0);
+}
+
+static void test_wave2_packet_layout(void)
+{
+	uint8_t out[256] = { 0 };
+	const uint8_t pcm[8] = { 1, 0, 2, 0, 3, 0, 4, 0 };
+	const size_t length = rf_rdp_rdpsnd_write_wave2(
+		out,
+		sizeof(out),
+		7,
+		0,
+		1234,
+		5678,
+		pcm,
+		sizeof(pcm)
+	);
+
+	assert(length == 16 + sizeof(pcm));
+	assert(out[0] == RF_RDP_RDPSND_SNDC_WAVE2);
+	assert(read_u16_le(out + 2) == 12 + sizeof(pcm));
+	assert(read_u16_le(out + 4) == 1234);
+	assert(read_u16_le(out + 6) == 0);
+	assert(out[8] == 7);
+	assert(read_u32_le(out + 12) == 5678);
+	assert(memcmp(out + 16, pcm, sizeof(pcm)) == 0);
 }
 
 static void test_parse_wave_confirm(void)
@@ -260,6 +287,7 @@ int main(void)
 	test_training_packet_and_parse_confirm();
 	test_wave_info_and_data_layout();
 	test_wave_packet_layout();
+	test_wave2_packet_layout();
 	test_parse_wave_confirm();
 	return 0;
 }

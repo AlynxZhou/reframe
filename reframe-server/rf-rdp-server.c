@@ -41,6 +41,9 @@
 #define RDP_RDPGFX_CODEC_PROBE_WIDTH 320u
 #define RDP_RDPGFX_CODEC_PROBE_HEIGHT 240u
 #define RDP_AUDIO_STATS_INTERVAL_US (10 * G_USEC_PER_SEC)
+#define RDP_AUDIO_QUEUE_TARGET_MS 120u
+#define RDP_AUDIO_SILENCE_THRESHOLD 256
+#define RDP_AUDIO_SILENCE_HOLD_MS 120u
 
 static unsigned int align16(unsigned int value)
 {
@@ -81,6 +84,8 @@ struct _RfRDPServer {
 	GTlsCertificate *certificate;
 	GMutex lock;
 	GMutex audio_lock;
+	GCond audio_cond;
+	GThread *audio_sender_thread;
 	GList *clients;
 	GHashTable *clipboard_sockets;
 	struct client *resize_owner;
@@ -97,7 +102,7 @@ struct _RfRDPServer {
 	char *clipboard_text;
 	struct rf_clipboard_rich_payload rich_clipboard;
 	GByteArray *clipboard_wire;
-	GByteArray *latest_audio_pcm;
+	GQueue *audio_queue;
 	GByteArray *last_frame;
 	unsigned int port;
 	unsigned int desktop_width;
@@ -119,6 +124,12 @@ struct _RfRDPServer {
 	uint64_t audio_stats_frames;
 	uint64_t audio_stats_bytes;
 	uint64_t audio_stats_dropped;
+	uint64_t audio_stats_latency_us;
+	uint64_t audio_stats_latency_samples;
+	uint64_t audio_stats_max_latency_us;
+	uint64_t audio_stats_skipped_frames;
+	uint64_t audio_stats_wave_confirms;
+	uint64_t audio_stats_first_confirm_us;
 	int64_t audio_stats_last_log_time_us;
 	unsigned int stats_min_target_fps;
 	unsigned int audio_stats_clients;
@@ -130,11 +141,11 @@ struct _RfRDPServer {
 	unsigned int audio_sample_rate;
 	unsigned int audio_channels;
 	unsigned int audio_frame_ms;
-	uint32_t latest_audio_sample_rate;
-	uint16_t latest_audio_channels;
-	uint16_t latest_audio_frame_ms;
 	uint64_t rdpgfx_target_bytes_per_second;
-	uint64_t latest_audio_timestamp_us;
+	uint64_t audio_sequence;
+	uint64_t audio_queue_dropped;
+	uint64_t audio_stats_silence_suppressed;
+	unsigned int audio_silent_frames;
 	uint32_t stats_max_rdpgfx_inflight;
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
 	uint16_t stats_max_rdpgfx_qoe_time_diff_se;
@@ -144,6 +155,7 @@ struct _RfRDPServer {
 	bool nla;
 	bool clipboard;
 	bool audio;
+	bool audio_silence_suppressed;
 	bool running;
 };
 G_DEFINE_TYPE(RfRDPServer, rf_rdp_server, RF_TYPE_REMOTE_SERVER)
@@ -154,6 +166,7 @@ struct client {
 	GIOStream *stream;
 	GThread *thread;
 	GMutex write_lock;
+	gint ref_count;
 	uint32_t selected_protocol;
 	uint32_t rdpgfx_channel_id;
 	uint16_t desktop_width;
@@ -199,6 +212,7 @@ struct client {
 	struct rf_rdp_cliprdr_channel_reassembler cliprdr_channel_reassembler;
 	int64_t av1_bit_rate;
 	int64_t avc_bit_rate;
+	int64_t rdpsnd_first_audio_sent_time_us;
 	unsigned int av1_gop_size;
 	unsigned int avc_gop_size;
 	unsigned int av1_quality_level;
@@ -208,6 +222,7 @@ struct client {
 	uint8_t av1_qp;
 	uint8_t avc_qp;
 	uint8_t rdpsnd_block_no;
+	uint8_t rdpsnd_first_audio_block_no;
 	uint16_t av1_width;
 	uint16_t av1_height;
 	uint16_t avc_width;
@@ -232,6 +247,8 @@ struct client {
 	bool rdpsnd_client_formats_received;
 	bool rdpsnd_training_confirmed;
 	bool rdpsnd_quality_mode_received;
+	bool rdpsnd_first_audio_sent;
+	bool rdpsnd_first_audio_confirmed;
 	bool drdynvc_capability_sent;
 	bool drdynvc_ready;
 	bool rdpgfx_create_sent;
@@ -255,6 +272,20 @@ struct client {
 	bool rdpgfx_avc_unavailable_logged;
 	bool rdpgfx_avc444_software_fallback_logged;
 };
+
+struct audio_client_target {
+	struct client *client;
+	struct rf_rdp_rdpsnd_audio_format format;
+	bool has_format;
+};
+
+struct audio_frame {
+	struct rf_rdp_audio_pcm_header header;
+	GByteArray *pcm;
+	uint64_t sequence;
+};
+
+static void clear_queued_audio_frames(RfRDPServer *this);
 
 struct audio_connection {
 	RfRDPServer *server;
@@ -414,6 +445,14 @@ static void client_reset_avc(struct client *client)
 	client->avc444_have_signature = false;
 }
 
+static struct client *client_ref(struct client *client)
+{
+	if (client == NULL)
+		return NULL;
+	g_atomic_int_inc(&client->ref_count);
+	return client;
+}
+
 static void client_free(struct client *client)
 {
 	if (client == NULL)
@@ -429,6 +468,14 @@ static void client_free(struct client *client)
 	);
 	g_mutex_clear(&client->write_lock);
 	g_free(client);
+}
+
+static void client_unref(struct client *client)
+{
+	if (client == NULL)
+		return;
+	if (g_atomic_int_dec_and_test(&client->ref_count))
+		client_free(client);
 }
 
 static bool read_exact(GInputStream *input, void *buffer, size_t length)
@@ -1788,13 +1835,35 @@ static bool send_rdpsnd_pcm(
 )
 {
 	uint8_t info[RF_RDP_RDPSND_WAVE_INFO_LENGTH] = { 0 };
+	g_autofree uint8_t *wave2 = NULL;
 	g_autofree uint8_t *wave_data = NULL;
 	size_t info_length = 0;
 	size_t data_length = 0;
+	const bool use_wave2 =
+		client->rdpsnd_client_formats.version >=
+		RF_RDP_RDPSND_CHANNEL_VERSION_WIN_MAX;
 
 	if (!client->rdpsnd_ready || client->rdpsnd_selected_format < 0 ||
 	    pcm == NULL || pcm_length < 4)
 		return false;
+
+	if (use_wave2) {
+		wave2 = g_malloc(16 + pcm_length);
+		data_length = rf_rdp_rdpsnd_write_wave2(
+			wave2,
+			16 + pcm_length,
+			client->rdpsnd_block_no,
+			(uint16_t)client->rdpsnd_selected_format,
+			timestamp,
+			timestamp,
+			pcm,
+			pcm_length
+		);
+		if (data_length == 0 ||
+		    !send_rdpsnd_payload(client, wave2, data_length))
+			return false;
+		goto sent;
+	}
 
 	info_length = rf_rdp_rdpsnd_write_wave_info(
 		info,
@@ -1809,10 +1878,10 @@ static bool send_rdpsnd_pcm(
 		return false;
 
 	if (pcm_length > 4) {
-		wave_data = g_malloc(pcm_length - 4);
+		wave_data = g_malloc(pcm_length);
 		data_length = rf_rdp_rdpsnd_write_wave_data(
 			wave_data,
-			pcm_length - 4,
+			pcm_length,
 			pcm,
 			pcm_length
 		);
@@ -1821,6 +1890,20 @@ static bool send_rdpsnd_pcm(
 			return false;
 	}
 
+sent:
+	if (!client->rdpsnd_first_audio_sent) {
+		client->rdpsnd_first_audio_sent = true;
+		client->rdpsnd_first_audio_block_no = client->rdpsnd_block_no;
+		client->rdpsnd_first_audio_sent_time_us = g_get_monotonic_time();
+		g_message(
+			"RDP: rdpsnd first audio frame sent using %s block=%u timestamp=%u format=%d bytes=%zu.",
+			use_wave2 ? "Wave2" : "Wave",
+			client->rdpsnd_block_no,
+			timestamp,
+			client->rdpsnd_selected_format,
+			pcm_length
+		);
+	}
 	client->rdpsnd_block_no++;
 	return true;
 }
@@ -1850,12 +1933,22 @@ static bool audio_frame_matches_client_format(
 	       format->block_align == header->channels * 2;
 }
 
+static void audio_client_target_clear(struct audio_client_target *target)
+{
+	if (target == NULL)
+		return;
+	g_clear_pointer(&target->client, client_unref);
+	target->has_format = false;
+}
+
 static void update_audio_stats(
 	RfRDPServer *this,
 	const struct rf_rdp_audio_pcm_header *header,
 	unsigned int clients,
 	unsigned int sent,
-	unsigned int dropped
+	unsigned int dropped,
+	uint64_t skipped,
+	uint64_t latency_us
 )
 {
 	const int64_t now = g_get_monotonic_time();
@@ -1864,17 +1957,35 @@ static void update_audio_stats(
 	this->audio_stats_frames += sent;
 	this->audio_stats_bytes += (uint64_t)header->pcm_length * sent;
 	this->audio_stats_dropped += dropped;
+	this->audio_stats_skipped_frames += skipped;
+	if (latency_us > 0) {
+		this->audio_stats_latency_us += latency_us;
+		this->audio_stats_latency_samples++;
+		this->audio_stats_max_latency_us =
+			MAX(this->audio_stats_max_latency_us, latency_us);
+	}
 	this->audio_stats_clients = clients;
 	if (this->audio_stats_last_log_time_us == 0)
 		this->audio_stats_last_log_time_us = now;
 	if (now - this->audio_stats_last_log_time_us >=
 	    RDP_AUDIO_STATS_INTERVAL_US) {
+		const uint64_t avg_latency_us =
+			this->audio_stats_latency_samples > 0 ?
+				this->audio_stats_latency_us /
+					this->audio_stats_latency_samples :
+				0;
 		g_message(
-			"RDP: Audio stats frames=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", dropped=%" G_GUINT64_FORMAT ", clients=%u, format=%uHz/%uch frame=%ums.",
+			"RDP: Audio stats frames=%" G_GUINT64_FORMAT ", bytes=%" G_GUINT64_FORMAT ", dropped=%" G_GUINT64_FORMAT ", skipped=%" G_GUINT64_FORMAT ", silence-suppressed=%" G_GUINT64_FORMAT ", clients=%u, latency-avg=%" G_GUINT64_FORMAT "ms latency-max=%" G_GUINT64_FORMAT "ms, confirms=%" G_GUINT64_FORMAT ", first-confirm=%" G_GUINT64_FORMAT "ms, format=%uHz/%uch frame=%ums.",
 			this->audio_stats_frames,
 			this->audio_stats_bytes,
 			this->audio_stats_dropped,
+			this->audio_stats_skipped_frames,
+			this->audio_stats_silence_suppressed,
 			this->audio_stats_clients,
+			avg_latency_us / 1000u,
+			this->audio_stats_max_latency_us / 1000u,
+			this->audio_stats_wave_confirms,
+			this->audio_stats_first_confirm_us / 1000u,
 			header->sample_rate,
 			header->channels,
 			header->frame_ms
@@ -1882,6 +1993,13 @@ static void update_audio_stats(
 		this->audio_stats_frames = 0;
 		this->audio_stats_bytes = 0;
 		this->audio_stats_dropped = 0;
+		this->audio_stats_latency_us = 0;
+		this->audio_stats_latency_samples = 0;
+		this->audio_stats_max_latency_us = 0;
+		this->audio_stats_skipped_frames = 0;
+		this->audio_stats_silence_suppressed = 0;
+		this->audio_stats_wave_confirms = 0;
+		this->audio_stats_first_confirm_us = 0;
 		this->audio_stats_last_log_time_us = now;
 	}
 	g_mutex_unlock(&this->audio_lock);
@@ -1890,27 +2008,38 @@ static void update_audio_stats(
 static void send_audio_to_clients(
 	RfRDPServer *this,
 	const struct rf_rdp_audio_pcm_header *header,
-	const GByteArray *pcm
+	const GByteArray *pcm,
+	uint64_t skipped
 )
 {
+	g_autoptr(GArray) targets = NULL;
 	unsigned int attempted = 0;
 	unsigned int sent = 0;
 	unsigned int dropped = 0;
+	const int64_t now = g_get_monotonic_time();
+	const uint64_t latency_us =
+		header->timestamp_us > 0 && (uint64_t)now > header->timestamp_us ?
+			(uint64_t)now - header->timestamp_us :
+			0;
 	const uint16_t timestamp = (uint16_t)(header->timestamp_us / 1000u);
 
 	if (pcm == NULL || header == NULL)
 		return;
 
+	targets = g_array_new(false, false, sizeof(struct audio_client_target));
+	g_array_set_clear_func(targets, (GDestroyNotify)audio_client_target_clear);
 	g_mutex_lock(&this->lock);
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
 		const struct rf_rdp_rdpsnd_audio_format *format = NULL;
+		struct audio_client_target target = { 0 };
 
 		if (!client->rdpsnd_ready)
 			continue;
 		format = client_rdpsnd_selected_format(client);
 		attempted++;
-		if (!audio_frame_matches_client_format(header, format)) {
+		if (format == NULL ||
+		    !audio_frame_matches_client_format(header, format)) {
 			dropped++;
 			if (format != NULL)
 				g_debug(
@@ -1919,16 +2048,28 @@ static void send_audio_to_clients(
 					header->channels,
 					format->samples_per_sec,
 					format->channels
-				);
+					);
 			continue;
 		}
-		if (send_rdpsnd_pcm(client, pcm->data, pcm->len, timestamp))
+		target.client = client_ref(client);
+		target.format = *format;
+		target.has_format = true;
+		g_array_append_val(targets, target);
+	}
+	g_mutex_unlock(&this->lock);
+
+	for (guint i = 0; i < targets->len; ++i) {
+		struct audio_client_target *target =
+			&g_array_index(targets, struct audio_client_target, i);
+
+		if (target->client == NULL || !target->has_format)
+			continue;
+		if (send_rdpsnd_pcm(target->client, pcm->data, pcm->len, timestamp))
 			sent++;
 		else
 			dropped++;
 	}
-	g_mutex_unlock(&this->lock);
-	update_audio_stats(this, header, attempted, sent, dropped);
+	update_audio_stats(this, header, attempted, sent, dropped, skipped, latency_us);
 
 	if (attempted > 0 && sent == 0)
 		g_debug("RDP: Failed to send audio frame to %u ready client(s).",
@@ -3435,6 +3576,8 @@ static bool rdpsnd_extract_static_payload(
 	return true;
 }
 
+static void set_rdpsnd_ready(struct client *client, bool ready, const char *reason);
+
 static void handle_rdpsnd_client_formats(
 	struct client *client,
 	const uint8_t *payload,
@@ -3456,10 +3599,13 @@ static void handle_rdpsnd_client_formats(
 		client->server->audio_sample_rate,
 		client->server->audio_channels
 	);
-	client->rdpsnd_ready =
+	set_rdpsnd_ready(
+		client,
 		client->rdpsnd_selected_format >= 0 &&
-		client->rdpsnd_client_formats.version <
-			RF_RDP_RDPSND_CHANNEL_VERSION_WIN_7;
+			client->rdpsnd_client_formats.version <
+				RF_RDP_RDPSND_CHANNEL_VERSION_WIN_7,
+		"formats"
+	);
 
 	g_message(
 		"RDP: rdpsnd client formats=%zu version=%u selected=%d ready=%s.",
@@ -3468,6 +3614,25 @@ static void handle_rdpsnd_client_formats(
 		client->rdpsnd_selected_format,
 		yes_no(client->rdpsnd_ready)
 	);
+}
+
+static void set_rdpsnd_ready(struct client *client, bool ready, const char *reason)
+{
+	const bool was_ready = client->rdpsnd_ready;
+
+	client->rdpsnd_ready = ready;
+	if (ready && !was_ready) {
+		client->rdpsnd_first_audio_sent = false;
+		client->rdpsnd_first_audio_confirmed = false;
+		client->rdpsnd_first_audio_sent_time_us = 0;
+		client->server->audio_silence_suppressed = false;
+		client->server->audio_silent_frames = 0;
+		clear_queued_audio_frames(client->server);
+		g_message(
+			"RDP: rdpsnd ready via %s; cleared queued audio for fresh startup.",
+			reason
+		);
+	}
 }
 
 static void handle_rdpsnd_channel_pdu(
@@ -3495,7 +3660,11 @@ static void handle_rdpsnd_channel_pdu(
 		break;
 	case RF_RDP_RDPSND_SNDC_QUALITYMODE:
 		client->rdpsnd_quality_mode_received = true;
-		client->rdpsnd_ready = client->rdpsnd_selected_format >= 0;
+		set_rdpsnd_ready(
+			client,
+			client->rdpsnd_selected_format >= 0,
+			"quality-mode"
+		);
 		g_message("RDP: rdpsnd client quality mode received; ready=%s.",
 			yes_no(client->rdpsnd_ready));
 		break;
@@ -3527,10 +3696,32 @@ static void handle_rdpsnd_channel_pdu(
 			    body_length,
 			    &timestamp,
 			    &block_no
-		    ))
+		    )) {
+			RfRDPServer *this = client->server;
+			const int64_t now = g_get_monotonic_time();
+
+			g_mutex_lock(&this->audio_lock);
+			this->audio_stats_wave_confirms++;
+			if (!client->rdpsnd_first_audio_confirmed &&
+			    client->rdpsnd_first_audio_sent &&
+			    block_no == client->rdpsnd_first_audio_block_no) {
+				client->rdpsnd_first_audio_confirmed = true;
+				if (client->rdpsnd_first_audio_sent_time_us > 0 &&
+				    now > client->rdpsnd_first_audio_sent_time_us)
+					this->audio_stats_first_confirm_us =
+						now - client->rdpsnd_first_audio_sent_time_us;
+				g_message(
+					"RDP: rdpsnd first wave confirm block=%u timestamp=%u after=%" G_GUINT64_FORMAT "ms.",
+					block_no,
+					timestamp,
+					this->audio_stats_first_confirm_us / 1000u
+				);
+			}
+			g_mutex_unlock(&this->audio_lock);
 			g_debug("RDP: rdpsnd wave confirm block=%u timestamp=%u.",
 				block_no,
 				timestamp);
+		}
 		break;
 	}
 	default:
@@ -5461,7 +5652,7 @@ out:
 	remove_client(client);
 	if (this->running)
 		g_io_stream_close(G_IO_STREAM(client->connection), NULL, NULL);
-	client_free(client);
+	client_unref(client);
 	return NULL;
 }
 
@@ -5637,6 +5828,7 @@ static gboolean on_incoming(
 	RfRDPServer *this = data;
 	struct client *client = g_new0(struct client, 1);
 
+	g_atomic_int_set(&client->ref_count, 1);
 	client->server = this;
 	client->rdpgfx_channel_id = RDP_RDPGFX_DVC_CHANNEL_ID;
 	client->rdpsnd_selected_format = -1;
@@ -5735,20 +5927,152 @@ static void audio_connection_free(struct audio_connection *connection)
 	g_free(connection);
 }
 
-static void update_latest_audio_frame(
+static void audio_frame_free(struct audio_frame *frame)
+{
+	if (frame == NULL)
+		return;
+	g_clear_pointer(&frame->pcm, g_byte_array_unref);
+	g_free(frame);
+}
+
+static void clear_queued_audio_frames(RfRDPServer *this)
+{
+	if (this == NULL)
+		return;
+
+	g_mutex_lock(&this->audio_lock);
+	if (this->audio_queue != NULL)
+		g_queue_clear_full(this->audio_queue, (GDestroyNotify)audio_frame_free);
+	this->audio_queue_dropped = 0;
+	this->audio_silence_suppressed = false;
+	this->audio_silent_frames = 0;
+	g_mutex_unlock(&this->audio_lock);
+}
+
+static void reset_rdpsnd_first_audio_markers(RfRDPServer *this)
+{
+	if (this == NULL)
+		return;
+
+	g_mutex_lock(&this->lock);
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		client->rdpsnd_first_audio_sent = false;
+		client->rdpsnd_first_audio_confirmed = false;
+		client->rdpsnd_first_audio_sent_time_us = 0;
+	}
+	g_mutex_unlock(&this->lock);
+}
+
+static unsigned int audio_queue_max_frames(unsigned int frame_ms)
+{
+	if (frame_ms == 0)
+		return 2;
+	return MAX(2u, RDP_AUDIO_QUEUE_TARGET_MS / frame_ms);
+}
+
+static unsigned int audio_silence_hold_frames(unsigned int frame_ms)
+{
+	if (frame_ms == 0)
+		return 2;
+	return MAX(1u, RDP_AUDIO_SILENCE_HOLD_MS / frame_ms);
+}
+
+static void queue_audio_frame(
 	RfRDPServer *this,
 	const struct rf_rdp_audio_pcm_header *header,
 	GByteArray *pcm
 )
 {
+	struct audio_frame *frame = NULL;
+	const unsigned int max_frames = audio_queue_max_frames(header->frame_ms);
+	const unsigned int silence_hold_frames =
+		audio_silence_hold_frames(header->frame_ms);
+	const bool silent = rf_rdp_audio_pcm_is_silent(
+		pcm->data,
+		pcm->len,
+		RDP_AUDIO_SILENCE_THRESHOLD
+	);
+
+	if (this->audio_queue == NULL)
+		return;
+
+	if (silent && this->audio_silence_suppressed) {
+		g_mutex_lock(&this->audio_lock);
+		this->audio_stats_silence_suppressed++;
+		g_mutex_unlock(&this->audio_lock);
+		return;
+	}
+	if (!silent && this->audio_silence_suppressed) {
+		this->audio_silence_suppressed = false;
+		this->audio_silent_frames = 0;
+		clear_queued_audio_frames(this);
+		reset_rdpsnd_first_audio_markers(this);
+		g_message("RDP: Audio resumed after suppressed silence; cleared queued audio.");
+	}
+	if (!silent)
+		this->audio_silent_frames = 0;
+
+	frame = g_new0(struct audio_frame, 1);
+	frame->header = *header;
+	frame->pcm = g_byte_array_ref(pcm);
+
 	g_mutex_lock(&this->audio_lock);
-	g_clear_pointer(&this->latest_audio_pcm, g_byte_array_unref);
-	this->latest_audio_pcm = g_byte_array_ref(pcm);
-	this->latest_audio_sample_rate = header->sample_rate;
-	this->latest_audio_channels = header->channels;
-	this->latest_audio_frame_ms = header->frame_ms;
-	this->latest_audio_timestamp_us = header->timestamp_us;
+	frame->sequence = ++this->audio_sequence;
+	while (this->audio_queue->length >= max_frames) {
+		struct audio_frame *oldest = g_queue_pop_head(this->audio_queue);
+
+		audio_frame_free(oldest);
+		this->audio_queue_dropped++;
+	}
+	g_queue_push_tail(this->audio_queue, frame);
+	if (silent)
+		this->audio_silent_frames++;
+	if (silent && this->audio_silent_frames >= silence_hold_frames) {
+		this->audio_silence_suppressed = true;
+		g_message(
+			"RDP: Audio silence suppression active after %u ms.",
+			this->audio_silent_frames * header->frame_ms
+		);
+	}
+	g_cond_signal(&this->audio_cond);
 	g_mutex_unlock(&this->audio_lock);
+}
+
+static void *audio_sender_thread(void *data)
+{
+	RfRDPServer *this = data;
+
+	while (true) {
+		struct audio_frame *frame = NULL;
+		uint64_t skipped = 0;
+
+		g_mutex_lock(&this->audio_lock);
+		while (this->running &&
+		       (this->audio_queue == NULL || this->audio_queue->length == 0))
+			g_cond_wait(&this->audio_cond, &this->audio_lock);
+		if (!this->running) {
+			g_mutex_unlock(&this->audio_lock);
+			break;
+		}
+		frame = g_queue_pop_head(this->audio_queue);
+		skipped = this->audio_queue_dropped;
+		this->audio_queue_dropped = 0;
+		g_mutex_unlock(&this->audio_lock);
+
+		if (frame != NULL) {
+			send_audio_to_clients(
+				this,
+				&frame->header,
+				frame->pcm,
+				skipped
+			);
+			audio_frame_free(frame);
+		}
+	}
+
+	return NULL;
 }
 
 static void *audio_connection_thread(void *data)
@@ -5770,8 +6094,9 @@ static void *audio_connection_thread(void *data)
 					error->message);
 			break;
 		}
-		update_latest_audio_frame(this, &header, pcm);
-		send_audio_to_clients(this, &header, pcm);
+		if (!this->running)
+			break;
+		queue_audio_frame(this, &header, pcm);
 		frames++;
 		if (frames == 1)
 			g_message(
@@ -5857,6 +6182,11 @@ static bool start_rdp_audio_service(RfRDPServer *this)
 		this
 	);
 	g_socket_service_start(this->audio_service);
+	this->audio_sender_thread = g_thread_new(
+		"rf-rdp-audio-send",
+		audio_sender_thread,
+		this
+	);
 	g_message("RDP: Audio helper listening on %s.",
 		this->rdp_audio_socket_path);
 	return true;
@@ -6150,7 +6480,21 @@ static void stop(RfRemoteServer *super)
 		return;
 
 	this->running = false;
+	g_mutex_lock(&this->audio_lock);
+	g_cond_signal(&this->audio_cond);
+	g_mutex_unlock(&this->audio_lock);
 	rf_remote_server_flush(super);
+	if (this->audio_sender_thread != NULL) {
+		g_thread_join(this->audio_sender_thread);
+		this->audio_sender_thread = NULL;
+	}
+	g_mutex_lock(&this->audio_lock);
+	if (this->audio_queue != NULL)
+		g_queue_clear_full(this->audio_queue, (GDestroyNotify)audio_frame_free);
+	this->audio_queue_dropped = 0;
+	this->audio_silent_frames = 0;
+	this->audio_silence_suppressed = false;
+	g_mutex_unlock(&this->audio_lock);
 	if (this->clipboard_sockets != NULL) {
 		GHashTableIter it;
 		void *value;
@@ -6479,9 +6823,12 @@ static void finalize(GObject *o)
 	g_free(this->clipboard_text);
 	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
 	g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
-	g_clear_pointer(&this->latest_audio_pcm, g_byte_array_unref);
+	if (this->audio_queue != NULL)
+		g_queue_clear_full(this->audio_queue, (GDestroyNotify)audio_frame_free);
+	g_clear_pointer(&this->audio_queue, g_queue_free);
 	g_clear_pointer(&this->last_frame, g_byte_array_unref);
 	g_clear_pointer(&this->clipboard_sockets, g_hash_table_unref);
+	g_cond_clear(&this->audio_cond);
 	g_mutex_clear(&this->audio_lock);
 	g_mutex_clear(&this->lock);
 
@@ -6511,6 +6858,8 @@ static void rf_rdp_server_init(RfRDPServer *this)
 {
 	g_mutex_init(&this->lock);
 	g_mutex_init(&this->audio_lock);
+	g_cond_init(&this->audio_cond);
+	this->audio_queue = g_queue_new();
 	rf_clipboard_rich_payload_init(&this->rich_clipboard);
 	this->clipboard_sockets = g_hash_table_new_full(
 		g_direct_hash,

@@ -224,3 +224,25 @@ bool rf_rdp_audio_stream_read_pcm(
 	*pcm = buffer;
 	return true;
 }
+
+bool rf_rdp_audio_pcm_is_silent(
+	const uint8_t *pcm,
+	size_t pcm_length,
+	int16_t threshold
+)
+{
+	const int16_t absolute_threshold = threshold < 0 ? -threshold : threshold;
+
+	if (pcm == NULL || pcm_length == 0 || (pcm_length % 2) != 0)
+		return false;
+
+	for (size_t i = 0; i < pcm_length; i += 2) {
+		const int16_t sample =
+			(int16_t)((uint16_t)pcm[i] | ((uint16_t)pcm[i + 1] << 8));
+		const int32_t value = sample < 0 ? -(int32_t)sample : sample;
+
+		if (value > absolute_threshold)
+			return false;
+	}
+	return true;
+}

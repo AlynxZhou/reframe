@@ -101,6 +101,16 @@ size_t rf_rdp_rdpsnd_write_wave(
 	const uint8_t *pcm,
 	size_t pcm_length
 );
+size_t rf_rdp_rdpsnd_write_wave2(
+	uint8_t *data,
+	size_t capacity,
+	uint8_t block_no,
+	uint16_t format_no,
+	uint16_t timestamp,
+	uint32_t audio_timestamp,
+	const uint8_t *pcm,
+	size_t pcm_length
+);
 size_t rf_rdp_rdpsnd_write_close(uint8_t *data, size_t capacity);
 
 #endif

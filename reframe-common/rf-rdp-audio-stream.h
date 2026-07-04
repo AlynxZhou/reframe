@@ -33,5 +33,10 @@ bool rf_rdp_audio_stream_read_pcm(
 	GByteArray **pcm,
 	GError **error
 );
+bool rf_rdp_audio_pcm_is_silent(
+	const uint8_t *pcm,
+	size_t pcm_length,
+	int16_t threshold
+);
 
 #endif
