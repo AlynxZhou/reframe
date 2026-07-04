@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ReFrame RDP Audio
+Comment=ReFrame RDP Audio
+Exec=@bindir@/reframe-rdp-audio --socket-dir=/run/reframe-rdp-audio
+Terminal=false
+Type=Application
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

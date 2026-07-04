@@ -63,6 +63,19 @@ executable(
   install: true
 )
 
+if have_rdp_audio
+  executable(
+    meson.project_name() + '-rdp-audio',
+    sources: files(
+      'rdp-audio.c',
+      'rf-rdp-audio-pipewire.c'
+    ),
+    dependencies: dependencies + [pipewire],
+    include_directories: include_directories,
+    install: true
+  )
+endif
+
 test_clipboard_text = executable(
   'test-clipboard-text',
   '../tests/test-clipboard-text.c',
