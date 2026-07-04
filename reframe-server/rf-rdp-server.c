@@ -1,7 +1,12 @@
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <gio/gio.h>
+#include <gio/gunixsocketaddress.h>
+#include <glib/gstdio.h>
 
+#include "rf-clipboard-rich.h"
 #include "rf-rdp-av1.h"
 #include "rf-rdp-avc.h"
 #include "rf-rdp-cliprdr.h"
@@ -44,6 +49,14 @@ static const char *yes_no(bool value)
 	return value ? "yes" : "no";
 }
 
+static void write_u32_le(uint8_t *data, uint32_t value)
+{
+	data[0] = value & 0xff;
+	data[1] = (value >> 8) & 0xff;
+	data[2] = (value >> 16) & 0xff;
+	data[3] = (value >> 24) & 0xff;
+}
+
 static const char *av1_mode_name(enum rf_rdp_av1_mode mode)
 {
 	switch (mode) {
@@ -59,9 +72,12 @@ struct _RfRDPServer {
 	RfRemoteServer parent_instance;
 	RfConfig *config;
 	GSocketService *service;
+	GSocketService *clipboard_service;
+	GSocketAddress *clipboard_address;
 	GTlsCertificate *certificate;
 	GMutex lock;
 	GList *clients;
+	GHashTable *clipboard_sockets;
 	struct client *resize_owner;
 	char **ips;
 	char *tls_private_key_file;
@@ -71,7 +87,10 @@ struct _RfRDPServer {
 	char *password;
 	char *graphics;
 	char *avc_encoder;
+	char *clipboard_socket_path;
 	char *clipboard_text;
+	struct rf_clipboard_rich_payload rich_clipboard;
+	GByteArray *clipboard_wire;
 	GByteArray *last_frame;
 	unsigned int port;
 	unsigned int desktop_width;
@@ -124,6 +143,14 @@ struct client {
 	uint16_t drdynvc_channel_id;
 	uint32_t cliprdr_channel_options;
 	uint32_t drdynvc_channel_options;
+	uint32_t cliprdr_requested_format_id;
+	uint32_t cliprdr_client_html_format_id;
+	uint32_t cliprdr_client_png_format_id;
+	uint32_t cliprdr_client_tiff_format_id;
+	uint32_t cliprdr_client_jpeg_format_id;
+	uint32_t cliprdr_client_webp_format_id;
+	uint32_t cliprdr_client_bmp_format_id;
+	struct rf_rdp_cliprdr_format_list cliprdr_client_formats;
 	uint16_t drdynvc_version;
 	uint16_t rdpgfx_surface_width;
 	uint16_t rdpgfx_surface_height;
@@ -146,6 +173,7 @@ struct client {
 	RfRdpAv1Encoder *av1;
 	RfRdpAvcEncoder *avc;
 	RfRdpAvcEncoder *avc_chroma;
+	struct rf_rdp_cliprdr_channel_reassembler cliprdr_channel_reassembler;
 	int64_t av1_bit_rate;
 	int64_t avc_bit_rate;
 	unsigned int av1_gop_size;
@@ -172,6 +200,7 @@ struct client {
 	bool bitmap_rle_logged;
 	bool cliprdr_caps_sent;
 	bool cliprdr_ready;
+	bool cliprdr_client_caps_received;
 	bool cliprdr_client_has_unicode_text;
 	bool drdynvc_capability_sent;
 	bool drdynvc_ready;
@@ -360,6 +389,9 @@ static void client_free(struct client *client)
 	client_reset_avc(client);
 	rf_rdp_nsc_context_free(client->nsc);
 	rf_rdp_rfx_context_free(client->rfx);
+	rf_rdp_cliprdr_channel_reassembler_clear(
+		&client->cliprdr_channel_reassembler
+	);
 	g_mutex_clear(&client->write_lock);
 	g_free(client);
 }
@@ -1026,35 +1058,55 @@ static bool send_static_channel_payload(
 	size_t payload_length
 )
 {
-	uint8_t channel[8 + RF_RDP_DVC_CHANNEL_CHUNK_LENGTH] = { 0 };
 	const uint32_t extra_flags =
 		(channel_options & RF_RDP_MCS_CHANNEL_OPTION_SHOW_PROTOCOL) != 0 ?
 			RF_RDP_DVC_CHANNEL_FLAG_SHOW_PROTOCOL :
 			0;
-	const size_t channel_length = rf_rdp_dvc_write_channel_pdu_with_flags(
-		channel,
-		sizeof(channel),
-		payload,
-		payload_length,
-		extra_flags
+	const size_t chunk_capacity = MIN(
+		(size_t)RF_RDP_DVC_CHANNEL_CHUNK_LENGTH,
+		(size_t)RDP_MAX_MCS_PAYLOAD - 8
 	);
+	size_t offset = 0;
 
-	if (channel_id == 0 || channel_length == 0 ||
-	    channel_length > RDP_MAX_MCS_PAYLOAD)
+	if (channel_id == 0 || (payload == NULL && payload_length > 0) ||
+	    payload_length > UINT32_MAX || chunk_capacity == 0)
 		return false;
 
-	g_autofree uint8_t *packet = g_malloc0(15 + channel_length);
-	const size_t packet_length = rf_rdp_mcs_write_send_data_indication(
-		packet,
-		15 + channel_length,
-		RF_RDP_MCS_BASE_CHANNEL_ID,
-		channel_id,
-		channel,
-		channel_length
-	);
+	do {
+		uint8_t channel[8 + RF_RDP_DVC_CHANNEL_CHUNK_LENGTH] = { 0 };
+		const size_t chunk_length = MIN(
+			chunk_capacity,
+			payload_length - offset
+		);
+		uint32_t flags = extra_flags;
 
-	return packet_length > 0 &&
-		client_write_exact(client, packet, packet_length);
+		if (offset == 0)
+			flags |= RF_RDP_DVC_CHANNEL_FLAG_FIRST;
+		if (offset + chunk_length == payload_length)
+			flags |= RF_RDP_DVC_CHANNEL_FLAG_LAST;
+		write_u32_le(channel, payload_length);
+		write_u32_le(channel + 4, flags);
+		if (chunk_length > 0)
+			memcpy(channel + 8, payload + offset, chunk_length);
+
+		const size_t channel_length = 8 + chunk_length;
+		g_autofree uint8_t *packet = g_malloc0(15 + channel_length);
+		const size_t packet_length = rf_rdp_mcs_write_send_data_indication(
+			packet,
+			15 + channel_length,
+			RF_RDP_MCS_BASE_CHANNEL_ID,
+			channel_id,
+			channel,
+			channel_length
+		);
+
+		if (packet_length == 0 ||
+		    !client_write_exact(client, packet, packet_length))
+			return false;
+		offset += chunk_length;
+	} while (offset < payload_length);
+
+	return true;
 }
 
 static bool send_cliprdr_payload(
@@ -1105,16 +1157,53 @@ static bool send_cliprdr_monitor_ready(struct client *client)
 	return true;
 }
 
-static bool send_cliprdr_format_list(struct client *client)
+static bool clipboard_formats_locked(
+	RfRDPServer *this,
+	struct rf_rdp_cliprdr_format_list *formats
+)
 {
-	uint8_t pdu[192] = { 0 };
-	const size_t length = rf_rdp_cliprdr_write_format_list(pdu, sizeof(pdu));
+	memset(formats, 0, sizeof(*formats));
+	if (this->clipboard_text != NULL ||
+	    this->rich_clipboard.text != NULL) {
+		formats->unicode_text = true;
+		formats->text = true;
+		formats->oem_text = true;
+		formats->locale = true;
+	}
+	if (this->rich_clipboard.html != NULL) {
+		formats->html = true;
+		formats->html_format_id = RF_RDP_CLIPRDR_FORMAT_HTML;
+	}
+	if (this->rich_clipboard.image_rgba != NULL) {
+		rf_rdp_cliprdr_set_server_image_formats(formats);
+	}
+	return formats->unicode_text || formats->html ||
+	       formats->dib || formats->dibv5;
+}
+
+static bool send_cliprdr_format_list_with_formats(
+	struct client *client,
+	const struct rf_rdp_cliprdr_format_list *formats
+)
+{
+	uint8_t pdu[512] = { 0 };
+	const size_t length = rf_rdp_cliprdr_write_format_list_for_formats(
+		pdu,
+		sizeof(pdu),
+		formats
+	);
 
 	if (!client->cliprdr_ready)
 		return false;
 	if (length == 0 || !send_cliprdr_payload(client, pdu, length))
 		return false;
-	g_message("RDP: cliprdr advertised Unicode text.");
+	g_message(
+		"RDP: cliprdr advertised formats text=%s html=%s dib=%s dibv5=%s.",
+		yes_no(formats->unicode_text),
+		yes_no(formats->html),
+		yes_no(formats->dib),
+		yes_no(formats->dibv5)
+	);
 	return true;
 }
 
@@ -1147,7 +1236,41 @@ static bool send_cliprdr_format_data_request(
 
 	if (length == 0 || !send_cliprdr_payload(client, pdu, length))
 		return false;
+	client->cliprdr_requested_format_id = format_id;
 	g_message("RDP: cliprdr requested format id %u.", format_id);
+	return true;
+}
+
+static bool request_next_cliprdr_format(struct client *client, const char *reason)
+{
+	const uint32_t previous_format_id = client->cliprdr_requested_format_id;
+	const uint32_t next_format_id =
+		rf_rdp_cliprdr_choose_request_format_after(
+			&client->cliprdr_client_formats,
+			previous_format_id
+		);
+
+	if (next_format_id == 0) {
+		g_message(
+			"RDP: cliprdr has no fallback format after %u (%s).",
+			previous_format_id,
+			reason != NULL ? reason : "unknown reason"
+		);
+		return false;
+	}
+	g_message(
+		"RDP: cliprdr falling back from format %u to %u after %s.",
+		previous_format_id,
+		next_format_id,
+		reason != NULL ? reason : "unknown reason"
+	);
+	if (!send_cliprdr_format_data_request(client, next_format_id)) {
+		g_warning(
+			"RDP: Failed to request fallback cliprdr format %u.",
+			next_format_id
+		);
+		return false;
+	}
 	return true;
 }
 
@@ -1240,6 +1363,110 @@ static bool send_cliprdr_format_data_response_locale(
 		return false;
 	g_message("RDP: cliprdr sent locale response 0x%08x.", locale_id);
 	return true;
+}
+
+static bool send_cliprdr_format_data_response_bytes(
+	struct client *client,
+	const uint8_t *payload,
+	size_t payload_length,
+	const char *name
+)
+{
+	const size_t capacity = RF_RDP_CLIPRDR_HEADER_SIZE + payload_length;
+	g_autofree uint8_t *pdu = NULL;
+	size_t length = 0;
+
+	if (payload == NULL)
+		return send_cliprdr_format_data_response_text(client, NULL);
+	pdu = g_malloc0(capacity);
+	length = rf_rdp_cliprdr_write_format_data_response_bytes(
+		pdu,
+		capacity,
+		payload,
+		payload_length
+	);
+	if (length == 0 || !send_cliprdr_payload(client, pdu, length))
+		return false;
+	g_message("RDP: cliprdr sent %s response length %zu.", name, payload_length);
+	return true;
+}
+
+static bool send_rdp_clipboard_wire(
+	RfRDPServer *this,
+	const GByteArray *wire
+)
+{
+	unsigned int helpers = 0;
+
+	if (wire == NULL || wire->len == 0 || this->clipboard_sockets == NULL)
+		return false;
+
+	GHashTableIter it;
+	void *key;
+	void *value;
+	g_hash_table_iter_init(&it, this->clipboard_sockets);
+	while (g_hash_table_iter_next(&it, &key, &value)) {
+		GSocket *socket = key;
+		GSource *source = value;
+		g_autoptr(GError) error = NULL;
+		g_autoptr(GSocketConnection) connection =
+			g_socket_connection_factory_create_connection(socket);
+		GOutputStream *output =
+			g_io_stream_get_output_stream(G_IO_STREAM(connection));
+		gsize written = 0;
+		ssize_t ret = rf_send_header(
+			connection,
+			RF_MSG_TYPE_RDP_CLIPBOARD_RICH,
+			wire->len,
+			&error
+		);
+
+		if (ret <= 0 ||
+		    !g_output_stream_write_all(
+			    output,
+			    wire->data,
+			    wire->len,
+			    &written,
+			    NULL,
+			    &error
+		    ) || written != wire->len) {
+			if (ret < 0 || error != NULL)
+				g_warning(
+					"RDP: Failed to send rich clipboard to helper: %s.",
+					error != NULL ? error->message : "short write"
+				);
+			g_source_destroy(source);
+			g_hash_table_iter_remove(&it);
+			continue;
+		}
+		helpers++;
+	}
+	g_message("RDP: Sent rich clipboard payload length %u to %u helper(s).",
+		wire->len,
+		helpers);
+	return helpers > 0;
+}
+
+static bool send_rdp_clipboard_payload(RfRDPServer *this, bool force)
+{
+	g_autoptr(GByteArray) wire = NULL;
+	bool duplicate = false;
+
+	g_mutex_lock(&this->lock);
+	wire = rf_clipboard_rich_payload_serialize(&this->rich_clipboard);
+	duplicate = !force && rf_clipboard_rich_wire_equal(this->clipboard_wire, wire);
+	if (wire == NULL) {
+		g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
+	} else if (!duplicate) {
+		g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
+		this->clipboard_wire = g_byte_array_ref(wire);
+	}
+	g_mutex_unlock(&this->lock);
+	if (duplicate) {
+		g_message("RDP: Skipping duplicate rich clipboard payload.");
+		return true;
+	}
+	return send_rdp_clipboard_wire(this, wire);
 }
 
 static bool send_rdpgfx_dvc_payload(
@@ -1445,13 +1672,17 @@ static void start_drdynvc(struct client *client)
 static void maybe_send_cliprdr_cached_format_list(struct client *client)
 {
 	RfRDPServer *this = client->server;
-	bool has_text = false;
+	struct rf_rdp_cliprdr_format_list formats = { 0 };
+	bool has_formats = false;
+
+	if (!client->cliprdr_ready || !client->cliprdr_client_caps_received)
+		return;
 
 	g_mutex_lock(&this->lock);
-	has_text = this->clipboard_text != NULL;
+	has_formats = clipboard_formats_locked(this, &formats);
 	g_mutex_unlock(&this->lock);
 
-	if (has_text && !send_cliprdr_format_list(client))
+	if (has_formats && !send_cliprdr_format_list_with_formats(client, &formats))
 		g_warning("RDP: Failed to send cliprdr format list.");
 }
 
@@ -2339,39 +2570,243 @@ static void handle_cliprdr_format_data_response(
 )
 {
 	RfRDPServer *this = client->server;
-	g_autofree char *text =
-		rf_rdp_cliprdr_parse_format_data_response_text(
-			data,
-			length,
-			msg_flags
-		);
 	bool changed = false;
 
-	if (text == NULL) {
-		g_message(
-			"RDP: cliprdr client format data response did not contain text."
-		);
+	if ((msg_flags & RF_RDP_CLIPRDR_CB_RESPONSE_OK) == 0) {
+		g_message("RDP: cliprdr client format data response failed.");
+		request_next_cliprdr_format(client, "client response failure");
 		return;
 	}
 
-	g_mutex_lock(&this->lock);
-	if (g_strcmp0(this->clipboard_text, text) != 0) {
+	if (client->cliprdr_requested_format_id == RF_RDP_CLIPRDR_CF_UNICODETEXT) {
+		g_autofree char *text =
+			rf_rdp_cliprdr_parse_format_data_response_text(
+				data,
+				length,
+				msg_flags
+			);
+
+			if (text == NULL) {
+				g_message(
+					"RDP: cliprdr client format data response did not contain text."
+				);
+				request_next_cliprdr_format(client, "missing text data");
+				return;
+			}
+
+		g_mutex_lock(&this->lock);
+		if (g_strcmp0(this->clipboard_text, text) != 0) {
+			g_free(this->clipboard_text);
+			this->clipboard_text = g_strdup(text);
+			rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+			rf_clipboard_rich_payload_set_text(
+				&this->rich_clipboard,
+				text
+			);
+			changed = true;
+		}
+		g_mutex_unlock(&this->lock);
+
+		g_message(
+			"RDP: cliprdr received Unicode text response length %zu changed=%s.",
+			strlen(text),
+			yes_no(changed)
+		);
+		if (changed)
+			rf_remote_server_handle_clipboard_text(
+				RF_REMOTE_SERVER(this),
+				text
+			);
+		if (changed)
+				send_rdp_clipboard_payload(this, false);
+		return;
+	}
+
+	if (client->cliprdr_requested_format_id == RF_RDP_CLIPRDR_CF_DIB ||
+	    client->cliprdr_requested_format_id == RF_RDP_CLIPRDR_CF_DIBV5) {
+		uint32_t width = 0;
+		uint32_t height = 0;
+		size_t stride = 0;
+		g_autoptr(GByteArray) rgba = rf_rdp_cliprdr_dib_to_rgba(
+			data,
+			length,
+			&width,
+			&height,
+			&stride
+		);
+
+			if (rgba == NULL) {
+				g_message("RDP: cliprdr image response is not supported DIB data.");
+				request_next_cliprdr_format(client, "unsupported DIB data");
+				return;
+			}
+		g_mutex_lock(&this->lock);
+		g_free(this->clipboard_text);
+		this->clipboard_text = NULL;
+		rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+		changed = rf_clipboard_rich_payload_set_image_rgba(
+			&this->rich_clipboard,
+			rgba->data,
+			rgba->len,
+			width,
+			height,
+			stride
+		);
+		g_mutex_unlock(&this->lock);
+		g_message(
+			"RDP: cliprdr received image response %ux%u stride=%zu length=%u changed=%s.",
+			width,
+			height,
+			stride,
+			rgba->len,
+			yes_no(changed)
+		);
+		if (changed)
+				send_rdp_clipboard_payload(this, false);
+		return;
+	}
+
+	if (client->cliprdr_requested_format_id == client->cliprdr_client_png_format_id ||
+	    client->cliprdr_requested_format_id == client->cliprdr_client_tiff_format_id ||
+	    client->cliprdr_requested_format_id == client->cliprdr_client_jpeg_format_id ||
+	    client->cliprdr_requested_format_id == client->cliprdr_client_webp_format_id ||
+	    client->cliprdr_requested_format_id == client->cliprdr_client_bmp_format_id ||
+	    client->cliprdr_requested_format_id == RF_RDP_CLIPRDR_CF_TIFF) {
+		uint32_t width = 0;
+		uint32_t height = 0;
+		size_t stride = 0;
+		const char *name = "image";
+		g_autoptr(GByteArray) rgba = rf_rdp_cliprdr_image_format_to_rgba(
+			data,
+			length,
+			&width,
+			&height,
+			&stride
+		);
+
+		if (client->cliprdr_requested_format_id == client->cliprdr_client_png_format_id)
+			name = "PNG";
+		else if (client->cliprdr_requested_format_id == client->cliprdr_client_tiff_format_id)
+			name = "TIFF";
+		else if (client->cliprdr_requested_format_id == client->cliprdr_client_jpeg_format_id)
+			name = "JPEG";
+		else if (client->cliprdr_requested_format_id == client->cliprdr_client_webp_format_id)
+			name = "WEBP";
+		else if (client->cliprdr_requested_format_id == client->cliprdr_client_bmp_format_id)
+			name = "BMP";
+		else if (client->cliprdr_requested_format_id == RF_RDP_CLIPRDR_CF_TIFF)
+			name = "CF_TIFF";
+
+		if (rgba == NULL) {
+			g_message("RDP: cliprdr %s response is not supported image data.",
+				name);
+			request_next_cliprdr_format(client, "unsupported image data");
+			return;
+		}
+		g_mutex_lock(&this->lock);
+		g_free(this->clipboard_text);
+		this->clipboard_text = NULL;
+		rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+		changed = rf_clipboard_rich_payload_set_image_rgba(
+			&this->rich_clipboard,
+			rgba->data,
+			rgba->len,
+			width,
+			height,
+			stride
+		);
+		g_mutex_unlock(&this->lock);
+		g_message(
+			"RDP: cliprdr received %s image response %ux%u stride=%zu source-length=%zu changed=%s.",
+			name,
+			width,
+			height,
+			stride,
+			length,
+			yes_no(changed)
+		);
+		if (changed)
+				send_rdp_clipboard_payload(this, false);
+		return;
+	}
+
+	if (client->cliprdr_requested_format_id == client->cliprdr_client_html_format_id) {
+		g_autoptr(GByteArray) html =
+			rf_rdp_cliprdr_html_format_unwrap(data, length);
+		g_autofree char *text = NULL;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		size_t stride = 0;
+		g_autoptr(GByteArray) rgba = rf_rdp_cliprdr_html_image_to_rgba(
+			data,
+			length,
+			&width,
+			&height,
+			&stride
+		);
+
+			if (html == NULL) {
+				g_message("RDP: cliprdr HTML response is malformed.");
+				request_next_cliprdr_format(client, "malformed HTML data");
+				return;
+			}
+		if (rgba != NULL) {
+			g_mutex_lock(&this->lock);
+			g_free(this->clipboard_text);
+			this->clipboard_text = NULL;
+			rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+			changed = rf_clipboard_rich_payload_set_image_rgba(
+				&this->rich_clipboard,
+				rgba->data,
+				rgba->len,
+				width,
+				height,
+				stride
+			);
+			g_mutex_unlock(&this->lock);
+			g_message(
+				"RDP: cliprdr received HTML image response %ux%u stride=%zu html-length=%u changed=%s.",
+				width,
+				height,
+				stride,
+				html->len,
+				yes_no(changed)
+			);
+			if (changed)
+					send_rdp_clipboard_payload(this, false);
+			return;
+		}
+		text = rf_rdp_cliprdr_html_fragment_to_text(html->data, html->len);
+		g_mutex_lock(&this->lock);
 		g_free(this->clipboard_text);
 		this->clipboard_text = g_strdup(text);
-		changed = true;
+		rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+		if (text != NULL && text[0] != '\0')
+			rf_clipboard_rich_payload_set_text(
+				&this->rich_clipboard,
+				text
+			);
+		changed = rf_clipboard_rich_payload_set_html(
+			&this->rich_clipboard,
+			html->data,
+			html->len
+		);
+		g_mutex_unlock(&this->lock);
+		g_message(
+			"RDP: cliprdr received HTML response length %u text-length=%zu changed=%s.",
+			html->len,
+			text != NULL ? strlen(text) : 0,
+			yes_no(changed)
+		);
+		if (changed)
+				send_rdp_clipboard_payload(this, false);
+		return;
 	}
-	g_mutex_unlock(&this->lock);
 
 	g_message(
-		"RDP: cliprdr received Unicode text response length %zu changed=%s.",
-		strlen(text),
-		yes_no(changed)
+		"RDP: cliprdr ignored response for requested format id %u.",
+		client->cliprdr_requested_format_id
 	);
-	if (changed)
-		rf_remote_server_handle_clipboard_text(
-			RF_REMOTE_SERVER(this),
-			text
-		);
 }
 
 static void handle_cliprdr_format_data_request(
@@ -2383,6 +2818,11 @@ static void handle_cliprdr_format_data_request(
 	RfRDPServer *this = client->server;
 	uint32_t format_id = 0;
 	g_autofree char *text = NULL;
+	g_autoptr(GByteArray) html = NULL;
+	g_autoptr(GByteArray) image = NULL;
+	uint32_t image_width = 0;
+	uint32_t image_height = 0;
+	size_t image_stride = 0;
 
 	if (!rf_rdp_cliprdr_parse_format_data_request(
 		    data,
@@ -2398,6 +2838,14 @@ static void handle_cliprdr_format_data_request(
 	g_mutex_lock(&this->lock);
 	if (this->clipboard_text != NULL)
 		text = g_strdup(this->clipboard_text);
+	if (this->rich_clipboard.html != NULL)
+		html = g_byte_array_ref(this->rich_clipboard.html);
+	if (this->rich_clipboard.image_rgba != NULL) {
+		image = g_byte_array_ref(this->rich_clipboard.image_rgba);
+		image_width = this->rich_clipboard.image_width;
+		image_height = this->rich_clipboard.image_height;
+		image_stride = this->rich_clipboard.image_stride;
+	}
 	g_mutex_unlock(&this->lock);
 
 	switch (format_id) {
@@ -2421,13 +2869,107 @@ static void handle_cliprdr_format_data_request(
 		if (!send_cliprdr_format_data_response_locale(client, 0x00000409))
 			g_warning("RDP: Failed to send cliprdr locale response.");
 		break;
+	case RF_RDP_CLIPRDR_CF_DIB:
+	case RF_RDP_CLIPRDR_CF_DIBV5: {
+		const bool v5 = format_id == RF_RDP_CLIPRDR_CF_DIBV5;
+		g_autoptr(GByteArray) dib = image != NULL ?
+			rf_rdp_cliprdr_rgba_to_dib(
+				image->data,
+				image->len,
+				image_width,
+				image_height,
+				image_stride,
+				v5
+			) :
+			NULL;
+
+		g_message("RDP: cliprdr client requested %s.",
+			v5 ? "CF_DIBV5" : "CF_DIB");
+		if (!send_cliprdr_format_data_response_bytes(
+			    client,
+			    dib != NULL ? dib->data : NULL,
+			    dib != NULL ? dib->len : 0,
+			    v5 ? "CF_DIBV5" : "CF_DIB"
+		    ))
+			g_warning("RDP: Failed to send cliprdr image response.");
+		break;
+	}
 	default:
-		g_message(
-			"RDP: cliprdr unsupported data request format id %u.",
-			format_id
-		);
-		if (!send_cliprdr_format_data_response_text(client, NULL))
-			g_warning("RDP: Failed to send cliprdr data response failure.");
+		if (format_id == RF_RDP_CLIPRDR_FORMAT_PNG ||
+		    format_id == RF_RDP_CLIPRDR_FORMAT_TIFF ||
+		    format_id == RF_RDP_CLIPRDR_CF_TIFF ||
+		    format_id == RF_RDP_CLIPRDR_FORMAT_JPEG ||
+		    format_id == RF_RDP_CLIPRDR_FORMAT_WEBP ||
+		    format_id == RF_RDP_CLIPRDR_FORMAT_BMP) {
+			const char *format_name = NULL;
+			const char *log_name = NULL;
+			g_autoptr(GByteArray) encoded = NULL;
+
+			if (format_id == RF_RDP_CLIPRDR_FORMAT_PNG) {
+				format_name = RF_RDP_CLIPRDR_PNG_FORMAT_NAME;
+				log_name = "image/png";
+			} else if (format_id == RF_RDP_CLIPRDR_FORMAT_TIFF) {
+				format_name = RF_RDP_CLIPRDR_TIFF_FORMAT_NAME;
+				log_name = "image/tiff";
+			} else if (format_id == RF_RDP_CLIPRDR_CF_TIFF) {
+				format_name = RF_RDP_CLIPRDR_TIFF_FORMAT_NAME;
+				log_name = "CF_TIFF";
+			} else if (format_id == RF_RDP_CLIPRDR_FORMAT_JPEG) {
+				format_name = RF_RDP_CLIPRDR_JPEG_FORMAT_NAME;
+				log_name = "image/jpeg";
+			} else if (format_id == RF_RDP_CLIPRDR_FORMAT_WEBP) {
+				format_name = RF_RDP_CLIPRDR_WEBP_FORMAT_NAME;
+				log_name = "image/webp";
+			} else {
+				format_name = RF_RDP_CLIPRDR_BMP_FORMAT_NAME;
+				log_name = "image/bmp";
+			}
+			encoded = image != NULL ?
+				rf_rdp_cliprdr_rgba_to_image_format(
+					image->data,
+					image->len,
+					image_width,
+					image_height,
+					image_stride,
+					format_name
+				) :
+				NULL;
+
+			g_message("RDP: cliprdr client requested %s.", log_name);
+			if (!send_cliprdr_format_data_response_bytes(
+				    client,
+				    encoded != NULL ? encoded->data : NULL,
+				    encoded != NULL ? encoded->len : 0,
+				    log_name
+			    ))
+				g_warning("RDP: Failed to send cliprdr %s response.",
+					log_name);
+		} else
+		if (format_id == RF_RDP_CLIPRDR_FORMAT_HTML ||
+		    format_id == client->cliprdr_client_html_format_id) {
+			g_autoptr(GByteArray) wrapped = html != NULL ?
+				rf_rdp_cliprdr_html_format_wrap(
+					html->data,
+					html->len
+				) :
+				NULL;
+
+			g_message("RDP: cliprdr client requested HTML Format.");
+			if (!send_cliprdr_format_data_response_bytes(
+				    client,
+				    wrapped != NULL ? wrapped->data : NULL,
+				    wrapped != NULL ? wrapped->len : 0,
+				    "HTML Format"
+			    ))
+				g_warning("RDP: Failed to send cliprdr HTML response.");
+		} else {
+			g_message(
+				"RDP: cliprdr unsupported data request format id %u.",
+				format_id
+			);
+			if (!send_cliprdr_format_data_response_text(client, NULL))
+				g_warning("RDP: Failed to send cliprdr data response failure.");
+		}
 		break;
 	}
 }
@@ -2444,23 +2986,50 @@ static void handle_cliprdr_format_list(
 		length,
 		&formats
 	);
+	const uint32_t request_format_id =
+		ok ? rf_rdp_cliprdr_choose_request_format(&formats) : 0;
 
 	client->cliprdr_client_has_unicode_text = ok && formats.unicode_text;
+	client->cliprdr_client_html_format_id = ok ? formats.html_format_id : 0;
+	client->cliprdr_client_png_format_id = ok ? formats.png_format_id : 0;
+	client->cliprdr_client_tiff_format_id = ok ? formats.tiff_format_id : 0;
+	client->cliprdr_client_jpeg_format_id = ok ? formats.jpeg_format_id : 0;
+	client->cliprdr_client_webp_format_id = ok ? formats.webp_format_id : 0;
+	client->cliprdr_client_bmp_format_id = ok ? formats.bmp_format_id : 0;
+	if (ok)
+		client->cliprdr_client_formats = formats;
+	else
+		memset(&client->cliprdr_client_formats, 0,
+			sizeof(client->cliprdr_client_formats));
 	g_message(
-		"RDP: cliprdr client format list ok=%s unicode-text=%s length=%zu.",
+		"RDP: cliprdr client format list ok=%s unicode-text=%s html=%s(%u) dib=%s dibv5=%s cf-tiff=%s png=%s(%u) tiff=%s(%u) jpeg=%s(%u) webp=%s(%u) bmp=%s(%u) length=%zu.",
 		yes_no(ok),
 		yes_no(formats.unicode_text),
+		yes_no(formats.html),
+		formats.html_format_id,
+		yes_no(formats.dib),
+		yes_no(formats.dibv5),
+		yes_no(formats.cf_tiff),
+		yes_no(formats.png),
+		formats.png_format_id,
+		yes_no(formats.tiff),
+		formats.tiff_format_id,
+		yes_no(formats.jpeg),
+		formats.jpeg_format_id,
+		yes_no(formats.webp),
+		formats.webp_format_id,
+		yes_no(formats.bmp),
+		formats.bmp_format_id,
 		length
 	);
 	if (!send_cliprdr_format_list_response(client, ok))
 		g_warning("RDP: Failed to send cliprdr format list response.");
-	if (!client->cliprdr_client_has_unicode_text)
+	if (!ok)
 		return;
-	if (!send_cliprdr_format_data_request(
-		    client,
-		    RF_RDP_CLIPRDR_CF_UNICODETEXT
-	    ))
-		g_warning("RDP: Failed to request cliprdr Unicode text.");
+	if (request_format_id != 0 &&
+	    !send_cliprdr_format_data_request(client, request_format_id))
+		g_warning("RDP: Failed to request cliprdr format %u.",
+			request_format_id);
 }
 
 static void handle_cliprdr_payload(
@@ -2487,7 +3056,9 @@ static void handle_cliprdr_payload(
 	body = payload + pdu.data_offset;
 	switch (pdu.msg_type) {
 	case RF_RDP_CLIPRDR_CB_CLIP_CAPS:
+		client->cliprdr_client_caps_received = true;
 		g_message("RDP: cliprdr client capabilities received.");
+		maybe_send_cliprdr_cached_format_list(client);
 		break;
 	case RF_RDP_CLIPRDR_CB_MONITOR_READY:
 		client->cliprdr_ready = true;
@@ -2538,21 +3109,25 @@ static void handle_cliprdr_channel_pdu(
 		channel.total_length,
 		channel.payload_length
 	);
-	if ((channel.flags & (
-		     RF_RDP_DVC_CHANNEL_FLAG_FIRST |
-		     RF_RDP_DVC_CHANNEL_FLAG_LAST
-	     )) != (
-		     RF_RDP_DVC_CHANNEL_FLAG_FIRST |
-		     RF_RDP_DVC_CHANNEL_FLAG_LAST
-	     )) {
-		g_message("RDP: Ignoring fragmented cliprdr static channel PDU.");
+	g_autoptr(GByteArray) reassembled = NULL;
+	if (!rf_rdp_cliprdr_channel_reassembler_add(
+		    &client->cliprdr_channel_reassembler,
+		    payload,
+		    payload_length,
+		    &reassembled
+	    )) {
+		g_message("RDP: Ignoring malformed fragmented cliprdr static channel PDU.");
+		return;
+	}
+	if (reassembled == NULL) {
+		g_message("RDP: Buffered fragmented cliprdr static channel PDU.");
 		return;
 	}
 
 	handle_cliprdr_payload(
 		client,
-		payload + channel.payload_offset,
-		channel.payload_length
+		reassembled->data,
+		reassembled->len
 	);
 }
 
@@ -4471,6 +5046,166 @@ out:
 	return NULL;
 }
 
+static ssize_t on_rdp_clipboard_msg(
+	RfRDPServer *this,
+	GSocketConnection *connection
+)
+{
+	size_t length = 0;
+	gsize read = 0;
+	g_autofree uint8_t *data = NULL;
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GByteArray) wire = NULL;
+	GInputStream *input =
+		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+	g_auto(RfClipboardRichPayload) payload;
+	struct rf_rdp_cliprdr_format_list formats = { 0 };
+	bool has_text = false;
+	bool has_html = false;
+	bool has_image = false;
+
+	if (!g_input_stream_read_all(
+		    input,
+		    &length,
+		    sizeof(length),
+		    &read,
+		    NULL,
+		    &error
+	    ) || read != sizeof(length))
+		goto fail;
+	if (length == 0 || length > RF_CLIPBOARD_RICH_MAX_BYTES)
+		return -1;
+
+	data = g_malloc(length);
+	if (!g_input_stream_read_all(input, data, length, &read, NULL, &error) ||
+	    read != length)
+		goto fail;
+	wire = g_byte_array_sized_new(length);
+	g_byte_array_append(wire, data, length);
+
+	rf_clipboard_rich_payload_init(&payload);
+	if (!rf_clipboard_rich_payload_parse(data, length, &payload)) {
+		g_warning("RDP: Ignoring malformed rich clipboard payload length %zu.",
+			length);
+		return -1;
+	}
+	has_text = payload.text != NULL;
+	has_html = payload.html != NULL;
+	has_image = payload.image_rgba != NULL;
+
+	g_mutex_lock(&this->lock);
+	if (rf_clipboard_rich_wire_equal(this->clipboard_wire, wire)) {
+		g_mutex_unlock(&this->lock);
+		g_message("RDP: Skipping duplicate rich clipboard from helper.");
+		return length;
+	}
+	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+	this->rich_clipboard = payload;
+	rf_clipboard_rich_payload_init(&payload);
+	g_free(this->clipboard_text);
+	this->clipboard_text = this->rich_clipboard.text != NULL ?
+		g_strdup(this->rich_clipboard.text) :
+		NULL;
+	g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
+	this->clipboard_wire = g_byte_array_ref(wire);
+	clipboard_formats_locked(this, &formats);
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		if (client->cliprdr_channel_id != 0 && client->cliprdr_ready &&
+		    client->cliprdr_client_caps_received &&
+		    !send_cliprdr_format_list_with_formats(client, &formats))
+			g_warning("RDP: Failed to advertise rich clipboard.");
+	}
+	g_mutex_unlock(&this->lock);
+
+	g_message(
+		"RDP: Received rich clipboard from helper text=%s html=%s image=%s length=%zu.",
+		yes_no(has_text),
+		yes_no(has_html),
+		yes_no(has_image),
+		length
+	);
+	return length;
+
+fail:
+	if (error != NULL)
+		g_warning("RDP: Failed to receive rich clipboard: %s.",
+			error->message);
+	return -1;
+}
+
+static int on_rdp_clipboard_socket_in(
+	GSocket *socket,
+	GIOCondition condition,
+	void *data
+)
+{
+	RfRDPServer *this = data;
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	char type = 0;
+	g_autoptr(GSocketConnection) connection =
+		g_socket_connection_factory_create_connection(socket);
+	GInputStream *input =
+		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+
+	if (!(condition & (G_IO_IN | G_IO_PRI)))
+		return G_SOURCE_CONTINUE;
+	ret = g_input_stream_read(input, &type, sizeof(type), NULL, &error);
+	if (ret <= 0)
+		goto out;
+
+	switch (type) {
+	case RF_MSG_TYPE_RDP_CLIPBOARD_RICH:
+		ret = on_rdp_clipboard_msg(this, connection);
+		break;
+	default:
+		g_message("RDP: Ignoring unsupported rich clipboard message %c.", type);
+		break;
+	}
+
+out:
+	if (ret <= 0) {
+		if (error != NULL)
+			g_warning("RDP: Rich clipboard helper disconnected: %s.",
+				error->message);
+		g_hash_table_remove(this->clipboard_sockets, socket);
+		return G_SOURCE_REMOVE;
+	}
+	return G_SOURCE_CONTINUE;
+}
+
+static gboolean on_rdp_clipboard_incoming(
+	GSocketService *service,
+	GSocketConnection *connection,
+	GObject *source_object,
+	void *data
+)
+{
+	(void)service;
+	(void)source_object;
+	RfRDPServer *this = data;
+	GSocket *socket = g_socket_connection_get_socket(connection);
+	GSource *source = g_socket_create_source(
+		socket,
+		G_IO_IN | G_IO_PRI,
+		NULL
+	);
+
+	g_source_set_callback(
+		source,
+		G_SOURCE_FUNC(on_rdp_clipboard_socket_in),
+		this,
+		NULL
+	);
+	g_source_attach(source, NULL);
+	g_hash_table_insert(this->clipboard_sockets, g_object_ref(socket), source);
+	g_message("RDP: Rich clipboard helper connected.");
+	send_rdp_clipboard_payload(this, true);
+	return true;
+}
+
 static gboolean on_incoming(
 	GSocketService *service,
 	GSocketConnection *connection,
@@ -4525,6 +5260,52 @@ static void listen_tcp(RfRDPServer *this, const char *ip, unsigned int port)
 		g_message("RDP: Listening on %s:%u.", ip ? ip : "0.0.0.0", port);
 }
 
+static void start_rdp_clipboard_service(RfRDPServer *this)
+{
+	if (!this->clipboard || this->clipboard_socket_path == NULL)
+		return;
+
+	g_autoptr(GError) error = NULL;
+	g_autofree char *dir = g_path_get_dirname(this->clipboard_socket_path);
+
+	g_mkdir_with_parents(dir, 0755);
+	rf_set_group(dir);
+	this->clipboard_service = g_socket_service_new();
+	g_clear_object(&this->clipboard_address);
+	this->clipboard_address =
+		g_unix_socket_address_new(this->clipboard_socket_path);
+	g_remove(this->clipboard_socket_path);
+	const mode_t previous_umask = umask(0007);
+	g_socket_listener_add_address(
+		G_SOCKET_LISTENER(this->clipboard_service),
+		this->clipboard_address,
+		G_SOCKET_TYPE_STREAM,
+		G_SOCKET_PROTOCOL_DEFAULT,
+		NULL,
+		NULL,
+		&error
+	);
+	umask(previous_umask);
+	rf_set_group(this->clipboard_socket_path);
+	g_chmod(this->clipboard_socket_path, 0660);
+	if (error != NULL) {
+		g_warning("RDP: Failed to listen on rich clipboard socket %s: %s.",
+			this->clipboard_socket_path,
+			error->message);
+		g_clear_object(&this->clipboard_service);
+		return;
+	}
+	g_signal_connect(
+		this->clipboard_service,
+		"incoming",
+		G_CALLBACK(on_rdp_clipboard_incoming),
+		this
+	);
+	g_socket_service_start(this->clipboard_service);
+	g_message("RDP: Rich clipboard listening on %s.",
+		this->clipboard_socket_path);
+}
+
 static void start(RfRemoteServer *super)
 {
 	RfRDPServer *this = RF_RDP_SERVER(super);
@@ -4555,6 +5336,7 @@ static void start(RfRemoteServer *super)
 		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
 	g_socket_service_start(this->service);
+	start_rdp_clipboard_service(this);
 
 	this->running = true;
 }
@@ -4812,6 +5594,23 @@ static void stop(RfRemoteServer *super)
 
 	this->running = false;
 	rf_remote_server_flush(super);
+	if (this->clipboard_sockets != NULL) {
+		GHashTableIter it;
+		void *value;
+
+		g_hash_table_iter_init(&it, this->clipboard_sockets);
+		while (g_hash_table_iter_next(&it, NULL, &value))
+			g_source_destroy(value);
+		g_hash_table_remove_all(this->clipboard_sockets);
+	}
+	if (this->clipboard_service != NULL) {
+		g_socket_service_stop(this->clipboard_service);
+		g_socket_listener_close(G_SOCKET_LISTENER(this->clipboard_service));
+		g_clear_object(&this->clipboard_service);
+	}
+	g_clear_object(&this->clipboard_address);
+	if (this->clipboard_socket_path != NULL)
+		g_remove(this->clipboard_socket_path);
 	g_socket_service_stop(this->service);
 	g_socket_listener_close(G_SOCKET_LISTENER(this->service));
 	g_clear_object(&this->service);
@@ -4824,9 +5623,21 @@ static void set_desktop_name(RfRemoteServer *super, const char *desktop_name)
 	(void)desktop_name;
 }
 
+static void set_rdp_clipboard_socket_path(
+	RfRemoteServer *super,
+	const char *socket_path
+)
+{
+	RfRDPServer *this = RF_RDP_SERVER(super);
+
+	g_free(this->clipboard_socket_path);
+	this->clipboard_socket_path = g_strdup(socket_path);
+}
+
 static void send_clipboard_text(RfRemoteServer *super, const char *text)
 {
 	RfRDPServer *this = RF_RDP_SERVER(super);
+	struct rf_rdp_cliprdr_format_list formats = { 0 };
 
 	if (!this->clipboard)
 		return;
@@ -4837,11 +5648,15 @@ static void send_clipboard_text(RfRemoteServer *super, const char *text)
 	}
 	g_free(this->clipboard_text);
 	this->clipboard_text = g_strdup(text);
+	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+	rf_clipboard_rich_payload_set_text(&this->rich_clipboard, text);
+	clipboard_formats_locked(this, &formats);
 	for (GList *l = this->clients; l != NULL; l = l->next) {
 		struct client *client = l->data;
 
 		if (client->cliprdr_channel_id != 0 && client->cliprdr_ready &&
-		    !send_cliprdr_format_list(client))
+		    client->cliprdr_client_caps_received &&
+		    !send_cliprdr_format_list_with_formats(client, &formats))
 			g_warning("RDP: Failed to advertise clipboard text.");
 	}
 	g_mutex_unlock(&this->lock);
@@ -5084,8 +5899,12 @@ static void finalize(GObject *o)
 	g_free(this->password);
 	g_free(this->graphics);
 	g_free(this->avc_encoder);
+	g_free(this->clipboard_socket_path);
 	g_free(this->clipboard_text);
+	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
+	g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
 	g_clear_pointer(&this->last_frame, g_byte_array_unref);
+	g_clear_pointer(&this->clipboard_sockets, g_hash_table_unref);
 	g_mutex_clear(&this->lock);
 
 	G_OBJECT_CLASS(rf_rdp_server_parent_class)->finalize(o);
@@ -5102,6 +5921,7 @@ static void rf_rdp_server_class_init(RfRDPServerClass *klass)
 	r_class->is_running = is_running;
 	r_class->stop = stop;
 	r_class->set_desktop_name = set_desktop_name;
+	r_class->set_rdp_clipboard_socket_path = set_rdp_clipboard_socket_path;
 	r_class->send_clipboard_text = send_clipboard_text;
 	r_class->should_render_frame = should_render_frame;
 	r_class->update = update;
@@ -5111,6 +5931,13 @@ static void rf_rdp_server_class_init(RfRDPServerClass *klass)
 static void rf_rdp_server_init(RfRDPServer *this)
 {
 	g_mutex_init(&this->lock);
+	rf_clipboard_rich_payload_init(&this->rich_clipboard);
+	this->clipboard_sockets = g_hash_table_new_full(
+		g_direct_hash,
+		g_direct_equal,
+		g_object_unref,
+		(GDestroyNotify)g_source_unref
+	);
 	this->port = 3389;
 	this->width = 1920;
 	this->height = 1080;

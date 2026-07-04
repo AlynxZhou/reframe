@@ -231,6 +231,7 @@ int main(int argc, char *argv[])
 	g_autofree char *config_path = NULL;
 	g_autofree char *socket_path = NULL;
 	g_autofree char *session_socket_path = NULL;
+	g_autofree char *rdp_clipboard_socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	int version = false;
@@ -252,13 +253,20 @@ int main(int argc, char *argv[])
 		  &socket_path,
 		  "Streamer socket path to communicate.",
 		  "SOCKET" },
-		{ "session-socket",
-		  'S',
-		  G_OPTION_FLAG_NONE,
-		  G_OPTION_ARG_FILENAME,
-		  &session_socket_path,
-		  "Session socket path to communicate.",
-		  "SOCKET" },
+			{ "session-socket",
+			  'S',
+			  G_OPTION_FLAG_NONE,
+			  G_OPTION_ARG_FILENAME,
+			  &session_socket_path,
+			  "Session socket path to communicate.",
+			  "SOCKET" },
+			{ "rdp-clipboard-socket",
+			  0,
+			  G_OPTION_FLAG_NONE,
+			  G_OPTION_ARG_FILENAME,
+			  &rdp_clipboard_socket_path,
+			  "RDP rich clipboard socket path to communicate.",
+			  "SOCKET" },
 		{ "config",
 		  'c',
 		  G_OPTION_FLAG_NONE,
@@ -303,6 +311,12 @@ int main(int argc, char *argv[])
 		session_socket_path =
 			g_strdup("/tmp/reframe-session/reframe-session.sock");
 	}
+	if (rdp_clipboard_socket_path == NULL) {
+		g_mkdir("/tmp/reframe-rdp-clipboard", 0755);
+		rf_set_group("/tmp/reframe-rdp-clipboard");
+		rdp_clipboard_socket_path =
+			g_strdup("/tmp/reframe-rdp-clipboard/reframe-rdp-clipboard.sock");
+	}
 
 	g_message(
 		"Skip damage region detection mode is %s.",
@@ -311,6 +325,7 @@ int main(int argc, char *argv[])
 	g_message("Using configuration file %s.", config_path);
 	g_message("Using socket %s.", socket_path);
 	g_message("Using session socket %s.", session_socket_path);
+	g_message("Using RDP clipboard socket %s.", rdp_clipboard_socket_path);
 
 	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
 	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {
@@ -325,11 +340,12 @@ int main(int argc, char *argv[])
 	this->config = rf_config_new(config_path);
 
 	g_autofree char *protocol = rf_config_get_remote_protocol(this->config);
+	const bool protocol_is_rdp = g_strcmp0(protocol, "rdp") == 0;
 	g_message("Remote: Protocol is %s.", protocol);
 	const char *module_name = NULL;
 	const char *module_subdir = NULL;
 	const char *constructor_name = NULL;
-	if (g_strcmp0(protocol, "rdp") == 0) {
+		if (protocol_is_rdp) {
 #ifdef HAVE_RDP
 		module_subdir = "rdp";
 		module_name = "lib" PROJECT_NAME "-rdp." G_MODULE_SUFFIX;
@@ -374,6 +390,10 @@ int main(int argc, char *argv[])
 			module_path,
 			g_module_error());
 	this->remote = rf_remote_server_new(this->config);
+	rf_remote_server_set_rdp_clipboard_socket_path(
+		this->remote,
+		rdp_clipboard_socket_path
+	);
 
 	this->converter = rf_converter_new(this->config);
 	this->session = rf_session_new();
@@ -399,12 +419,14 @@ int main(int argc, char *argv[])
 		this->remote
 	);
 	g_signal_connect(this->streamer, "frame", G_CALLBACK(on_frame), this);
-	g_signal_connect_swapped(
-		this->session,
-		"clipboard-text",
-		G_CALLBACK(rf_remote_server_send_clipboard_text),
-		this->remote
-	);
+	if (!protocol_is_rdp) {
+		g_signal_connect_swapped(
+			this->session,
+			"clipboard-text",
+			G_CALLBACK(rf_remote_server_send_clipboard_text),
+			this->remote
+		);
+	}
 	g_signal_connect(
 		this->remote, "first-client", G_CALLBACK(on_first_client), this
 	);
@@ -426,12 +448,14 @@ int main(int argc, char *argv[])
 		G_CALLBACK(on_pointer_event),
 		this
 	);
-	g_signal_connect_swapped(
-		this->remote,
-		"clipboard-text",
-		G_CALLBACK(rf_session_send_clipboard_text_msg),
-		this->session
-	);
+	if (!protocol_is_rdp) {
+		g_signal_connect_swapped(
+			this->remote,
+			"clipboard-text",
+			G_CALLBACK(rf_session_send_clipboard_text_msg),
+			this->session
+		);
+	}
 	g_signal_connect_swapped(
 		this->streamer,
 		"start",

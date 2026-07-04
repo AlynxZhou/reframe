@@ -24,8 +24,12 @@ struct _RfRemoteServerClass {
 	void (*start)(RfRemoteServer *this);
 	bool (*is_running)(RfRemoteServer *this);
 	void (*stop)(RfRemoteServer *this);
-	void (*set_desktop_name)(RfRemoteServer *this, const char *desktop_name);
-	void (*send_clipboard_text)(RfRemoteServer *this, const char *text);
+		void (*set_desktop_name)(RfRemoteServer *this, const char *desktop_name);
+		void (*set_rdp_clipboard_socket_path)(
+			RfRemoteServer *this,
+			const char *socket_path
+		);
+		void (*send_clipboard_text)(RfRemoteServer *this, const char *text);
 	bool (*should_render_frame)(RfRemoteServer *this);
 	void (*update)(
 		RfRemoteServer *this,
@@ -45,6 +49,10 @@ void rf_remote_server_stop(RfRemoteServer *this);
 void rf_remote_server_set_desktop_name(
 	RfRemoteServer *this,
 	const char *desktop_name
+);
+void rf_remote_server_set_rdp_clipboard_socket_path(
+	RfRemoteServer *this,
+	const char *socket_path
 );
 void rf_remote_server_send_clipboard_text(RfRemoteServer *this, const char *text);
 bool rf_remote_server_should_render_frame(RfRemoteServer *this);

@@ -79,12 +79,23 @@ if get_option('rdp')
   avcodec = dependency('libavcodec', required: false)
   avutil = dependency('libavutil', required: false)
   swscale = dependency('libswscale', required: false)
+  gdk_pixbuf = dependency('gdk-pixbuf-2.0', required: true)
+  libpng = dependency('libpng', required: true)
+  libtiff = dependency('libtiff-4', required: true)
   rdp_avc_c_args = []
   rdp_avc_dependencies = []
   if avcodec.found() and avutil.found() and swscale.found()
     rdp_avc_c_args += ['-DRF_HAVE_RDP_AVC=1']
     rdp_avc_dependencies += [avcodec, avutil, swscale]
   endif
+  rdp_cliprdr_c_args = []
+  rdp_cliprdr_dependencies = []
+  rdp_cliprdr_c_args += ['-DRF_HAVE_RDP_CLIPRDR_LIBPNG=1']
+  rdp_cliprdr_dependencies += [libpng]
+  rdp_cliprdr_c_args += ['-DRF_HAVE_RDP_CLIPRDR_PNG=1']
+  rdp_cliprdr_dependencies += [gdk_pixbuf]
+  rdp_cliprdr_c_args += ['-DRF_HAVE_RDP_CLIPRDR_TIFF=1']
+  rdp_cliprdr_dependencies += [libtiff]
 
   rdp_sources = files(
     'rf-rdp-server.c',
@@ -122,18 +133,20 @@ if get_option('rdp')
   rdp_dependencies += [
     glib,
     gio,
+    gio_unix,
     gmodule,
     gobject,
     reframe_common_dep
   ]
   rdp_dependencies += rdp_avc_dependencies
+  rdp_dependencies += rdp_cliprdr_dependencies
 
   shared_module(
     meson.project_name() + '-rdp',
     sources: rdp_sources,
     dependencies: rdp_dependencies,
     include_directories: include_directories,
-    c_args: rdp_avc_c_args,
+    c_args: rdp_avc_c_args + rdp_cliprdr_c_args,
     install: true,
     install_dir: moduledir / 'rdp'
   )
@@ -201,11 +214,25 @@ if get_option('rdp')
       '../tests/test-rdp-cliprdr.c',
       'rf-rdp-cliprdr.c'
     ),
-    dependencies: [glib],
+    dependencies: [glib] + rdp_cliprdr_dependencies,
     include_directories: rdp_test_include_directories,
+    c_args: rdp_cliprdr_c_args,
     install: false
   )
   test('rdp-cliprdr', test_rdp_cliprdr)
+
+  test_rdp_cliprdr_tiff = executable(
+    'test-rdp-cliprdr-tiff',
+    sources: files(
+      '../tests/test-rdp-cliprdr.c',
+      'rf-rdp-cliprdr.c'
+    ),
+    dependencies: [glib, libtiff],
+    include_directories: rdp_test_include_directories,
+    c_args: ['-DRF_HAVE_RDP_CLIPRDR_TIFF=1'],
+    install: false
+  )
+  test('rdp-cliprdr-tiff', test_rdp_cliprdr_tiff)
 
   test_rdp_gfx = executable(
     'test-rdp-gfx',
