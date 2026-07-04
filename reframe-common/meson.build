@@ -1,13 +1,15 @@
 sources = files(
-  'rf-common.c',
-  'rf-config.c',
-  'rf-resize.c'
+	'rf-common.c',
+	'rf-clipboard-rich.c',
+	'rf-config.c',
+	'rf-resize.c'
 )
 
 headers = files(
-  'rf-common.h',
-  'rf-config.h',
-  'rf-resize.h'
+	'rf-common.h',
+	'rf-clipboard-rich.h',
+	'rf-config.h',
+	'rf-resize.h'
 )
 
 dependencies = []
@@ -29,6 +31,14 @@ reframe_common = library(
   install: true
 )
 reframe_common_dep = declare_dependency(
-  link_with: reframe_common,
-  include_directories: include_directories('.')
+	link_with: reframe_common,
+	include_directories: include_directories('.')
 )
+
+test_clipboard_rich = executable(
+  'test-clipboard-rich',
+  sources: files('../tests/test-clipboard-rich.c', 'rf-clipboard-rich.c'),
+  dependencies: [glib],
+  include_directories: include_directories
+)
+test('clipboard-rich', test_clipboard_rich)
