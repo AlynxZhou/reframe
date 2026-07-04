@@ -84,7 +84,6 @@ test('rdp-clipboard-stream', test_rdp_clipboard_stream)
 test_rdp_audio_stream = executable(
   'test-rdp-audio-stream',
   '../tests/test-rdp-audio-stream.c',
-  'rf-rdp-audio-stream.c',
   dependencies: [gio, reframe_common_dep],
   include_directories: include_directories
 )

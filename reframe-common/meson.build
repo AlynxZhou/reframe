@@ -2,6 +2,7 @@ sources = files(
 	'rf-common.c',
 	'rf-clipboard-rich.c',
 	'rf-config.c',
+	'rf-rdp-audio-stream.c',
 	'rf-resize.c'
 )
 
@@ -9,6 +10,7 @@ headers = files(
 	'rf-common.h',
 	'rf-clipboard-rich.h',
 	'rf-config.h',
+	'rf-rdp-audio-stream.h',
 	'rf-resize.h'
 )
 

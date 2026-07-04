@@ -7,6 +7,7 @@
 #include <glib/gstdio.h>
 
 #include "rf-clipboard-rich.h"
+#include "rf-rdp-audio-stream.h"
 #include "rf-rdp-av1.h"
 #include "rf-rdp-avc.h"
 #include "rf-rdp-cliprdr.h"
@@ -74,9 +75,11 @@ struct _RfRDPServer {
 	RfConfig *config;
 	GSocketService *service;
 	GSocketService *clipboard_service;
+	GSocketService *audio_service;
 	GSocketAddress *clipboard_address;
 	GTlsCertificate *certificate;
 	GMutex lock;
+	GMutex audio_lock;
 	GList *clients;
 	GHashTable *clipboard_sockets;
 	struct client *resize_owner;
@@ -93,6 +96,7 @@ struct _RfRDPServer {
 	char *clipboard_text;
 	struct rf_clipboard_rich_payload rich_clipboard;
 	GByteArray *clipboard_wire;
+	GByteArray *latest_audio_pcm;
 	GByteArray *last_frame;
 	unsigned int port;
 	unsigned int desktop_width;
@@ -120,7 +124,11 @@ struct _RfRDPServer {
 	unsigned int audio_sample_rate;
 	unsigned int audio_channels;
 	unsigned int audio_frame_ms;
+	uint32_t latest_audio_sample_rate;
+	uint16_t latest_audio_channels;
+	uint16_t latest_audio_frame_ms;
 	uint64_t rdpgfx_target_bytes_per_second;
+	uint64_t latest_audio_timestamp_us;
 	uint32_t stats_max_rdpgfx_inflight;
 	uint32_t stats_max_rdpgfx_ack_queue_depth;
 	uint16_t stats_max_rdpgfx_qoe_time_diff_se;
@@ -240,6 +248,11 @@ struct client {
 	bool rdpgfx_av1_unavailable_logged;
 	bool rdpgfx_avc_unavailable_logged;
 	bool rdpgfx_avc444_software_fallback_logged;
+};
+
+struct audio_connection {
+	RfRDPServer *server;
+	GSocketConnection *connection;
 };
 
 static bool rdpgfx_avc444_supported(RfRDPServer *this)
@@ -1761,7 +1774,7 @@ static bool start_rdpsnd(struct client *client)
 	return true;
 }
 
-static bool G_GNUC_UNUSED send_rdpsnd_pcm(
+static bool send_rdpsnd_pcm(
 	struct client *client,
 	const uint8_t *pcm,
 	size_t pcm_length,
@@ -1804,6 +1817,36 @@ static bool G_GNUC_UNUSED send_rdpsnd_pcm(
 
 	client->rdpsnd_block_no++;
 	return true;
+}
+
+static void send_audio_to_clients(
+	RfRDPServer *this,
+	const struct rf_rdp_audio_pcm_header *header,
+	const GByteArray *pcm
+)
+{
+	unsigned int attempted = 0;
+	unsigned int sent = 0;
+	const uint16_t timestamp = (uint16_t)(header->timestamp_us / 1000u);
+
+	if (pcm == NULL || header == NULL)
+		return;
+
+	g_mutex_lock(&this->lock);
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		if (!client->rdpsnd_ready)
+			continue;
+		attempted++;
+		if (send_rdpsnd_pcm(client, pcm->data, pcm->len, timestamp))
+			sent++;
+	}
+	g_mutex_unlock(&this->lock);
+
+	if (attempted > 0 && sent == 0)
+		g_debug("RDP: Failed to send audio frame to %u ready client(s).",
+			attempted);
 }
 
 static void maybe_send_cliprdr_cached_format_list(struct client *client)
@@ -5597,6 +5640,142 @@ static void start_rdp_clipboard_service(RfRDPServer *this)
 		this->clipboard_socket_path);
 }
 
+static void audio_connection_free(struct audio_connection *connection)
+{
+	if (connection == NULL)
+		return;
+	g_clear_object(&connection->connection);
+	g_clear_object(&connection->server);
+	g_free(connection);
+}
+
+static void update_latest_audio_frame(
+	RfRDPServer *this,
+	const struct rf_rdp_audio_pcm_header *header,
+	GByteArray *pcm
+)
+{
+	g_mutex_lock(&this->audio_lock);
+	g_clear_pointer(&this->latest_audio_pcm, g_byte_array_unref);
+	this->latest_audio_pcm = g_byte_array_ref(pcm);
+	this->latest_audio_sample_rate = header->sample_rate;
+	this->latest_audio_channels = header->channels;
+	this->latest_audio_frame_ms = header->frame_ms;
+	this->latest_audio_timestamp_us = header->timestamp_us;
+	g_mutex_unlock(&this->audio_lock);
+}
+
+static void *audio_connection_thread(void *data)
+{
+	struct audio_connection *connection = data;
+	RfRDPServer *this = connection->server;
+	GInputStream *input =
+		g_io_stream_get_input_stream(G_IO_STREAM(connection->connection));
+	unsigned int frames = 0;
+
+	while (this->running) {
+		struct rf_rdp_audio_pcm_header header = { 0 };
+		g_autoptr(GByteArray) pcm = NULL;
+		g_autoptr(GError) error = NULL;
+
+		if (!rf_rdp_audio_stream_read_pcm(input, &header, &pcm, &error)) {
+			if (error != NULL)
+				g_message("RDP: Audio helper disconnected: %s.",
+					error->message);
+			break;
+		}
+		update_latest_audio_frame(this, &header, pcm);
+		send_audio_to_clients(this, &header, pcm);
+		frames++;
+		if (frames == 1)
+			g_message(
+				"RDP: Received first audio frame from helper: %u Hz/%u channel(s), %u ms, %u bytes.",
+				header.sample_rate,
+				header.channels,
+				header.frame_ms,
+				header.pcm_length
+			);
+	}
+
+	audio_connection_free(connection);
+	return NULL;
+}
+
+static gboolean on_rdp_audio_incoming(
+	GSocketService *service,
+	GSocketConnection *connection,
+	GObject *source_object,
+	void *data
+)
+{
+	(void)service;
+	(void)source_object;
+	RfRDPServer *this = data;
+	struct audio_connection *audio_connection = g_new0(
+		struct audio_connection,
+		1
+	);
+	GThread *thread = NULL;
+
+	audio_connection->server = g_object_ref(this);
+	audio_connection->connection = g_object_ref(connection);
+	thread = g_thread_new(
+		"rf-rdp-audio",
+		audio_connection_thread,
+		audio_connection
+	);
+	g_thread_unref(thread);
+	g_message("RDP: Audio helper connected.");
+	return true;
+}
+
+static bool start_rdp_audio_service(RfRDPServer *this)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GSocketAddress) address = NULL;
+	g_autofree char *dir = NULL;
+
+	if (!this->audio || this->rdp_audio_socket_path == NULL)
+		return true;
+
+	dir = g_path_get_dirname(this->rdp_audio_socket_path);
+	g_mkdir_with_parents(dir, 0755);
+	rf_set_group(dir);
+	this->audio_service = g_socket_service_new();
+	address = g_unix_socket_address_new(this->rdp_audio_socket_path);
+	g_remove(this->rdp_audio_socket_path);
+	const mode_t previous_umask = umask(0007);
+	g_socket_listener_add_address(
+		G_SOCKET_LISTENER(this->audio_service),
+		address,
+		G_SOCKET_TYPE_STREAM,
+		G_SOCKET_PROTOCOL_DEFAULT,
+		NULL,
+		NULL,
+		&error
+	);
+	umask(previous_umask);
+	rf_set_group(this->rdp_audio_socket_path);
+	g_chmod(this->rdp_audio_socket_path, 0660);
+	if (error != NULL) {
+		g_warning("RDP: Failed to listen on audio socket %s: %s.",
+			this->rdp_audio_socket_path,
+			error->message);
+		g_clear_object(&this->audio_service);
+		return false;
+	}
+	g_signal_connect(
+		this->audio_service,
+		"incoming",
+		G_CALLBACK(on_rdp_audio_incoming),
+		this
+	);
+	g_socket_service_start(this->audio_service);
+	g_message("RDP: Audio helper listening on %s.",
+		this->rdp_audio_socket_path);
+	return true;
+}
+
 static void start(RfRemoteServer *super)
 {
 	RfRDPServer *this = RF_RDP_SERVER(super);
@@ -5626,10 +5805,11 @@ static void start(RfRemoteServer *super)
 	g_signal_connect(
 		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
+	this->running = true;
 	g_socket_service_start(this->service);
 	start_rdp_clipboard_service(this);
-
-	this->running = true;
+	if (!start_rdp_audio_service(this))
+		g_warning("RDP: Audio socket disabled after startup failure.");
 }
 
 static bool is_running(RfRemoteServer *super)
@@ -5902,6 +6082,13 @@ static void stop(RfRemoteServer *super)
 	g_clear_object(&this->clipboard_address);
 	if (this->clipboard_socket_path != NULL)
 		g_remove(this->clipboard_socket_path);
+	if (this->audio_service != NULL) {
+		g_socket_service_stop(this->audio_service);
+		g_socket_listener_close(G_SOCKET_LISTENER(this->audio_service));
+		g_clear_object(&this->audio_service);
+	}
+	if (this->rdp_audio_socket_path != NULL)
+		g_remove(this->rdp_audio_socket_path);
 	g_socket_service_stop(this->service);
 	g_socket_listener_close(G_SOCKET_LISTENER(this->service));
 	g_clear_object(&this->service);
@@ -6206,8 +6393,10 @@ static void finalize(GObject *o)
 	g_free(this->clipboard_text);
 	rf_clipboard_rich_payload_clear(&this->rich_clipboard);
 	g_clear_pointer(&this->clipboard_wire, g_byte_array_unref);
+	g_clear_pointer(&this->latest_audio_pcm, g_byte_array_unref);
 	g_clear_pointer(&this->last_frame, g_byte_array_unref);
 	g_clear_pointer(&this->clipboard_sockets, g_hash_table_unref);
+	g_mutex_clear(&this->audio_lock);
 	g_mutex_clear(&this->lock);
 
 	G_OBJECT_CLASS(rf_rdp_server_parent_class)->finalize(o);
@@ -6235,6 +6424,7 @@ static void rf_rdp_server_class_init(RfRDPServerClass *klass)
 static void rf_rdp_server_init(RfRDPServer *this)
 {
 	g_mutex_init(&this->lock);
+	g_mutex_init(&this->audio_lock);
 	rf_clipboard_rich_payload_init(&this->rich_clipboard);
 	this->clipboard_sockets = g_hash_table_new_full(
 		g_direct_hash,
