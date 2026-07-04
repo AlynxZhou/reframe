@@ -132,6 +132,18 @@ static bool read_audio_format(
 	return true;
 }
 
+const char *rf_rdp_rdpsnd_format_name(uint16_t tag)
+{
+	switch (tag) {
+	case RF_RDP_RDPSND_WAVE_FORMAT_PCM:
+		return "PCM";
+	case RF_RDP_RDPSND_WAVE_FORMAT_DVI_ADPCM:
+		return "DVI ADPCM";
+	default:
+		return "unknown";
+	}
+}
+
 uint16_t rf_rdp_rdpsnd_dvi_adpcm_samples_per_block(
 	uint32_t sample_rate,
 	uint16_t frame_ms

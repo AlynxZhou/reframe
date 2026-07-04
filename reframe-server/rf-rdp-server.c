@@ -1796,11 +1796,53 @@ static bool rdp_audio_advertises_adpcm(const RfRDPServer *this)
 		g_strcmp0(this->audio_codec, "adpcm") == 0);
 }
 
+static char *rdpsnd_format_array_summary(
+	const struct rf_rdp_rdpsnd_audio_format *formats,
+	size_t format_count
+)
+{
+	GString *summary = g_string_new(NULL);
+
+	for (size_t i = 0; i < format_count; ++i) {
+		const struct rf_rdp_rdpsnd_audio_format *format = &formats[i];
+
+		if (i > 0)
+			g_string_append(summary, "; ");
+		g_string_append_printf(
+			summary,
+			"%zu:%s tag=0x%04x %uHz/%uch/%ubit align=%u avg=%u extra=%u",
+			i,
+			rf_rdp_rdpsnd_format_name(format->tag),
+			format->tag,
+			format->samples_per_sec,
+			format->channels,
+			format->bits_per_sample,
+			format->block_align,
+			format->avg_bytes_per_sec,
+			format->extra_size
+		);
+	}
+	return g_string_free(summary, false);
+}
+
+static char *rdpsnd_client_formats_summary(
+	const struct rf_rdp_rdpsnd_client_formats *formats
+)
+{
+	if (formats == NULL)
+		return g_strdup("");
+	return rdpsnd_format_array_summary(
+		formats->formats,
+		formats->format_count
+	);
+}
+
 static bool start_rdpsnd(struct client *client)
 {
 	RfRDPServer *this = client->server;
 	uint8_t pdu[256] = { 0 };
 	struct rf_rdp_rdpsnd_audio_format formats[4] = { 0 };
+	g_autofree char *summary = NULL;
 	size_t format_count = 0;
 	size_t length = 0;
 
@@ -1841,30 +1883,16 @@ static bool start_rdpsnd(struct client *client)
 	}
 
 	client->rdpsnd_formats_sent = true;
+	summary = rdpsnd_format_array_summary(formats, format_count);
 	g_message(
-		"RDP: rdpsnd sent %zu server audio format(s), preferred=%u Hz/%u channel(s), codec=%s.",
+		"RDP: rdpsnd sent %zu server audio format(s), preferred=%u Hz/%u channel(s), codec=%s, formats=[%s].",
 		format_count,
 		this->audio_sample_rate,
 		this->audio_channels,
-		this->audio_codec
+		this->audio_codec,
+		summary
 	);
 	return true;
-}
-
-static const char *rdpsnd_audio_format_name(
-	const struct rf_rdp_rdpsnd_audio_format *format
-)
-{
-	if (format == NULL)
-		return "unknown";
-	switch (format->tag) {
-	case RF_RDP_RDPSND_WAVE_FORMAT_DVI_ADPCM:
-		return "DVI ADPCM";
-	case RF_RDP_RDPSND_WAVE_FORMAT_PCM:
-		return "PCM";
-	default:
-		return "unknown";
-	}
 }
 
 static bool send_rdpsnd_audio(
@@ -1962,7 +1990,7 @@ sent:
 			client->rdpsnd_block_no,
 			timestamp,
 			client->rdpsnd_selected_format,
-			rdpsnd_audio_format_name(format),
+			rf_rdp_rdpsnd_format_name(format->tag),
 			payload_length,
 			pcm_length
 		);
@@ -2126,14 +2154,14 @@ static void send_audio_to_clients(
 		    !audio_frame_can_encode_client_format(header, format)) {
 			dropped++;
 			if (format != NULL)
-				g_debug(
-					"RDP: Dropping audio frame %u Hz/%u ch; selected client format is %s %u Hz/%u ch.",
-					header->sample_rate,
-					header->channels,
-					rdpsnd_audio_format_name(format),
-					format->samples_per_sec,
-					format->channels
-					);
+			g_debug(
+				"RDP: Dropping audio frame %u Hz/%u ch; selected client format is %s %u Hz/%u ch.",
+				header->sample_rate,
+				header->channels,
+				rf_rdp_rdpsnd_format_name(format->tag),
+				format->samples_per_sec,
+				format->channels
+				);
 			continue;
 		}
 		target.client = client_ref(client);
@@ -3688,6 +3716,8 @@ static void handle_rdpsnd_client_formats(
 	size_t payload_length
 )
 {
+	g_autofree char *formats_summary = NULL;
+
 	if (!rf_rdp_rdpsnd_parse_client_formats(
 		    payload,
 		    payload_length,
@@ -3712,13 +3742,19 @@ static void handle_rdpsnd_client_formats(
 		"formats"
 	);
 
+	formats_summary = rdpsnd_client_formats_summary(&client->rdpsnd_client_formats);
 	g_message(
-		"RDP: rdpsnd client formats=%zu version=%u selected=%d ready=%s codec=%s.",
+		"RDP: rdpsnd client formats=%zu version=%u selected=%d ready=%s codec=%s formats=[%s].",
 		client->rdpsnd_client_formats.format_count,
 		client->rdpsnd_client_formats.version,
 		client->rdpsnd_selected_format,
 		yes_no(client->rdpsnd_ready),
-		rdpsnd_audio_format_name(client_rdpsnd_selected_format(client))
+		client_rdpsnd_selected_format(client) != NULL ?
+			rf_rdp_rdpsnd_format_name(
+				client_rdpsnd_selected_format(client)->tag
+			) :
+			"unknown",
+		formats_summary
 	);
 }
 

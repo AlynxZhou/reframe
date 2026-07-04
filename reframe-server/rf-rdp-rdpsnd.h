@@ -43,6 +43,7 @@ struct rf_rdp_rdpsnd_client_formats {
 	uint16_t version;
 };
 
+const char *rf_rdp_rdpsnd_format_name(uint16_t tag);
 struct rf_rdp_rdpsnd_audio_format rf_rdp_rdpsnd_make_dvi_adpcm_format(
 	uint32_t sample_rate,
 	uint16_t channels,

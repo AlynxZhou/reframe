@@ -78,6 +78,21 @@ static void test_server_formats_pcm_48k_stereo(void)
 	assert(read_u16_le(out + 40) == 0);
 }
 
+static void test_audio_format_names(void)
+{
+	assert(strcmp(
+		       rf_rdp_rdpsnd_format_name(RF_RDP_RDPSND_WAVE_FORMAT_PCM),
+		       "PCM"
+	       ) == 0);
+	assert(strcmp(
+		       rf_rdp_rdpsnd_format_name(
+			       RF_RDP_RDPSND_WAVE_FORMAT_DVI_ADPCM
+		       ),
+		       "DVI ADPCM"
+	       ) == 0);
+	assert(strcmp(rf_rdp_rdpsnd_format_name(0xffff), "unknown") == 0);
+}
+
 static void test_server_formats_dvi_adpcm_extra(void)
 {
 	uint8_t out[256] = { 0 };
@@ -376,6 +391,7 @@ static void test_parse_wave_confirm(void)
 int main(void)
 {
 	test_server_formats_pcm_48k_stereo();
+	test_audio_format_names();
 	test_server_formats_dvi_adpcm_extra();
 	test_parse_client_formats();
 	test_choose_client_pcm_format();
