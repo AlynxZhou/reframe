@@ -9,6 +9,7 @@
 #mesondefine HAVE_LIBSYSTEMD
 #mesondefine HAVE_NEATVNC
 #mesondefine HAVE_RDP
+#mesondefine HAVE_WAYLAND_CLIPBOARD
 #mesondefine NEATVNC_UNSTABLE_API
 
 #endif

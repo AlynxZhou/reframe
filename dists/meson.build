@@ -56,6 +56,15 @@ configure_file(
   install_dir: xdgautostartdir
 )
 
+configure_file(
+  input: 'reframe-rdp-clipboard.desktop.in',
+  output: 'reframe-rdp-clipboard.desktop',
+  configuration: {
+    'bindir': bindir
+  },
+  install_dir: xdgautostartdir
+)
+
 install_data(
   'example.conf',
   install_dir: confdir
