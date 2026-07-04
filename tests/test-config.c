@@ -111,6 +111,50 @@ static void test_rdp_target_bandwidth_invalid_uses_default(void)
 	unlink(path);
 }
 
+static void test_rdp_audio_defaults(void)
+{
+	g_autoptr(RfConfig) config = rf_config_new("/nonexistent/reframe.conf");
+
+	assert(!rf_config_get_rdp_audio(config));
+	assert(rf_config_get_rdp_audio_sample_rate(config) == 48000);
+	assert(rf_config_get_rdp_audio_channels(config) == 2);
+	assert(rf_config_get_rdp_audio_frame_ms(config) == 20);
+}
+
+static void test_rdp_audio_config_values(void)
+{
+	g_autofree char *path = write_temp_config(
+		"[rdp]\n"
+		"audio=true\n"
+		"audio-sample-rate=44100\n"
+		"audio-channels=1\n"
+		"audio-frame-ms=10\n"
+	);
+	g_autoptr(RfConfig) config = rf_config_new(path);
+
+	assert(rf_config_get_rdp_audio(config));
+	assert(rf_config_get_rdp_audio_sample_rate(config) == 44100);
+	assert(rf_config_get_rdp_audio_channels(config) == 1);
+	assert(rf_config_get_rdp_audio_frame_ms(config) == 10);
+	unlink(path);
+}
+
+static void test_rdp_audio_invalid_uses_defaults(void)
+{
+	g_autofree char *path = write_temp_config(
+		"[rdp]\n"
+		"audio-sample-rate=32000\n"
+		"audio-channels=8\n"
+		"audio-frame-ms=5\n"
+	);
+	g_autoptr(RfConfig) config = rf_config_new(path);
+
+	assert(rf_config_get_rdp_audio_sample_rate(config) == 48000);
+	assert(rf_config_get_rdp_audio_channels(config) == 2);
+	assert(rf_config_get_rdp_audio_frame_ms(config) == 20);
+	unlink(path);
+}
+
 int main(void)
 {
 	test_fps_default();
@@ -123,5 +167,8 @@ int main(void)
 	test_rdp_target_bandwidth_default();
 	test_rdp_target_bandwidth_custom();
 	test_rdp_target_bandwidth_invalid_uses_default();
+	test_rdp_audio_defaults();
+	test_rdp_audio_config_values();
+	test_rdp_audio_invalid_uses_defaults();
 	return 0;
 }

@@ -78,6 +78,7 @@ static void rf_remote_server_class_init(RfRemoteServerClass *klass)
 	klass->stop = NULL;
 	klass->set_desktop_name = NULL;
 	klass->set_rdp_clipboard_socket_path = NULL;
+	klass->set_rdp_audio_socket_path = NULL;
 	klass->send_clipboard_text = NULL;
 	klass->should_render_frame = NULL;
 	klass->update = NULL;
@@ -240,6 +241,21 @@ void rf_remote_server_set_rdp_clipboard_socket_path(
 		return;
 
 	klass->set_rdp_clipboard_socket_path(this, socket_path);
+}
+
+void rf_remote_server_set_rdp_audio_socket_path(
+	RfRemoteServer *this,
+	const char *socket_path
+)
+{
+	g_return_if_fail(RF_IS_REMOTE_SERVER(this));
+	g_return_if_fail(socket_path != NULL);
+
+	RfRemoteServerClass *klass = RF_REMOTE_SERVER_GET_CLASS(this);
+	if (klass->set_rdp_audio_socket_path == NULL)
+		return;
+
+	klass->set_rdp_audio_socket_path(this, socket_path);
 }
 
 void rf_remote_server_send_clipboard_text(RfRemoteServer *this, const char *text)

@@ -29,6 +29,10 @@ struct _RfRemoteServerClass {
 			RfRemoteServer *this,
 			const char *socket_path
 		);
+		void (*set_rdp_audio_socket_path)(
+			RfRemoteServer *this,
+			const char *socket_path
+		);
 		void (*send_clipboard_text)(RfRemoteServer *this, const char *text);
 	bool (*should_render_frame)(RfRemoteServer *this);
 	void (*update)(
@@ -51,6 +55,10 @@ void rf_remote_server_set_desktop_name(
 	const char *desktop_name
 );
 void rf_remote_server_set_rdp_clipboard_socket_path(
+	RfRemoteServer *this,
+	const char *socket_path
+);
+void rf_remote_server_set_rdp_audio_socket_path(
 	RfRemoteServer *this,
 	const char *socket_path
 );

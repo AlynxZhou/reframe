@@ -658,3 +658,70 @@ unsigned int rf_config_get_rdp_target_bandwidth_mbps(RfConfig *this)
 	}
 	return (unsigned int)bandwidth;
 }
+
+bool rf_config_get_rdp_audio(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), false);
+
+	g_autoptr(GError) error = NULL;
+	const int audio = g_key_file_get_boolean(
+		this->f, RF_CONFIG_GROUP_RDP, "audio", &error
+	);
+	if (error != NULL)
+		return false;
+	return audio;
+}
+
+unsigned int rf_config_get_rdp_audio_sample_rate(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 48000);
+
+	g_autoptr(GError) error = NULL;
+	const int sample_rate = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_RDP, "audio-sample-rate", &error
+	);
+	if (error != NULL)
+		return 48000;
+	if (sample_rate != 44100 && sample_rate != 48000) {
+		g_warning(
+			"RDP: Invalid audio-sample-rate %d, using 48000.",
+			sample_rate
+		);
+		return 48000;
+	}
+	return (unsigned int)sample_rate;
+}
+
+unsigned int rf_config_get_rdp_audio_channels(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 2);
+
+	g_autoptr(GError) error = NULL;
+	const int channels = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_RDP, "audio-channels", &error
+	);
+	if (error != NULL)
+		return 2;
+	if (channels != 1 && channels != 2) {
+		g_warning("RDP: Invalid audio-channels %d, using 2.", channels);
+		return 2;
+	}
+	return (unsigned int)channels;
+}
+
+unsigned int rf_config_get_rdp_audio_frame_ms(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 20);
+
+	g_autoptr(GError) error = NULL;
+	const int frame_ms = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_RDP, "audio-frame-ms", &error
+	);
+	if (error != NULL)
+		return 20;
+	if (frame_ms != 10 && frame_ms != 20 && frame_ms != 40) {
+		g_warning("RDP: Invalid audio-frame-ms %d, using 20.", frame_ms);
+		return 20;
+	}
+	return (unsigned int)frame_ms;
+}

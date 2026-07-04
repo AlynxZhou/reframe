@@ -232,6 +232,7 @@ int main(int argc, char *argv[])
 	g_autofree char *socket_path = NULL;
 	g_autofree char *session_socket_path = NULL;
 	g_autofree char *rdp_clipboard_socket_path = NULL;
+	g_autofree char *rdp_audio_socket_path = NULL;
 	// `gboolean` is `int`, but `bool` may be `char`! Passing `bool` pointer
 	// to `GOptionContext` leads into overflow!
 	int version = false;
@@ -266,6 +267,13 @@ int main(int argc, char *argv[])
 			  G_OPTION_ARG_FILENAME,
 			  &rdp_clipboard_socket_path,
 			  "RDP rich clipboard socket path to communicate.",
+			  "SOCKET" },
+			{ "rdp-audio-socket",
+			  0,
+			  G_OPTION_FLAG_NONE,
+			  G_OPTION_ARG_FILENAME,
+			  &rdp_audio_socket_path,
+			  "RDP audio socket path to communicate.",
 			  "SOCKET" },
 		{ "config",
 		  'c',
@@ -317,6 +325,12 @@ int main(int argc, char *argv[])
 		rdp_clipboard_socket_path =
 			g_strdup("/tmp/reframe-rdp-clipboard/reframe-rdp-clipboard.sock");
 	}
+	if (rdp_audio_socket_path == NULL) {
+		g_mkdir("/tmp/reframe-rdp-audio", 0755);
+		rf_set_group("/tmp/reframe-rdp-audio");
+		rdp_audio_socket_path =
+			g_strdup("/tmp/reframe-rdp-audio/reframe-rdp-audio.sock");
+	}
 
 	g_message(
 		"Skip damage region detection mode is %s.",
@@ -326,6 +340,7 @@ int main(int argc, char *argv[])
 	g_message("Using socket %s.", socket_path);
 	g_message("Using session socket %s.", session_socket_path);
 	g_message("Using RDP clipboard socket %s.", rdp_clipboard_socket_path);
+	g_message("Using RDP audio socket %s.", rdp_audio_socket_path);
 
 	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
 	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {
@@ -393,6 +408,10 @@ int main(int argc, char *argv[])
 	rf_remote_server_set_rdp_clipboard_socket_path(
 		this->remote,
 		rdp_clipboard_socket_path
+	);
+	rf_remote_server_set_rdp_audio_socket_path(
+		this->remote,
+		rdp_audio_socket_path
 	);
 
 	this->converter = rf_converter_new(this->config);
