@@ -81,6 +81,15 @@ test_rdp_clipboard_stream = executable(
 )
 test('rdp-clipboard-stream', test_rdp_clipboard_stream)
 
+test_rdp_audio_stream = executable(
+  'test-rdp-audio-stream',
+  '../tests/test-rdp-audio-stream.c',
+  'rf-rdp-audio-stream.c',
+  dependencies: [gio, reframe_common_dep],
+  include_directories: include_directories
+)
+test('rdp-audio-stream', test_rdp_audio_stream)
+
 test_rdp_clipboard_provider = executable(
   'test-rdp-clipboard-provider',
   '../tests/test-rdp-clipboard-provider.c',
