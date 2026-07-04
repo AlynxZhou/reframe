@@ -725,3 +725,26 @@ unsigned int rf_config_get_rdp_audio_frame_ms(RfConfig *this)
 	}
 	return (unsigned int)frame_ms;
 }
+
+char *rf_config_get_rdp_audio_codec(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	g_autoptr(GError) error = NULL;
+	char *codec = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_RDP, "audio-codec", &error
+	);
+	if (error != NULL || codec == NULL) {
+		g_clear_pointer(&codec, g_free);
+		return g_strdup("auto");
+	}
+	g_strstrip(codec);
+	if (g_strcmp0(codec, "auto") == 0 ||
+	    g_strcmp0(codec, "pcm") == 0 ||
+	    g_strcmp0(codec, "adpcm") == 0)
+		return codec;
+
+	g_warning("RDP: Invalid audio-codec '%s', using auto.", codec);
+	g_clear_pointer(&codec, g_free);
+	return g_strdup("auto");
+}

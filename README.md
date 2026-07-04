@@ -306,6 +306,7 @@ audio=true
 audio-sample-rate=48000
 audio-channels=2
 audio-frame-ms=20
+audio-codec=auto
 ```
 
 RDP requires TLS credentials. ReFrame does not generate them automatically; for local testing you can create a self-signed certificate:
@@ -334,7 +335,7 @@ For clipboard sync, add your desktop user to the `reframe` group, then log out a
 
 The RDP clipboard helper is installed as an XDG autostart entry and supports text, HTML, and common image formats. Wayland clipboard image sync needs a running user session and a working Wayland clipboard provider.
 
-For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`.
+For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`. The RDP server then sends `rdpsnd` audio as IMA/DVI ADPCM when the client supports it, with PCM as the compatibility fallback. Set `audio-codec=pcm` to force the old uncompressed path, or `audio-codec=adpcm` to prefer ADPCM explicitly.
 
 If you need to start it manually:
 

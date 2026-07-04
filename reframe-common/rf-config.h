@@ -59,6 +59,7 @@ bool rf_config_get_rdp_audio(RfConfig *this);
 unsigned int rf_config_get_rdp_audio_sample_rate(RfConfig *this);
 unsigned int rf_config_get_rdp_audio_channels(RfConfig *this);
 unsigned int rf_config_get_rdp_audio_frame_ms(RfConfig *this);
+char *rf_config_get_rdp_audio_codec(RfConfig *this);
 
 G_END_DECLS
 

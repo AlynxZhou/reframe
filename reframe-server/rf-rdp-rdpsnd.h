@@ -17,10 +17,12 @@
 #define RF_RDP_RDPSND_SNDC_WAVE2 0x0du
 
 #define RF_RDP_RDPSND_WAVE_FORMAT_PCM 0x0001u
+#define RF_RDP_RDPSND_WAVE_FORMAT_DVI_ADPCM 0x0011u
 #define RF_RDP_RDPSND_CHANNEL_VERSION_WIN_7 6u
 #define RF_RDP_RDPSND_CHANNEL_VERSION_WIN_MAX 8u
 #define RF_RDP_RDPSND_QUALITY_MODE_DYNAMIC 2u
 #define RF_RDP_RDPSND_MAX_FORMATS 16u
+#define RF_RDP_RDPSND_MAX_FORMAT_EXTRA 16u
 #define RF_RDP_RDPSND_WAVE_INFO_LENGTH 16u
 
 struct rf_rdp_rdpsnd_audio_format {
@@ -30,6 +32,8 @@ struct rf_rdp_rdpsnd_audio_format {
 	uint32_t avg_bytes_per_sec;
 	uint16_t block_align;
 	uint16_t bits_per_sample;
+	uint16_t extra_size;
+	uint8_t extra[RF_RDP_RDPSND_MAX_FORMAT_EXTRA];
 };
 
 struct rf_rdp_rdpsnd_client_formats {
@@ -39,6 +43,15 @@ struct rf_rdp_rdpsnd_client_formats {
 	uint16_t version;
 };
 
+struct rf_rdp_rdpsnd_audio_format rf_rdp_rdpsnd_make_dvi_adpcm_format(
+	uint32_t sample_rate,
+	uint16_t channels,
+	uint16_t samples_per_block
+);
+uint16_t rf_rdp_rdpsnd_dvi_adpcm_samples_per_block(
+	uint32_t sample_rate,
+	uint16_t frame_ms
+);
 size_t rf_rdp_rdpsnd_write_server_formats(
 	uint8_t *data,
 	size_t capacity,
@@ -55,6 +68,19 @@ int rf_rdp_rdpsnd_choose_pcm_format(
 	const struct rf_rdp_rdpsnd_client_formats *formats,
 	uint32_t preferred_rate,
 	uint16_t preferred_channels
+);
+int rf_rdp_rdpsnd_choose_audio_format(
+	const struct rf_rdp_rdpsnd_client_formats *formats,
+	uint32_t preferred_rate,
+	uint16_t preferred_channels,
+	bool prefer_adpcm
+);
+size_t rf_rdp_rdpsnd_encode_dvi_adpcm(
+	uint8_t *dst,
+	size_t dst_capacity,
+	const uint8_t *pcm,
+	size_t pcm_length,
+	const struct rf_rdp_rdpsnd_audio_format *format
 );
 size_t rf_rdp_rdpsnd_write_quality_mode(uint8_t *data, size_t capacity);
 size_t rf_rdp_rdpsnd_write_training(
