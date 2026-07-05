@@ -36,6 +36,20 @@ void rf_map_point_from_viewport(
 	double *out_ry
 );
 
+int rf_map_point_to_absolute(
+	double rx,
+	double ry,
+	unsigned int surface_width,
+	unsigned int surface_height,
+	unsigned int desktop_width,
+	unsigned int desktop_height,
+	int monitor_x,
+	int monitor_y,
+	unsigned int abs_max,
+	int *abs_x,
+	int *abs_y
+);
+
 static void test_unknown_aspect_uses_requested_size(void)
 {
 	unsigned int width = 0;
@@ -118,6 +132,50 @@ static void test_viewport_point_mapping_removes_letterbox_bars(void)
 	assert(ry > 0.499 && ry < 0.501);
 }
 
+static void test_absolute_mapping_uses_remote_surface_size(void)
+{
+	int abs_x = 0;
+	int abs_y = 0;
+
+	assert(rf_map_point_to_absolute(
+		1560.0 / 2560.0,
+		28.0 / 1440.0,
+		2560,
+		1440,
+		4266,
+		1440,
+		0,
+		0,
+		32767,
+		&abs_x,
+		&abs_y
+	) == 0);
+	assert(abs_x > 11980 && abs_x < 11990);
+	assert(abs_y > 635 && abs_y < 645);
+}
+
+static void test_absolute_mapping_falls_back_to_surface_desktop(void)
+{
+	int abs_x = 0;
+	int abs_y = 0;
+
+	assert(rf_map_point_to_absolute(
+		0.5,
+		0.5,
+		2560,
+		1440,
+		0,
+		0,
+		0,
+		0,
+		32767,
+		&abs_x,
+		&abs_y
+	) == 0);
+	assert(abs_x > 16380 && abs_x < 16390);
+	assert(abs_y > 16380 && abs_y < 16390);
+}
+
 static void test_default_size_does_not_override_client_size(void)
 {
 	unsigned int width = 1024;
@@ -146,6 +204,8 @@ int main(void)
 	test_reference_aspect_uses_requested_size_without_reference();
 	test_reference_aspect_centers_viewport_inside_canvas();
 	test_viewport_point_mapping_removes_letterbox_bars();
+	test_absolute_mapping_uses_remote_surface_size();
+	test_absolute_mapping_falls_back_to_surface_desktop();
 	test_default_size_does_not_override_client_size();
 	test_default_size_initializes_unset_size();
 	return 0;

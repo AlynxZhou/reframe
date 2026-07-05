@@ -43,6 +43,20 @@ void rf_map_point_from_viewport(
 	double *out_ry
 );
 
+int rf_map_point_to_absolute(
+	double rx,
+	double ry,
+	unsigned int surface_width,
+	unsigned int surface_height,
+	unsigned int desktop_width,
+	unsigned int desktop_height,
+	int monitor_x,
+	int monitor_y,
+	unsigned int abs_max,
+	int *abs_x,
+	int *abs_y
+);
+
 void rf_apply_default_size_if_unset(
 	unsigned int default_width,
 	unsigned int default_height,

@@ -726,6 +726,23 @@ unsigned int rf_config_get_rdp_audio_frame_ms(RfConfig *this)
 	return (unsigned int)frame_ms;
 }
 
+unsigned int rf_config_get_rdp_audio_volume(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), 100);
+
+	g_autoptr(GError) error = NULL;
+	const int volume = g_key_file_get_integer(
+		this->f, RF_CONFIG_GROUP_RDP, "audio-volume", &error
+	);
+	if (error != NULL)
+		return 100;
+	if (volume < 0 || volume > 100) {
+		g_warning("RDP: Invalid audio-volume %d, using 100.", volume);
+		return 100;
+	}
+	return (unsigned int)volume;
+}
+
 char *rf_config_get_rdp_audio_codec(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
@@ -741,7 +758,8 @@ char *rf_config_get_rdp_audio_codec(RfConfig *this)
 	g_strstrip(codec);
 	if (g_strcmp0(codec, "auto") == 0 ||
 	    g_strcmp0(codec, "pcm") == 0 ||
-	    g_strcmp0(codec, "adpcm") == 0)
+	    g_strcmp0(codec, "adpcm") == 0 ||
+	    g_strcmp0(codec, "opus") == 0)
 		return codec;
 
 	g_warning("RDP: Invalid audio-codec '%s', using auto.", codec);

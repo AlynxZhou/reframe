@@ -142,6 +142,9 @@ struct _RfRDPServer {
 	unsigned int audio_sample_rate;
 	unsigned int audio_channels;
 	unsigned int audio_frame_ms;
+	unsigned int audio_volume;
+	uint16_t audio_dynamic_volume_left;
+	uint16_t audio_dynamic_volume_right;
 	uint64_t rdpgfx_target_bytes_per_second;
 	uint64_t audio_sequence;
 	uint64_t audio_queue_dropped;
@@ -157,6 +160,7 @@ struct _RfRDPServer {
 	bool clipboard;
 	bool audio;
 	bool audio_silence_suppressed;
+	bool audio_dynamic_volume_valid;
 	bool running;
 };
 G_DEFINE_TYPE(RfRDPServer, rf_rdp_server, RF_TYPE_REMOTE_SERVER)
@@ -210,6 +214,7 @@ struct client {
 	RfRdpAv1Encoder *av1;
 	RfRdpAvcEncoder *avc;
 	RfRdpAvcEncoder *avc_chroma;
+	RfRdpRdpsndOpusEncoder *rdpsnd_opus;
 	struct rf_rdp_cliprdr_channel_reassembler cliprdr_channel_reassembler;
 	int64_t av1_bit_rate;
 	int64_t avc_bit_rate;
@@ -462,6 +467,7 @@ static void client_free(struct client *client)
 	g_clear_object(&client->stream);
 	g_clear_object(&client->connection);
 	client_reset_avc(client);
+	rf_rdp_rdpsnd_opus_encoder_free(client->rdpsnd_opus);
 	rf_rdp_nsc_context_free(client->nsc);
 	rf_rdp_rfx_context_free(client->rfx);
 	rf_rdp_cliprdr_channel_reassembler_clear(
@@ -1209,6 +1215,51 @@ static bool send_rdpsnd_payload(
 	);
 }
 
+static uint16_t rdpsnd_percent_to_volume16(unsigned int percent)
+{
+	percent = MIN(percent, 100u);
+	return (uint16_t)((percent * 0xffffu + 50u) / 100u);
+}
+
+static bool send_rdpsnd_volume_values(
+	struct client *client,
+	uint16_t left,
+	uint16_t right
+)
+{
+	uint8_t pdu[8] = { 0 };
+	const size_t length = rf_rdp_rdpsnd_write_set_volume(
+		pdu,
+		sizeof(pdu),
+		left,
+		right
+	);
+
+	if (length == 0 || !send_rdpsnd_payload(client, pdu, length)) {
+		g_warning("RDP: Failed to send rdpsnd client volume.");
+		return false;
+	}
+	g_message(
+		"RDP: rdpsnd set client volume left=0x%04x right=0x%04x.",
+		left,
+		right
+	);
+	return true;
+}
+
+static bool send_rdpsnd_volume(struct client *client)
+{
+	uint16_t volume = rdpsnd_percent_to_volume16(client->server->audio_volume);
+
+	if (client->server->audio_dynamic_volume_valid)
+		return send_rdpsnd_volume_values(
+			client,
+			client->server->audio_dynamic_volume_left,
+			client->server->audio_dynamic_volume_right
+		);
+	return send_rdpsnd_volume_values(client, volume, volume);
+}
+
 static bool send_cliprdr_payload(
 	struct client *client,
 	const uint8_t *payload,
@@ -1786,7 +1837,9 @@ static struct rf_rdp_rdpsnd_audio_format rdpsnd_pcm_format(
 
 static bool rdp_audio_prefers_adpcm(const RfRDPServer *this)
 {
-	return this != NULL && g_strcmp0(this->audio_codec, "pcm") != 0;
+	return this != NULL &&
+	       (g_strcmp0(this->audio_codec, "auto") == 0 ||
+		g_strcmp0(this->audio_codec, "adpcm") == 0);
 }
 
 static bool rdp_audio_advertises_adpcm(const RfRDPServer *this)
@@ -1794,6 +1847,25 @@ static bool rdp_audio_advertises_adpcm(const RfRDPServer *this)
 	return this != NULL &&
 	       (g_strcmp0(this->audio_codec, "auto") == 0 ||
 		g_strcmp0(this->audio_codec, "adpcm") == 0);
+}
+
+static bool rdp_audio_prefers_opus(const RfRDPServer *this)
+{
+	return this != NULL &&
+	       (g_strcmp0(this->audio_codec, "auto") == 0 ||
+		g_strcmp0(this->audio_codec, "opus") == 0);
+}
+
+static bool rdp_audio_advertises_opus(const RfRDPServer *this)
+{
+#ifdef RF_HAVE_RDP_OPUS
+	return this != NULL &&
+	       (g_strcmp0(this->audio_codec, "auto") == 0 ||
+		g_strcmp0(this->audio_codec, "opus") == 0);
+#else
+	(void)this;
+	return false;
+#endif
 }
 
 static char *rdpsnd_format_array_summary(
@@ -1841,7 +1913,7 @@ static bool start_rdpsnd(struct client *client)
 {
 	RfRDPServer *this = client->server;
 	uint8_t pdu[256] = { 0 };
-	struct rf_rdp_rdpsnd_audio_format formats[4] = { 0 };
+	struct rf_rdp_rdpsnd_audio_format formats[5] = { 0 };
 	g_autofree char *summary = NULL;
 	size_t format_count = 0;
 	size_t length = 0;
@@ -1853,6 +1925,12 @@ static bool start_rdpsnd(struct client *client)
 		return false;
 	}
 
+	if (rdp_audio_advertises_opus(this))
+		formats[format_count++] = rf_rdp_rdpsnd_make_opus_format(
+			this->audio_sample_rate,
+			this->audio_channels,
+			16000
+		);
 	if (rdp_audio_advertises_adpcm(this))
 		formats[format_count++] =
 			rf_rdp_rdpsnd_make_dvi_adpcm_format(
@@ -1927,6 +2005,30 @@ static bool send_rdpsnd_audio(
 		payload_length = rf_rdp_rdpsnd_encode_dvi_adpcm(
 			encoded,
 			format->block_align,
+			pcm,
+			pcm_length,
+			format
+		);
+		if (payload_length == 0)
+			return false;
+		payload = encoded;
+	}
+	if (format->tag == RF_RDP_RDPSND_WAVE_FORMAT_OPUS) {
+		if (!use_wave2)
+			return false;
+		if (client->rdpsnd_opus == NULL)
+			client->rdpsnd_opus = rf_rdp_rdpsnd_opus_encoder_new(
+				format->samples_per_sec,
+				format->channels,
+				format->avg_bytes_per_sec
+			);
+		if (client->rdpsnd_opus == NULL)
+			return false;
+		encoded = g_malloc0(4096);
+		payload_length = rf_rdp_rdpsnd_opus_encode(
+			client->rdpsnd_opus,
+			encoded,
+			4096,
 			pcm,
 			pcm_length,
 			format
@@ -2040,6 +2142,9 @@ static bool audio_frame_can_encode_client_format(
 		       header->channels == format->channels &&
 		       format->bits_per_sample == 4 &&
 		       format->block_align > 0;
+	if (format->tag == RF_RDP_RDPSND_WAVE_FORMAT_OPUS)
+		return header->sample_rate == format->samples_per_sec &&
+		       header->channels == format->channels;
 	return false;
 }
 
@@ -3728,10 +3833,17 @@ static void handle_rdpsnd_client_formats(
 	}
 
 	client->rdpsnd_client_formats_received = true;
-	client->rdpsnd_selected_format = rf_rdp_rdpsnd_choose_audio_format(
+	g_clear_pointer(
+		&client->rdpsnd_opus,
+		rf_rdp_rdpsnd_opus_encoder_free
+	);
+	client->rdpsnd_selected_format = rf_rdp_rdpsnd_choose_audio_format_preferred(
 		&client->rdpsnd_client_formats,
 		client->server->audio_sample_rate,
 		client->server->audio_channels,
+		rdp_audio_prefers_opus(client->server) &&
+			client->rdpsnd_client_formats.version >=
+				RF_RDP_RDPSND_CHANNEL_VERSION_WIN_MAX,
 		rdp_audio_prefers_adpcm(client->server)
 	);
 	set_rdpsnd_ready(
@@ -3774,6 +3886,7 @@ static void set_rdpsnd_ready(struct client *client, bool ready, const char *reas
 			"RDP: rdpsnd ready via %s; cleared queued audio for fresh startup.",
 			reason
 		);
+		send_rdpsnd_volume(client);
 	}
 }
 
@@ -6217,6 +6330,38 @@ static void *audio_sender_thread(void *data)
 	return NULL;
 }
 
+static void handle_audio_volume_message(
+	RfRDPServer *this,
+	const struct rf_rdp_audio_volume *volume
+)
+{
+	g_autoptr(GPtrArray) clients = NULL;
+
+	if (this == NULL || volume == NULL)
+		return;
+
+	this->audio_dynamic_volume_left = volume->left;
+	this->audio_dynamic_volume_right = volume->right;
+	this->audio_dynamic_volume_valid = true;
+
+	clients = g_ptr_array_new_with_free_func((GDestroyNotify)client_unref);
+	g_mutex_lock(&this->lock);
+	for (GList *l = this->clients; l != NULL; l = l->next) {
+		struct client *client = l->data;
+
+		if (!client->rdpsnd_ready)
+			continue;
+		g_ptr_array_add(clients, client_ref(client));
+	}
+	g_mutex_unlock(&this->lock);
+
+	for (guint i = 0; i < clients->len; ++i) {
+		struct client *client = g_ptr_array_index(clients, i);
+
+		send_rdpsnd_volume_values(client, volume->left, volume->right);
+	}
+}
+
 static void *audio_connection_thread(void *data)
 {
 	struct audio_connection *connection = data;
@@ -6226,11 +6371,21 @@ static void *audio_connection_thread(void *data)
 	unsigned int frames = 0;
 
 	while (this->running) {
+		enum rf_rdp_audio_stream_message_type message_type =
+			RF_RDP_AUDIO_STREAM_MESSAGE_PCM;
 		struct rf_rdp_audio_pcm_header header = { 0 };
+		struct rf_rdp_audio_volume volume = { 0 };
 		g_autoptr(GByteArray) pcm = NULL;
 		g_autoptr(GError) error = NULL;
 
-		if (!rf_rdp_audio_stream_read_pcm(input, &header, &pcm, &error)) {
+		if (!rf_rdp_audio_stream_read_message(
+			    input,
+			    &message_type,
+			    &header,
+			    &volume,
+			    &pcm,
+			    &error
+		    )) {
 			if (error != NULL)
 				g_message("RDP: Audio helper disconnected: %s.",
 					error->message);
@@ -6238,6 +6393,10 @@ static void *audio_connection_thread(void *data)
 		}
 		if (!this->running)
 			break;
+		if (message_type == RF_RDP_AUDIO_STREAM_MESSAGE_VOLUME) {
+			handle_audio_volume_message(this, &volume);
+			continue;
+		}
 		queue_audio_frame(this, &header, pcm);
 		frames++;
 		if (frames == 1)
@@ -7051,6 +7210,7 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 	this->audio_sample_rate = rf_config_get_rdp_audio_sample_rate(config);
 	this->audio_channels = rf_config_get_rdp_audio_channels(config);
 	this->audio_frame_ms = rf_config_get_rdp_audio_frame_ms(config);
+	this->audio_volume = rf_config_get_rdp_audio_volume(config);
 	g_free(this->audio_codec);
 	this->audio_codec = rf_config_get_rdp_audio_codec(config);
 	this->max_fps = rf_config_get_fps(config);
@@ -7092,12 +7252,13 @@ G_MODULE_EXPORT RfRemoteServer *rf_rdp_server_new(RfConfig *config)
 			this->rdpgfx_target_bandwidth_mbps
 		);
 	g_message(
-		"RDP: Audio is %s, preferred format is %u Hz/%u channel(s)/16-bit, frame-ms=%u, codec=%s.",
+		"RDP: Audio is %s, preferred format is %u Hz/%u channel(s)/16-bit, frame-ms=%u, codec=%s, volume=%u%%.",
 		this->audio ? "enabled" : "disabled",
 		this->audio_sample_rate,
 		this->audio_channels,
 		this->audio_frame_ms,
-		this->audio_codec
+		this->audio_codec,
+		this->audio_volume
 	);
 	return RF_REMOTE_SERVER(this);
 }

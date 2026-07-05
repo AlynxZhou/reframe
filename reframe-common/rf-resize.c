@@ -119,6 +119,46 @@ void rf_map_point_from_viewport(
 	*out_ry = clamp_unit((y - viewport->y) / viewport->h);
 }
 
+int rf_map_point_to_absolute(
+	double rx,
+	double ry,
+	unsigned int surface_width,
+	unsigned int surface_height,
+	unsigned int desktop_width,
+	unsigned int desktop_height,
+	int monitor_x,
+	int monitor_y,
+	unsigned int abs_max,
+	int *abs_x,
+	int *abs_y
+)
+{
+	if (abs_x == 0 || abs_y == 0 || surface_width == 0 ||
+	    surface_height == 0 || abs_max == 0)
+		return -1;
+
+	const double effective_desktop_width =
+		desktop_width > 0 ? desktop_width :
+				    (double)monitor_x + surface_width;
+	const double effective_desktop_height =
+		desktop_height > 0 ? desktop_height :
+				     (double)monitor_y + surface_height;
+	if (effective_desktop_width <= 0.0 || effective_desktop_height <= 0.0)
+		return -1;
+
+	const double x = clamp_unit(
+		((double)monitor_x + clamp_unit(rx) * surface_width) /
+		effective_desktop_width
+	);
+	const double y = clamp_unit(
+		((double)monitor_y + clamp_unit(ry) * surface_height) /
+		effective_desktop_height
+	);
+	*abs_x = abs_max * x;
+	*abs_y = abs_max * y;
+	return 0;
+}
+
 void rf_apply_default_size_if_unset(
 	unsigned int default_width,
 	unsigned int default_height,

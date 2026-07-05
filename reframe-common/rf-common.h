@@ -30,6 +30,8 @@ G_BEGIN_DECLS
 #define RF_MSG_TYPE_CLIPBOARD_TEXT 'T'
 #define RF_MSG_TYPE_RDP_CLIPBOARD_RICH 'R'
 #define RF_MSG_TYPE_RDP_AUDIO_PCM 'U'
+#define RF_MSG_TYPE_RDP_AUDIO_VOLUME 'V'
+#define RF_MSG_TYPE_DESKTOP_LAYOUT 'L'
 #define RF_MSG_TYPE_AUTH 'A'
 
 #define RF_KEYBOARD_MAX 256
@@ -82,6 +84,13 @@ struct rf_rect {
 struct rf_auth {
 	pid_t pid;
 	bool ok;
+};
+
+struct rf_desktop_layout {
+	unsigned int desktop_width;
+	unsigned int desktop_height;
+	int monitor_x;
+	int monitor_y;
 };
 
 void rf_buffer_debug(struct rf_buffer *b);

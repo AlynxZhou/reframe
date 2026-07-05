@@ -45,6 +45,19 @@ static struct rf_rdp_rdpsnd_audio_format dvi_adpcm_format(
 	);
 }
 
+static struct rf_rdp_rdpsnd_audio_format opus_format(
+	uint32_t sample_rate,
+	uint16_t channels,
+	uint32_t avg_bytes_per_sec
+)
+{
+	return rf_rdp_rdpsnd_make_opus_format(
+		sample_rate,
+		channels,
+		avg_bytes_per_sec
+	);
+}
+
 static void test_server_formats_pcm_48k_stereo(void)
 {
 	uint8_t out[256] = { 0 };
@@ -90,7 +103,36 @@ static void test_audio_format_names(void)
 		       ),
 		       "DVI ADPCM"
 	       ) == 0);
+	assert(strcmp(
+		       rf_rdp_rdpsnd_format_name(RF_RDP_RDPSND_WAVE_FORMAT_OPUS),
+		       "Opus"
+	       ) == 0);
 	assert(strcmp(rf_rdp_rdpsnd_format_name(0xffff), "unknown") == 0);
+}
+
+static void test_server_formats_opus(void)
+{
+	uint8_t out[256] = { 0 };
+	const struct rf_rdp_rdpsnd_audio_format format =
+		opus_format(48000, 2, 16000);
+	const size_t length = rf_rdp_rdpsnd_write_server_formats(
+		out,
+		sizeof(out),
+		&format,
+		1,
+		0
+	);
+
+	assert(length == 42);
+	assert(out[0] == RF_RDP_RDPSND_SNDC_FORMATS);
+	assert(read_u16_le(out + 2) == 38);
+	assert(read_u16_le(out + 24) == RF_RDP_RDPSND_WAVE_FORMAT_OPUS);
+	assert(read_u16_le(out + 26) == 2);
+	assert(read_u32_le(out + 28) == 48000);
+	assert(read_u32_le(out + 32) == 16000);
+	assert(read_u16_le(out + 36) == 1);
+	assert(read_u16_le(out + 38) == 16);
+	assert(read_u16_le(out + 40) == 0);
 }
 
 static void test_server_formats_dvi_adpcm_extra(void)
@@ -196,6 +238,34 @@ static void test_choose_prefers_dvi_adpcm_when_allowed(void)
 	assert(rf_rdp_rdpsnd_choose_audio_format(&formats, 48000, 2, false) == 0);
 }
 
+static void test_choose_prefers_opus_then_dvi_adpcm(void)
+{
+	const struct rf_rdp_rdpsnd_client_formats formats = {
+		.formats = {
+			pcm_format(48000, 2),
+			dvi_adpcm_format(48000, 2, 960),
+			opus_format(48000, 2, 16000)
+		},
+		.format_count = 3
+	};
+
+	assert(rf_rdp_rdpsnd_choose_opus_format(&formats, 48000, 2) == 2);
+	assert(rf_rdp_rdpsnd_choose_audio_format_preferred(
+		       &formats,
+		       48000,
+		       2,
+		       true,
+		       true
+	       ) == 2);
+	assert(rf_rdp_rdpsnd_choose_audio_format_preferred(
+		       &formats,
+		       48000,
+		       2,
+		       false,
+		       true
+	       ) == 1);
+}
+
 static void test_choose_falls_back_to_44100(void)
 {
 	const struct rf_rdp_rdpsnd_client_formats formats = {
@@ -249,6 +319,49 @@ static void test_quality_mode_packet(void)
 	assert(read_u16_le(out + 2) == 4);
 	assert(read_u16_le(out + 4) == RF_RDP_RDPSND_QUALITY_MODE_DYNAMIC);
 	assert(read_u16_le(out + 6) == 0);
+}
+
+static void test_set_volume_packet(void)
+{
+	uint8_t out[16] = { 0 };
+	const size_t length = rf_rdp_rdpsnd_write_set_volume(
+		out,
+		sizeof(out),
+		0x1234,
+		0xabcd
+	);
+
+	assert(length == 8);
+	assert(out[0] == RF_RDP_RDPSND_SNDC_SETVOLUME);
+	assert(out[1] == 0);
+	assert(read_u16_le(out + 2) == 4);
+	assert(read_u16_le(out + 4) == 0x1234);
+	assert(read_u16_le(out + 6) == 0xabcd);
+}
+
+static void test_opus_encode_silent_frame(void)
+{
+#ifdef RF_HAVE_RDP_OPUS
+	uint8_t out[4096] = { 0 };
+	uint8_t pcm[3840] = { 0 };
+	const struct rf_rdp_rdpsnd_audio_format format =
+		opus_format(48000, 2, 16000);
+	RfRdpRdpsndOpusEncoder *encoder =
+		rf_rdp_rdpsnd_opus_encoder_new(48000, 2, 16000);
+	const size_t length = rf_rdp_rdpsnd_opus_encode(
+		encoder,
+		out,
+		sizeof(out),
+		pcm,
+		sizeof(pcm),
+		&format
+	);
+
+	assert(encoder != NULL);
+	assert(length > 0);
+	assert(length < sizeof(pcm));
+	rf_rdp_rdpsnd_opus_encoder_free(encoder);
+#endif
 }
 
 static void test_training_packet_and_parse_confirm(void)
@@ -392,13 +505,17 @@ int main(void)
 {
 	test_server_formats_pcm_48k_stereo();
 	test_audio_format_names();
+	test_server_formats_opus();
 	test_server_formats_dvi_adpcm_extra();
 	test_parse_client_formats();
 	test_choose_client_pcm_format();
 	test_choose_prefers_dvi_adpcm_when_allowed();
+	test_choose_prefers_opus_then_dvi_adpcm();
 	test_choose_falls_back_to_44100();
 	test_dvi_adpcm_encode_silent_mono_block();
 	test_quality_mode_packet();
+	test_set_volume_packet();
+	test_opus_encode_silent_frame();
 	test_training_packet_and_parse_confirm();
 	test_wave_info_and_data_layout();
 	test_wave_packet_layout();

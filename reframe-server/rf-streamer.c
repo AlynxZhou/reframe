@@ -6,6 +6,7 @@
 #include <linux/uinput.h>
 
 #include "rf-common.h"
+#include "rf-resize.h"
 #include "rf-streamer.h"
 
 #define KEYBOARD_MAX_EVENTS 2
@@ -29,6 +30,7 @@ struct _RfStreamer {
 	unsigned int desktop_height;
 	int monitor_x;
 	int monitor_y;
+	bool auto_desktop_layout;
 	unsigned int rotation;
 	// These are the real size of monitor and have nothing with VNC.
 	uint32_t frame_width;
@@ -418,6 +420,52 @@ out:
 	return ret;
 }
 
+static ssize_t on_desktop_layout_msg(RfStreamer *this)
+{
+	struct rf_desktop_layout layout = { 0 };
+	size_t length = 0;
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	GInputStream *is =
+		g_io_stream_get_input_stream(G_IO_STREAM(this->connection));
+
+	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
+	if (ret <= 0 || length != 1)
+		goto out;
+
+	ret = g_input_stream_read(is, &layout, sizeof(layout), NULL, &error);
+	if (ret <= 0)
+		goto out;
+	if (layout.desktop_width == 0 || layout.desktop_height == 0)
+		goto out;
+
+	if (this->auto_desktop_layout) {
+		this->desktop_width = layout.desktop_width;
+		this->desktop_height = layout.desktop_height;
+		this->monitor_x = layout.monitor_x;
+		this->monitor_y = layout.monitor_y;
+		g_message(
+			"Input: Auto desktop layout %ux%u, monitor %d,%d.",
+			this->desktop_width,
+			this->desktop_height,
+			this->monitor_x,
+			this->monitor_y
+		);
+	} else {
+		g_debug(
+			"Input: Ignoring auto desktop layout because explicit input geometry is configured."
+		);
+	}
+
+out:
+	if (ret < 0)
+		g_warning(
+			"Input: Failed to receive desktop layout: %s.",
+			error->message
+		);
+	return ret;
+}
+
 static ssize_t on_auth_msg(RfStreamer *this)
 {
 	struct rf_auth auth;
@@ -480,6 +528,9 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 		break;
 	case RF_MSG_TYPE_CONNECTOR_NAME:
 		ret = on_connector_name_msg(this);
+		break;
+	case RF_MSG_TYPE_DESKTOP_LAYOUT:
+		ret = on_desktop_layout_msg(this);
 		break;
 	case RF_MSG_TYPE_AUTH:
 		ret = on_auth_msg(this);
@@ -599,6 +650,7 @@ static void rf_streamer_init(RfStreamer *this)
 	this->desktop_height = 0;
 	this->monitor_x = 0;
 	this->monitor_y = 0;
+	this->auto_desktop_layout = false;
 	this->rotation = 0;
 	this->frame_width = 0;
 	this->frame_height = 0;
@@ -646,6 +698,9 @@ int rf_streamer_start(RfStreamer *this)
 	);
 	this->monitor_x = rf_config_get_monitor_x(this->config);
 	this->monitor_y = rf_config_get_monitor_y(this->config);
+	this->auto_desktop_layout =
+		this->desktop_width == 0 && this->desktop_height == 0 &&
+		this->monitor_x == 0 && this->monitor_y == 0;
 	g_message(
 		"Input: Got monitor x %u and y %u.",
 		this->monitor_x,
@@ -761,6 +816,8 @@ void rf_streamer_send_pointer_event(
 	RfStreamer *this,
 	double rx,
 	double ry,
+	unsigned int surface_width,
+	unsigned int surface_height,
 	bool left,
 	bool middle,
 	bool right,
@@ -777,24 +834,31 @@ void rf_streamer_send_pointer_event(
 	if (!this->running)
 		return;
 
-	// Assuming user only have 1 monitor when they set desktop size to 0x0.
-	const uint32_t desktop_width =
-		this->desktop_width > 0 ? this->desktop_width :
-					  this->monitor_x + this->frame_width;
-	const uint32_t desktop_height =
-		this->desktop_height > 0 ? this->desktop_height :
-					   this->monitor_y + this->frame_height;
-	// This may happen if we are still not getting the first frame.
-	if (desktop_width == 0 || desktop_height == 0)
+	// Input coordinates are relative to the remote surface, which can differ
+	// from the physical DRM CRTC size on scaled outputs.
+	if (surface_width == 0)
+		surface_width = this->frame_width;
+	if (surface_height == 0)
+		surface_height = this->frame_height;
+	int abs_x = 0;
+	int abs_y = 0;
+	if (rf_map_point_to_absolute(
+		    rx,
+		    ry,
+		    surface_width,
+		    surface_height,
+		    this->desktop_width,
+		    this->desktop_height,
+		    this->monitor_x,
+		    this->monitor_y,
+		    RF_POINTER_MAX,
+		    &abs_x,
+		    &abs_y
+	    ) < 0)
 		return;
-	// Typically desktop environment will map uinput `EV_ABS` max size to
-	// the whole virtual desktop, so we need to convert the position to
-	// global position in the virtual desktop.
-	const double x =
-		(this->monitor_x + rx * this->frame_width) / desktop_width;
-	const double y =
-		(this->monitor_y + ry * this->frame_height) / desktop_height;
-	g_debug("Input: Calculated global position x %f and y %f.", x, y);
+	g_debug("Input: Calculated absolute pointer position x %d and y %d.",
+		abs_x,
+		abs_y);
 
 	size_t length = 0;
 	struct input_event ies[POINTER_MAX_EVENTS];
@@ -802,12 +866,12 @@ void rf_streamer_send_pointer_event(
 
 	ies[length].type = EV_ABS;
 	ies[length].code = ABS_X;
-	ies[length].value = RF_POINTER_MAX * x;
+	ies[length].value = abs_x;
 	++length;
 
 	ies[length].type = EV_ABS;
 	ies[length].code = ABS_Y;
-	ies[length].value = RF_POINTER_MAX * y;
+	ies[length].value = abs_y;
 	++length;
 
 	ies[length].type = EV_KEY;

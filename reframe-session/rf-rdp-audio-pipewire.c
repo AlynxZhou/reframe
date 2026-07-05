@@ -29,7 +29,12 @@ struct audio_capture {
 	unsigned int frame_ms;
 	size_t frame_bytes;
 	unsigned int reconnect_delay_ms;
+	int64_t last_volume_probe_us;
+	uint16_t volume_left;
+	uint16_t volume_right;
 	uint64_t frames_sent;
+	bool volume_probe_failed_logged;
+	bool volume_sent;
 };
 
 static void disconnect_socket(struct audio_capture *capture)
@@ -65,6 +70,7 @@ static bool connect_socket(struct audio_capture *capture)
 	capture->output =
 		g_io_stream_get_output_stream(G_IO_STREAM(capture->connection));
 	capture->reconnect_delay_ms = RF_RDP_AUDIO_RECONNECT_MIN_MS;
+	capture->volume_sent = false;
 	g_message("RDP audio: Connected to %s.", capture->socket_path);
 	return true;
 }
@@ -99,6 +105,141 @@ static bool write_audio_frame(struct audio_capture *capture)
 	return true;
 }
 
+static uint16_t percent_to_volume16(double volume)
+{
+	if (volume < 0.0)
+		volume = 0.0;
+	if (volume > 1.0)
+		volume = 1.0;
+	return (uint16_t)(volume * 65535.0 + 0.5);
+}
+
+static bool parse_wpctl_volume(
+	const char *text,
+	uint16_t *volume_left,
+	uint16_t *volume_right
+)
+{
+	char *end = NULL;
+	const char *number = NULL;
+	double volume = 0.0;
+
+	if (text == NULL || volume_left == NULL || volume_right == NULL)
+		return false;
+	if (strstr(text, "MUTED") != NULL || strstr(text, "[MUTED]") != NULL) {
+		*volume_left = 0;
+		*volume_right = 0;
+		return true;
+	}
+
+	number = strchr(text, ':');
+	if (number == NULL)
+		number = text;
+	else
+		number++;
+	while (*number == ' ' || *number == '\t')
+		number++;
+	volume = g_ascii_strtod(number, &end);
+	if (end == number)
+		return false;
+
+	*volume_left = percent_to_volume16(volume);
+	*volume_right = *volume_left;
+	return true;
+}
+
+static bool probe_default_sink_volume(
+	uint16_t *volume_left,
+	uint16_t *volume_right,
+	GError **error
+)
+{
+	g_autofree char *stdout_text = NULL;
+	g_autofree char *stderr_text = NULL;
+	char *argv[] = {
+		"wpctl",
+		"get-volume",
+		"@DEFAULT_AUDIO_SINK@",
+		NULL
+	};
+	int status = 0;
+
+	if (!g_spawn_sync(
+		    NULL,
+		    argv,
+		    NULL,
+		    G_SPAWN_SEARCH_PATH,
+		    NULL,
+		    NULL,
+		    &stdout_text,
+		    &stderr_text,
+		    &status,
+		    error
+	    ))
+		return false;
+	if (!g_spawn_check_wait_status(status, error))
+		return false;
+	return parse_wpctl_volume(stdout_text, volume_left, volume_right);
+}
+
+static bool send_volume(struct audio_capture *capture)
+{
+	g_autoptr(GError) error = NULL;
+
+	if (!rf_rdp_audio_stream_write_volume(
+		    capture->output,
+		    capture->volume_left,
+		    capture->volume_right,
+		    &error
+	    )) {
+		g_message("RDP audio: Failed to write volume frame: %s.",
+			error != NULL ? error->message : "unknown error");
+		disconnect_socket(capture);
+		return false;
+	}
+	capture->volume_sent = true;
+	return true;
+}
+
+static bool maybe_update_volume(struct audio_capture *capture)
+{
+	g_autoptr(GError) error = NULL;
+	const int64_t now = g_get_monotonic_time();
+	uint16_t volume_left = capture->volume_left;
+	uint16_t volume_right = capture->volume_right;
+	bool changed = false;
+
+	if (capture->last_volume_probe_us > 0 &&
+	    now - capture->last_volume_probe_us < 250000)
+		return !capture->volume_sent ? send_volume(capture) : true;
+	capture->last_volume_probe_us = now;
+
+	if (!probe_default_sink_volume(&volume_left, &volume_right, &error)) {
+		if (!capture->volume_probe_failed_logged) {
+			g_message(
+				"RDP audio: Failed to read PipeWire sink volume; using 100%%: %s.",
+				error != NULL ? error->message : "unknown error"
+			);
+			capture->volume_probe_failed_logged = true;
+		}
+		return !capture->volume_sent ? send_volume(capture) : true;
+	}
+	changed = volume_left != capture->volume_left ||
+		  volume_right != capture->volume_right;
+	if (changed) {
+		g_message(
+			"RDP audio: Sink volume changed left=0x%04x right=0x%04x.",
+			volume_left,
+			volume_right
+		);
+	}
+	capture->volume_left = volume_left;
+	capture->volume_right = volume_right;
+	if (!capture->volume_sent || changed)
+		return send_volume(capture);
+	return true;
+}
+
 static void maybe_send_complete_frames(struct audio_capture *capture)
 {
 	while (capture->frame->len >= capture->frame_bytes) {
@@ -112,7 +253,7 @@ static void maybe_send_complete_frames(struct audio_capture *capture)
 		}
 		if (capture->frame->len > capture->frame_bytes)
 			g_byte_array_set_size(capture->frame, capture->frame_bytes);
-		if (!write_audio_frame(capture))
+		if (!maybe_update_volume(capture) || !write_audio_frame(capture))
 			return;
 		g_byte_array_set_size(capture->frame, 0);
 	}
@@ -209,7 +350,9 @@ bool rf_rdp_audio_pipewire_run(
 		.sample_rate = sample_rate,
 		.channels = channels,
 		.frame_ms = frame_ms,
-		.reconnect_delay_ms = RF_RDP_AUDIO_RECONNECT_MIN_MS
+		.reconnect_delay_ms = RF_RDP_AUDIO_RECONNECT_MIN_MS,
+		.volume_left = 0xffff,
+		.volume_right = 0xffff
 	};
 	struct pw_stream_events stream_events = {
 		PW_VERSION_STREAM_EVENTS,

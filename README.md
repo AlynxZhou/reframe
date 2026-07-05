@@ -146,6 +146,7 @@ If you want to build the native RDP server module (`-D rdp=true`), you will also
 - libtiff
 - gdk-pixbuf
 - PipeWire (`libpipewire-0.3`) for RDP remote audio output
+- Opus (`opus`) for low-latency compressed RDP remote audio output
 - ffmpeg libraries (`libavcodec`, `libavutil`, `libswscale`) for AVC/H.264 and AV1 RDPGFX encoders
 
 ### Build
@@ -306,6 +307,7 @@ audio=true
 audio-sample-rate=48000
 audio-channels=2
 audio-frame-ms=20
+audio-volume=100
 audio-codec=auto
 ```
 
@@ -335,7 +337,7 @@ For clipboard sync, add your desktop user to the `reframe` group, then log out a
 
 The RDP clipboard helper is installed as an XDG autostart entry and supports text, HTML, and common image formats. Wayland clipboard image sync needs a running user session and a working Wayland clipboard provider.
 
-For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`. The RDP server then sends `rdpsnd` audio as IMA/DVI ADPCM when the client supports it, with PCM as the compatibility fallback. Set `audio-codec=pcm` to force the old uncompressed path, or `audio-codec=adpcm` to prefer ADPCM explicitly.
+For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`. The RDP server then sends `rdpsnd` audio as Opus when both sides support it, IMA/DVI ADPCM as the lightweight fallback, and PCM as the compatibility fallback. Set `audio-codec=pcm` to force the old uncompressed path, `audio-codec=adpcm` to prefer ADPCM explicitly, or `audio-codec=opus` to prefer Opus explicitly. Set `audio-volume=0..100` to send an RDP client playback volume when the audio channel becomes ready.
 
 If you need to start it manually:
 
@@ -349,7 +351,7 @@ $ /usr/bin/reframe-rdp-audio \
 
 ### FreeRDP Client for RDPGFX/AV1 Testing
 
-FreeRDP is a useful client for testing RDPGFX codecs. If you enable FreeRDP's experimental AV1 support, build it with libaom as well; otherwise the client may advertise AV1 but fail to decode RDPGFX AV1 frames.
+FreeRDP is a useful client for testing RDPGFX codecs. If you enable FreeRDP's experimental AV1 support, build it with libaom as well; otherwise the client may advertise AV1 but fail to decode RDPGFX AV1 frames. To receive `rdpsnd` IMA/DVI ADPCM audio, enable FreeRDP's FFmpeg DSP path and experimental DSP codecs; otherwise macOS FreeRDP will usually advertise only PCM audio.
 
 On macOS with Homebrew:
 
@@ -364,6 +366,9 @@ $ cmake -S . -B build -G Ninja \
   -DWITH_CLIENT_SDL2=OFF \
   -DWITH_CLIENT_SDL3=ON \
   -DWITH_FFMPEG=ON \
+  -DWITH_DSP_FFMPEG=ON \
+  -DWITH_DSP_EXPERIMENTAL=ON \
+  -DWITH_OPUS=ON \
   -DWITH_VIDEOTOOLBOX=ON \
   -DWITH_GFX_AV1=ON \
   -DWITH_AOM=ON
@@ -373,7 +378,7 @@ $ cmake --build build --target install --parallel
 Confirm the installed client has the expected codecs:
 
 ```
-$ /opt/homebrew/bin/sdl-freerdp /buildconfig | tr ' ' '\n' | grep -E 'WITH_AOM|WITH_GFX_AV1|WITH_VIDEOTOOLBOX|WITH_CLIENT_SDL[23]'
+$ /opt/homebrew/bin/sdl-freerdp /buildconfig | tr ' ' '\n' | grep -E 'WITH_AOM|WITH_GFX_AV1|WITH_VIDEOTOOLBOX|WITH_DSP_FFMPEG|WITH_DSP_EXPERIMENTAL|WITH_OPUS|WITH_CLIENT_SDL[23]'
 ```
 
 The output should include:
@@ -382,6 +387,9 @@ The output should include:
 WITH_AOM=ON
 WITH_GFX_AV1=ON
 WITH_VIDEOTOOLBOX=ON
+WITH_DSP_FFMPEG=ON
+WITH_DSP_EXPERIMENTAL=ON
+WITH_OPUS=ON
 WITH_CLIENT_SDL2=OFF
 WITH_CLIENT_SDL3=ON
 ```

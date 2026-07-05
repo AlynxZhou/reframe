@@ -26,6 +26,8 @@ void rf_streamer_send_pointer_event(
 	RfStreamer *this,
 	double rx,
 	double ry,
+	unsigned int surface_width,
+	unsigned int surface_height,
 	bool left,
 	bool middle,
 	bool right,

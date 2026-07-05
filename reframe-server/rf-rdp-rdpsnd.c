@@ -1,6 +1,11 @@
 #include "rf-rdp-rdpsnd.h"
 
+#include <stdlib.h>
 #include <string.h>
+
+#ifdef RF_HAVE_RDP_OPUS
+#include <opus.h>
+#endif
 
 static const int16_t ima_step_index_table[] = {
 	-1, -1, -1, -1, 2, 4, 6, 8,
@@ -30,6 +35,15 @@ static const struct {
 	{ 1, 0 }, { 5, 0 }, { 1, 4 }, { 5, 4 },
 	{ 2, 0 }, { 6, 0 }, { 2, 4 }, { 6, 4 },
 	{ 3, 0 }, { 7, 0 }, { 3, 4 }, { 7, 4 }
+};
+
+struct rf_rdp_rdpsnd_opus_encoder {
+#ifdef RF_HAVE_RDP_OPUS
+	OpusEncoder *encoder;
+#endif
+	uint32_t sample_rate;
+	uint16_t channels;
+	uint32_t avg_bytes_per_sec;
 };
 
 static uint16_t read_u16_le(const uint8_t *data)
@@ -139,6 +153,8 @@ const char *rf_rdp_rdpsnd_format_name(uint16_t tag)
 		return "PCM";
 	case RF_RDP_RDPSND_WAVE_FORMAT_DVI_ADPCM:
 		return "DVI ADPCM";
+	case RF_RDP_RDPSND_WAVE_FORMAT_OPUS:
+		return "Opus";
 	default:
 		return "unknown";
 	}
@@ -193,6 +209,27 @@ struct rf_rdp_rdpsnd_audio_format rf_rdp_rdpsnd_make_dvi_adpcm_format(
 	format.extra_size = 2;
 	write_u16_le(format.extra, samples_per_block);
 	return format;
+}
+
+struct rf_rdp_rdpsnd_audio_format rf_rdp_rdpsnd_make_opus_format(
+	uint32_t sample_rate,
+	uint16_t channels,
+	uint32_t avg_bytes_per_sec
+)
+{
+	if (channels == 0)
+		channels = 1;
+	if (avg_bytes_per_sec == 0)
+		avg_bytes_per_sec = 16000;
+
+	return (struct rf_rdp_rdpsnd_audio_format){
+		.tag = RF_RDP_RDPSND_WAVE_FORMAT_OPUS,
+		.channels = channels,
+		.samples_per_sec = sample_rate,
+		.avg_bytes_per_sec = avg_bytes_per_sec,
+		.block_align = 1,
+		.bits_per_sample = 16
+	};
 }
 
 size_t rf_rdp_rdpsnd_write_server_formats(
@@ -333,6 +370,19 @@ static bool dvi_adpcm_format_matches(
 	       read_u16_le(format->extra) >= 2;
 }
 
+static bool opus_format_matches(
+	const struct rf_rdp_rdpsnd_audio_format *format,
+	uint32_t sample_rate,
+	uint16_t channels
+)
+{
+	if (format == NULL)
+		return false;
+	return format->tag == RF_RDP_RDPSND_WAVE_FORMAT_OPUS &&
+	       format->channels == channels &&
+	       format->samples_per_sec == sample_rate;
+}
+
 int rf_rdp_rdpsnd_choose_pcm_format(
 	const struct rf_rdp_rdpsnd_client_formats *formats,
 	uint32_t preferred_rate,
@@ -369,6 +419,26 @@ int rf_rdp_rdpsnd_choose_pcm_format(
 	return -1;
 }
 
+int rf_rdp_rdpsnd_choose_opus_format(
+	const struct rf_rdp_rdpsnd_client_formats *formats,
+	uint32_t preferred_rate,
+	uint16_t preferred_channels
+)
+{
+	if (formats == NULL)
+		return -1;
+
+	for (size_t i = 0; i < formats->format_count; ++i) {
+		if (opus_format_matches(
+			    &formats->formats[i],
+			    preferred_rate,
+			    preferred_channels
+		    ))
+			return (int)i;
+	}
+	return -1;
+}
+
 int rf_rdp_rdpsnd_choose_audio_format(
 	const struct rf_rdp_rdpsnd_client_formats *formats,
 	uint32_t preferred_rate,
@@ -376,9 +446,35 @@ int rf_rdp_rdpsnd_choose_audio_format(
 	bool prefer_adpcm
 )
 {
+	return rf_rdp_rdpsnd_choose_audio_format_preferred(
+		formats,
+		preferred_rate,
+		preferred_channels,
+		false,
+		prefer_adpcm
+	);
+}
+
+int rf_rdp_rdpsnd_choose_audio_format_preferred(
+	const struct rf_rdp_rdpsnd_client_formats *formats,
+	uint32_t preferred_rate,
+	uint16_t preferred_channels,
+	bool prefer_opus,
+	bool prefer_adpcm
+)
+{
 	if (formats == NULL)
 		return -1;
 
+	if (prefer_opus) {
+		const int opus = rf_rdp_rdpsnd_choose_opus_format(
+			formats,
+			preferred_rate,
+			preferred_channels
+		);
+		if (opus >= 0)
+			return opus;
+	}
 	if (prefer_adpcm) {
 		for (size_t i = 0; i < formats->format_count; ++i) {
 			if (dvi_adpcm_format_matches(
@@ -399,6 +495,121 @@ int rf_rdp_rdpsnd_choose_audio_format(
 static int16_t read_i16_le(const uint8_t *data)
 {
 	return (int16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
+}
+
+RfRdpRdpsndOpusEncoder *rf_rdp_rdpsnd_opus_encoder_new(
+	uint32_t sample_rate,
+	uint16_t channels,
+	uint32_t avg_bytes_per_sec
+)
+{
+#ifdef RF_HAVE_RDP_OPUS
+	int error = OPUS_OK;
+#endif
+	RfRdpRdpsndOpusEncoder *encoder = NULL;
+
+	if (channels == 0 || channels > 2)
+		return NULL;
+	if (sample_rate != 8000 && sample_rate != 12000 &&
+	    sample_rate != 16000 && sample_rate != 24000 &&
+	    sample_rate != 48000)
+		return NULL;
+	if (avg_bytes_per_sec == 0)
+		avg_bytes_per_sec = 16000;
+
+	encoder = calloc(1, sizeof(*encoder));
+	if (encoder == NULL)
+		return NULL;
+	encoder->sample_rate = sample_rate;
+	encoder->channels = channels;
+	encoder->avg_bytes_per_sec = avg_bytes_per_sec;
+
+#ifdef RF_HAVE_RDP_OPUS
+	encoder->encoder = opus_encoder_create(
+		(opus_int32)sample_rate,
+		channels,
+		OPUS_APPLICATION_AUDIO,
+		&error
+	);
+	if (error != OPUS_OK || encoder->encoder == NULL) {
+		rf_rdp_rdpsnd_opus_encoder_free(encoder);
+		return NULL;
+	}
+	if (opus_encoder_ctl(
+		    encoder->encoder,
+		    OPUS_SET_BITRATE((opus_int32)avg_bytes_per_sec * 8)
+	    ) != OPUS_OK) {
+		rf_rdp_rdpsnd_opus_encoder_free(encoder);
+		return NULL;
+	}
+	return encoder;
+#else
+	free(encoder);
+	return NULL;
+#endif
+}
+
+void rf_rdp_rdpsnd_opus_encoder_free(RfRdpRdpsndOpusEncoder *encoder)
+{
+	if (encoder == NULL)
+		return;
+#ifdef RF_HAVE_RDP_OPUS
+	if (encoder->encoder != NULL)
+		opus_encoder_destroy(encoder->encoder);
+#endif
+	free(encoder);
+}
+
+size_t rf_rdp_rdpsnd_opus_encode(
+	RfRdpRdpsndOpusEncoder *encoder,
+	uint8_t *dst,
+	size_t dst_capacity,
+	const uint8_t *pcm,
+	size_t pcm_length,
+	const struct rf_rdp_rdpsnd_audio_format *format
+)
+{
+#ifdef RF_HAVE_RDP_OPUS
+	opus_int16 *samples = NULL;
+	int encoded = 0;
+	size_t sample_count = 0;
+	size_t frame_count = 0;
+#endif
+
+	if (encoder == NULL || dst == NULL || dst_capacity == 0 ||
+	    pcm == NULL || pcm_length == 0 || format == NULL ||
+	    format->tag != RF_RDP_RDPSND_WAVE_FORMAT_OPUS ||
+	    format->channels == 0 ||
+	    encoder->sample_rate != format->samples_per_sec ||
+	    encoder->channels != format->channels)
+		return 0;
+
+#ifdef RF_HAVE_RDP_OPUS
+	if ((pcm_length % (sizeof(int16_t) * format->channels)) != 0)
+		return 0;
+	sample_count = pcm_length / sizeof(int16_t);
+	frame_count = sample_count / format->channels;
+	if (frame_count == 0 || frame_count > 5760)
+		return 0;
+
+	samples = malloc(sample_count * sizeof(*samples));
+	if (samples == NULL)
+		return 0;
+	for (size_t i = 0; i < sample_count; ++i)
+		samples[i] = read_i16_le(pcm + i * sizeof(int16_t));
+
+	encoded = opus_encode(
+		encoder->encoder,
+		samples,
+		(int)frame_count,
+		dst,
+		(opus_int32)dst_capacity
+	);
+	free(samples);
+	return encoded > 0 ? (size_t)encoded : 0;
+#else
+	return 0;
+#endif
 }
 
 static uint8_t ima_encode_sample(
@@ -545,6 +756,21 @@ size_t rf_rdp_rdpsnd_write_quality_mode(uint8_t *data, size_t capacity)
 
 	write_u16_le(data + 4, RF_RDP_RDPSND_QUALITY_MODE_DYNAMIC);
 	write_u16_le(data + 6, 0);
+	return 8;
+}
+
+size_t rf_rdp_rdpsnd_write_set_volume(
+	uint8_t *data,
+	size_t capacity,
+	uint16_t left,
+	uint16_t right
+)
+{
+	if (capacity < 8 ||
+	    !write_header(data, capacity, RF_RDP_RDPSND_SNDC_SETVOLUME, 4))
+		return 0;
+	write_u16_le(data + 4, left);
+	write_u16_le(data + 6, right);
 	return 8;
 }
 

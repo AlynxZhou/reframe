@@ -203,6 +203,8 @@ static void on_pointer_event(
 		this->streamer,
 		rx,
 		ry,
+		this->width,
+		this->height,
 		left,
 		middle,
 		right,

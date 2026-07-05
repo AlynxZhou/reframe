@@ -84,6 +84,7 @@ if get_option('rdp')
   gdk_pixbuf = dependency('gdk-pixbuf-2.0', required: true)
   libpng = dependency('libpng', required: true)
   libtiff = dependency('libtiff-4', required: true)
+  opus = dependency('opus', required: false)
   rdp_avc_c_args = []
   rdp_avc_dependencies = []
   if avcodec.found() and avutil.found() and swscale.found()
@@ -98,6 +99,12 @@ if get_option('rdp')
   rdp_cliprdr_dependencies += [gdk_pixbuf]
   rdp_cliprdr_c_args += ['-DRF_HAVE_RDP_CLIPRDR_TIFF=1']
   rdp_cliprdr_dependencies += [libtiff]
+  rdp_rdpsnd_c_args = []
+  rdp_rdpsnd_dependencies = []
+  if opus.found()
+    rdp_rdpsnd_c_args += ['-DRF_HAVE_RDP_OPUS=1']
+    rdp_rdpsnd_dependencies += [opus]
+  endif
 
   rdp_sources = files(
     'rf-rdp-server.c',
@@ -144,13 +151,14 @@ if get_option('rdp')
   ]
   rdp_dependencies += rdp_avc_dependencies
   rdp_dependencies += rdp_cliprdr_dependencies
+  rdp_dependencies += rdp_rdpsnd_dependencies
 
   shared_module(
     meson.project_name() + '-rdp',
     sources: rdp_sources,
     dependencies: rdp_dependencies,
     include_directories: include_directories,
-    c_args: rdp_avc_c_args + rdp_cliprdr_c_args,
+    c_args: rdp_avc_c_args + rdp_cliprdr_c_args + rdp_rdpsnd_c_args,
     install_rpath: libdir,
     install: true,
     install_dir: moduledir / 'rdp'

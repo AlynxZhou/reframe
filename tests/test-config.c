@@ -120,6 +120,7 @@ static void test_rdp_audio_defaults(void)
 	assert(rf_config_get_rdp_audio_sample_rate(config) == 48000);
 	assert(rf_config_get_rdp_audio_channels(config) == 2);
 	assert(rf_config_get_rdp_audio_frame_ms(config) == 20);
+	assert(rf_config_get_rdp_audio_volume(config) == 100);
 	assert(strcmp(rf_config_get_rdp_audio_codec(config), "auto") == 0);
 }
 
@@ -131,6 +132,7 @@ static void test_rdp_audio_config_values(void)
 		"audio-sample-rate=44100\n"
 		"audio-channels=1\n"
 		"audio-frame-ms=10\n"
+		"audio-volume=65\n"
 		"audio-codec=adpcm\n"
 	);
 	g_autoptr(RfConfig) config = rf_config_new(path);
@@ -139,7 +141,17 @@ static void test_rdp_audio_config_values(void)
 	assert(rf_config_get_rdp_audio_sample_rate(config) == 44100);
 	assert(rf_config_get_rdp_audio_channels(config) == 1);
 	assert(rf_config_get_rdp_audio_frame_ms(config) == 10);
+	assert(rf_config_get_rdp_audio_volume(config) == 65);
 	assert(strcmp(rf_config_get_rdp_audio_codec(config), "adpcm") == 0);
+	unlink(path);
+}
+
+static void test_rdp_audio_codec_opus(void)
+{
+	g_autofree char *path = write_temp_config("[rdp]\naudio-codec=opus\n");
+	g_autoptr(RfConfig) config = rf_config_new(path);
+
+	assert(strcmp(rf_config_get_rdp_audio_codec(config), "opus") == 0);
 	unlink(path);
 }
 
@@ -150,6 +162,7 @@ static void test_rdp_audio_invalid_uses_defaults(void)
 		"audio-sample-rate=32000\n"
 		"audio-channels=8\n"
 		"audio-frame-ms=5\n"
+		"audio-volume=101\n"
 		"audio-codec=mp3\n"
 	);
 	g_autoptr(RfConfig) config = rf_config_new(path);
@@ -157,6 +170,7 @@ static void test_rdp_audio_invalid_uses_defaults(void)
 	assert(rf_config_get_rdp_audio_sample_rate(config) == 48000);
 	assert(rf_config_get_rdp_audio_channels(config) == 2);
 	assert(rf_config_get_rdp_audio_frame_ms(config) == 20);
+	assert(rf_config_get_rdp_audio_volume(config) == 100);
 	assert(strcmp(rf_config_get_rdp_audio_codec(config), "auto") == 0);
 	unlink(path);
 }
@@ -175,6 +189,7 @@ int main(void)
 	test_rdp_target_bandwidth_invalid_uses_default();
 	test_rdp_audio_defaults();
 	test_rdp_audio_config_values();
+	test_rdp_audio_codec_opus();
 	test_rdp_audio_invalid_uses_defaults();
 	return 0;
 }

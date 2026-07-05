@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <locale.h>
+#include <stdlib.h>
 #include <glib.h>
 #include <glib-unix.h>
 #include <glib/gstdio.h>
@@ -15,12 +16,14 @@
 #include "config.h"
 #include "rf-common.h"
 #include "rf-config.h"
+#include "rf-display-layout.h"
 
 #ifdef HAVE_LIBSYSTEMD
 #	include <systemd/sd-daemon.h>
 #endif
 
 #define WAKEUP_MAX_EVENTS 4
+#define DESKTOP_LAYOUT_PROBE_INTERVAL (2 * G_USEC_PER_SEC)
 
 // clang-format off
 #define ioctl_must(...)                                                         \
@@ -69,6 +72,9 @@ struct this {
 	int ufd;
 	bool wakeup;
 	bool skip_auth;
+	int64_t next_layout_probe_time;
+	bool have_last_layout;
+	struct rf_desktop_layout last_layout;
 };
 
 static int auth_pid(struct this *this, pid_t pid, const char *target)
@@ -514,6 +520,327 @@ out:
 	return ret;
 }
 
+static ssize_t send_desktop_layout_msg(
+	struct this *this,
+	const struct rf_desktop_layout *layout
+)
+{
+	ssize_t ret = 0;
+	g_autoptr(GError) error = NULL;
+	GOutputStream *os =
+		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
+
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_DESKTOP_LAYOUT, 1, &error);
+	if (ret <= 0)
+		goto out;
+	ret = g_output_stream_write(os, layout, sizeof(*layout), NULL, &error);
+
+out:
+	if (ret < 0)
+		g_warning(
+			"Input: Failed to send desktop layout: %s.",
+			error->message
+		);
+	return ret;
+}
+
+static char *find_niri_socket(char **runtime_dir)
+{
+	const char *env_socket = g_getenv("NIRI_SOCKET");
+	if (env_socket != NULL && env_socket[0] != '\0' &&
+	    g_file_test(env_socket, G_FILE_TEST_EXISTS)) {
+		*runtime_dir = g_path_get_dirname(env_socket);
+		return g_strdup(env_socket);
+	}
+
+	g_autoptr(GDir) users = g_dir_open("/run/user", 0, NULL);
+	if (users == NULL)
+		return NULL;
+
+	const char *user = NULL;
+	while ((user = g_dir_read_name(users)) != NULL) {
+		g_autofree char *dir_path =
+			g_build_filename("/run/user", user, NULL);
+		g_autoptr(GDir) dir = g_dir_open(dir_path, 0, NULL);
+		if (dir == NULL)
+			continue;
+		const char *name = NULL;
+		while ((name = g_dir_read_name(dir)) != NULL) {
+			if (!g_str_has_prefix(name, "niri.") ||
+			    !g_str_has_suffix(name, ".sock"))
+				continue;
+			*runtime_dir = g_strdup(dir_path);
+			return g_build_filename(dir_path, name, NULL);
+		}
+	}
+	return NULL;
+}
+
+struct niri_env {
+	const char *runtime_dir;
+	const char *socket_path;
+};
+
+static void setup_niri_env(void *data)
+{
+	const struct niri_env *env = data;
+
+	setenv("XDG_RUNTIME_DIR", env->runtime_dir, 1);
+	setenv("NIRI_SOCKET", env->socket_path, 1);
+}
+
+static char *read_niri_outputs(void)
+{
+	g_autofree char *niri = g_find_program_in_path("niri");
+	if (niri == NULL) {
+		g_debug("Input: Cannot detect niri layout because niri is not in PATH.");
+		return NULL;
+	}
+
+	g_autofree char *runtime_dir = NULL;
+	g_autofree char *socket_path = find_niri_socket(&runtime_dir);
+	if (socket_path == NULL || runtime_dir == NULL) {
+		g_debug("Input: Cannot detect niri layout because no niri socket was found.");
+		return NULL;
+	}
+
+	g_autofree char *stderr_text = NULL;
+	g_autoptr(GError) error = NULL;
+	char *stdout_text = NULL;
+	int wait_status = 0;
+	char *argv[] = { niri, "msg", "outputs", NULL };
+	struct niri_env env = {
+		.runtime_dir = runtime_dir,
+		.socket_path = socket_path,
+	};
+
+	if (!g_spawn_sync(
+		    NULL,
+		    argv,
+		    NULL,
+		    G_SPAWN_DEFAULT,
+		    setup_niri_env,
+		    &env,
+		    &stdout_text,
+		    &stderr_text,
+		    &wait_status,
+		    &error
+	    )) {
+		g_debug("Input: Failed to run niri msg outputs: %s.", error->message);
+		return NULL;
+	}
+	if (!g_spawn_check_wait_status(wait_status, &error)) {
+		g_debug("Input: niri msg outputs failed: %s%s%s.",
+			error->message,
+			stderr_text != NULL && stderr_text[0] != '\0' ? ": " : "",
+			stderr_text != NULL ? stderr_text : "");
+		g_clear_pointer(&stdout_text, g_free);
+		return NULL;
+	}
+	if (stdout_text == NULL || stdout_text[0] == '\0') {
+		g_debug("Input: niri msg outputs returned no output.");
+		g_clear_pointer(&stdout_text, g_free);
+		return NULL;
+	}
+	return stdout_text;
+}
+
+static bool hyprland_instance_is_usable(
+	const char *runtime_dir,
+	const char *signature
+)
+{
+	g_autofree char *instance_dir =
+		g_build_filename(runtime_dir, "hypr", signature, NULL);
+	g_autofree char *socket_path =
+		g_build_filename(instance_dir, ".socket.sock", NULL);
+
+	return g_file_test(socket_path, G_FILE_TEST_EXISTS) ||
+	       g_file_test(instance_dir, G_FILE_TEST_IS_DIR);
+}
+
+static char *find_hyprland_instance(char **runtime_dir)
+{
+	const char *env_runtime_dir = g_getenv("XDG_RUNTIME_DIR");
+	const char *env_signature = g_getenv("HYPRLAND_INSTANCE_SIGNATURE");
+	if (env_runtime_dir != NULL && env_runtime_dir[0] != '\0' &&
+	    env_signature != NULL && env_signature[0] != '\0' &&
+	    hyprland_instance_is_usable(env_runtime_dir, env_signature)) {
+		*runtime_dir = g_strdup(env_runtime_dir);
+		return g_strdup(env_signature);
+	}
+
+	g_autoptr(GDir) users = g_dir_open("/run/user", 0, NULL);
+	if (users == NULL)
+		return NULL;
+
+	const char *user = NULL;
+	while ((user = g_dir_read_name(users)) != NULL) {
+		g_autofree char *user_runtime_dir =
+			g_build_filename("/run/user", user, NULL);
+		g_autofree char *hypr_dir =
+			g_build_filename(user_runtime_dir, "hypr", NULL);
+		g_autoptr(GDir) dir = g_dir_open(hypr_dir, 0, NULL);
+		if (dir == NULL)
+			continue;
+
+		const char *signature = NULL;
+		while ((signature = g_dir_read_name(dir)) != NULL) {
+			if (!hyprland_instance_is_usable(
+				    user_runtime_dir,
+				    signature
+			    ))
+				continue;
+			*runtime_dir = g_strdup(user_runtime_dir);
+			return g_strdup(signature);
+		}
+	}
+	return NULL;
+}
+
+struct hyprland_env {
+	const char *runtime_dir;
+	const char *signature;
+};
+
+static void setup_hyprland_env(void *data)
+{
+	const struct hyprland_env *env = data;
+
+	setenv("XDG_RUNTIME_DIR", env->runtime_dir, 1);
+	setenv("HYPRLAND_INSTANCE_SIGNATURE", env->signature, 1);
+}
+
+static char *read_hyprland_monitors(void)
+{
+	g_autofree char *hyprctl = g_find_program_in_path("hyprctl");
+	if (hyprctl == NULL) {
+		g_debug("Input: Cannot detect hyprland layout because hyprctl is not in PATH.");
+		return NULL;
+	}
+
+	g_autofree char *runtime_dir = NULL;
+	g_autofree char *signature = find_hyprland_instance(&runtime_dir);
+	if (signature == NULL || runtime_dir == NULL) {
+		g_debug("Input: Cannot detect hyprland layout because no hyprland socket was found.");
+		return NULL;
+	}
+
+	g_autofree char *stderr_text = NULL;
+	g_autoptr(GError) error = NULL;
+	char *stdout_text = NULL;
+	int wait_status = 0;
+	char *argv[] = { hyprctl, "monitors", "-j", NULL };
+	struct hyprland_env env = {
+		.runtime_dir = runtime_dir,
+		.signature = signature,
+	};
+
+	if (!g_spawn_sync(
+		    NULL,
+		    argv,
+		    NULL,
+		    G_SPAWN_DEFAULT,
+		    setup_hyprland_env,
+		    &env,
+		    &stdout_text,
+		    &stderr_text,
+		    &wait_status,
+		    &error
+	    )) {
+		g_debug("Input: Failed to run hyprctl monitors -j: %s.",
+			error->message);
+		return NULL;
+	}
+	if (!g_spawn_check_wait_status(wait_status, &error)) {
+		g_debug("Input: hyprctl monitors -j failed: %s%s%s.",
+			error->message,
+			stderr_text != NULL && stderr_text[0] != '\0' ? ": " : "",
+			stderr_text != NULL ? stderr_text : "");
+		g_clear_pointer(&stdout_text, g_free);
+		return NULL;
+	}
+	if (stdout_text == NULL || stdout_text[0] == '\0') {
+		g_debug("Input: hyprctl monitors -j returned no output.");
+		g_clear_pointer(&stdout_text, g_free);
+		return NULL;
+	}
+	return stdout_text;
+}
+
+static bool read_current_desktop_layout(
+	struct this *this,
+	struct rf_desktop_layout *layout,
+	const char **source_name
+)
+{
+	g_autofree char *outputs = read_niri_outputs();
+
+	if (outputs != NULL && rf_parse_niri_outputs_layout(
+			outputs,
+			this->connector_name,
+			layout
+	    )) {
+		*source_name = "niri";
+		return true;
+	}
+	if (outputs != NULL) {
+		g_debug("Input: Failed to parse niri outputs for %s.",
+			this->connector_name);
+	}
+
+	g_autofree char *monitors = read_hyprland_monitors();
+	if (monitors != NULL && rf_parse_hyprland_monitors_layout(
+			monitors,
+			this->connector_name,
+			layout
+	    )) {
+		*source_name = "hyprland";
+		return true;
+	}
+	if (monitors != NULL) {
+		g_debug("Input: Failed to parse hyprland monitors for %s.",
+			this->connector_name);
+	}
+	return false;
+}
+
+static void maybe_send_desktop_layout_msg(struct this *this, bool force)
+{
+	struct rf_desktop_layout layout = { 0 };
+	const char *source_name = "compositor";
+
+	if (!read_current_desktop_layout(this, &layout, &source_name))
+		return;
+	if (!force && this->have_last_layout &&
+	    rf_desktop_layout_equal(&this->last_layout, &layout))
+		return;
+
+	g_message(
+		"Input: Detected %s desktop layout %ux%u, monitor %d,%d for %s.",
+		source_name,
+		layout.desktop_width,
+		layout.desktop_height,
+		layout.monitor_x,
+		layout.monitor_y,
+		this->connector_name
+	);
+	if (send_desktop_layout_msg(this, &layout) > 0) {
+		this->last_layout = layout;
+		this->have_last_layout = true;
+	}
+}
+
+static void maybe_probe_desktop_layout_msg(struct this *this)
+{
+	const int64_t now = g_get_monotonic_time();
+
+	if (this->next_layout_probe_time > now)
+		return;
+	this->next_layout_probe_time = now + DESKTOP_LAYOUT_PROBE_INTERVAL;
+	maybe_send_desktop_layout_msg(this, false);
+}
+
 static inline char *get_connector_name(drmModeConnector *connector)
 {
 	return g_strdup_printf(
@@ -671,6 +998,7 @@ static void setup_drm(struct this *this)
 
 	send_card_path_msg(this, this->card_path);
 	send_connector_name_msg(this, this->connector_name);
+	maybe_send_desktop_layout_msg(this, true);
 }
 
 static void clean_drm(struct this *this)
@@ -681,6 +1009,9 @@ static void clean_drm(struct this *this)
 	}
 	g_clear_pointer(&this->card_path, g_free);
 	g_clear_pointer(&this->connector_name, g_free);
+	this->next_layout_probe_time = 0;
+	this->have_last_layout = false;
+	memset(&this->last_layout, 0, sizeof(this->last_layout));
 }
 
 static void wakeup_uinput(struct this *this)
@@ -964,6 +1295,8 @@ int main(int argc, char *argv[])
 			switch (type) {
 			case RF_MSG_TYPE_FRAME:
 				ret = on_frame_msg(this);
+				if (ret > 0)
+					maybe_probe_desktop_layout_msg(this);
 				break;
 			case RF_MSG_TYPE_INPUT:
 				ret = on_input_msg(this);

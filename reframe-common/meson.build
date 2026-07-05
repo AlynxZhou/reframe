@@ -2,6 +2,7 @@ sources = files(
 	'rf-common.c',
 	'rf-clipboard-rich.c',
 	'rf-config.c',
+	'rf-display-layout.c',
 	'rf-rdp-audio-stream.c',
 	'rf-resize.c'
 )
@@ -10,6 +11,7 @@ headers = files(
 	'rf-common.h',
 	'rf-clipboard-rich.h',
 	'rf-config.h',
+	'rf-display-layout.h',
 	'rf-rdp-audio-stream.h',
 	'rf-resize.h'
 )
@@ -44,3 +46,11 @@ test_clipboard_rich = executable(
   include_directories: include_directories
 )
 test('clipboard-rich', test_clipboard_rich)
+
+test_display_layout = executable(
+  'test-display-layout',
+  sources: files('../tests/test-display-layout.c', 'rf-display-layout.c'),
+  dependencies: [glib],
+  include_directories: include_directories
+)
+test('display-layout', test_display_layout)

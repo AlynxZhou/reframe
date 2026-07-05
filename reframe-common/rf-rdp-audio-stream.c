@@ -5,7 +5,9 @@
 #include "rf-common.h"
 
 #define RF_RDP_AUDIO_STREAM_HEADER_LENGTH 25u
+#define RF_RDP_AUDIO_STREAM_COMMON_HEADER_LENGTH 5u
 #define RF_RDP_AUDIO_STREAM_METADATA_LENGTH 20u
+#define RF_RDP_AUDIO_STREAM_VOLUME_LENGTH 4u
 
 static void write_u16_le(uint8_t *data, uint16_t value)
 {
@@ -159,48 +161,75 @@ bool rf_rdp_audio_stream_write_pcm(
 	       write_all(stream, pcm, pcm_header.pcm_length, error);
 }
 
-bool rf_rdp_audio_stream_read_pcm(
+bool rf_rdp_audio_stream_write_volume(
+	GOutputStream *stream,
+	uint16_t left,
+	uint16_t right,
+	GError **error
+)
+{
+	uint8_t message[RF_RDP_AUDIO_STREAM_COMMON_HEADER_LENGTH +
+			RF_RDP_AUDIO_STREAM_VOLUME_LENGTH] = { 0 };
+
+	g_return_val_if_fail(G_IS_OUTPUT_STREAM(stream), false);
+
+	message[0] = RF_MSG_TYPE_RDP_AUDIO_VOLUME;
+	write_u32_le(message + 1, RF_RDP_AUDIO_STREAM_VOLUME_LENGTH);
+	write_u16_le(message + 5, left);
+	write_u16_le(message + 7, right);
+
+	return write_all(stream, message, sizeof(message), error);
+}
+
+bool rf_rdp_audio_stream_write_pcm_with_volume(
+	GOutputStream *stream,
+	uint32_t sample_rate,
+	uint16_t channels,
+	uint16_t frame_ms,
+	uint64_t timestamp_us,
+	uint16_t volume_left,
+	uint16_t volume_right,
+	const uint8_t *pcm,
+	size_t pcm_length,
+	GError **error
+)
+{
+	return rf_rdp_audio_stream_write_volume(
+		stream,
+		volume_left,
+		volume_right,
+		error
+	) && rf_rdp_audio_stream_write_pcm(
+		stream,
+		sample_rate,
+		channels,
+		frame_ms,
+		timestamp_us,
+		pcm,
+		pcm_length,
+		error
+	);
+}
+
+static bool read_pcm_payload(
 	GInputStream *stream,
+	uint32_t payload_length,
 	struct rf_rdp_audio_pcm_header *header,
 	GByteArray **pcm,
 	GError **error
 )
 {
-	uint8_t wire_header[RF_RDP_AUDIO_STREAM_HEADER_LENGTH] = { 0 };
-	uint32_t payload_length = 0;
+	uint8_t metadata[RF_RDP_AUDIO_STREAM_METADATA_LENGTH] = { 0 };
 	GByteArray *buffer = NULL;
 
-	g_return_val_if_fail(G_IS_INPUT_STREAM(stream), false);
-
-	if (header == NULL || pcm == NULL) {
-		g_set_error(
-			error,
-			G_IO_ERROR,
-			G_IO_ERROR_INVALID_ARGUMENT,
-			"missing RDP audio output buffer"
-		);
+	if (!read_all(stream, metadata, sizeof(metadata), error))
 		return false;
-	}
 
-	*pcm = NULL;
-	if (!read_all(stream, wire_header, sizeof(wire_header), error))
-		return false;
-	if (wire_header[0] != RF_MSG_TYPE_RDP_AUDIO_PCM) {
-		g_set_error(
-			error,
-			G_IO_ERROR,
-			G_IO_ERROR_INVALID_DATA,
-			"unexpected RDP audio message type"
-		);
-		return false;
-	}
-
-	payload_length = read_u32_le(wire_header + 1);
-	header->sample_rate = read_u32_le(wire_header + 5);
-	header->channels = read_u16_le(wire_header + 9);
-	header->frame_ms = read_u16_le(wire_header + 11);
-	header->timestamp_us = read_u64_le(wire_header + 13);
-	header->pcm_length = read_u32_le(wire_header + 21);
+	header->sample_rate = read_u32_le(metadata);
+	header->channels = read_u16_le(metadata + 4);
+	header->frame_ms = read_u16_le(metadata + 6);
+	header->timestamp_us = read_u64_le(metadata + 8);
+	header->pcm_length = read_u32_le(metadata + 16);
 
 	if (payload_length !=
 		    RF_RDP_AUDIO_STREAM_METADATA_LENGTH + header->pcm_length ||
@@ -223,6 +252,101 @@ bool rf_rdp_audio_stream_read_pcm(
 
 	*pcm = buffer;
 	return true;
+}
+
+bool rf_rdp_audio_stream_read_message(
+	GInputStream *stream,
+	enum rf_rdp_audio_stream_message_type *message_type,
+	struct rf_rdp_audio_pcm_header *header,
+	struct rf_rdp_audio_volume *volume,
+	GByteArray **pcm,
+	GError **error
+)
+{
+	uint8_t common_header[RF_RDP_AUDIO_STREAM_COMMON_HEADER_LENGTH] = { 0 };
+	uint32_t payload_length = 0;
+
+	g_return_val_if_fail(G_IS_INPUT_STREAM(stream), false);
+
+	if (message_type == NULL || header == NULL || volume == NULL || pcm == NULL) {
+		g_set_error(
+			error,
+			G_IO_ERROR,
+			G_IO_ERROR_INVALID_ARGUMENT,
+			"missing RDP audio output buffer"
+		);
+		return false;
+	}
+
+	*pcm = NULL;
+	memset(header, 0, sizeof(*header));
+	memset(volume, 0, sizeof(*volume));
+	if (!read_all(stream, common_header, sizeof(common_header), error))
+		return false;
+
+	payload_length = read_u32_le(common_header + 1);
+	if (common_header[0] == RF_MSG_TYPE_RDP_AUDIO_PCM) {
+		*message_type = RF_RDP_AUDIO_STREAM_MESSAGE_PCM;
+		return read_pcm_payload(stream, payload_length, header, pcm, error);
+	}
+	if (common_header[0] == RF_MSG_TYPE_RDP_AUDIO_VOLUME) {
+		uint8_t payload[RF_RDP_AUDIO_STREAM_VOLUME_LENGTH] = { 0 };
+
+		if (payload_length != RF_RDP_AUDIO_STREAM_VOLUME_LENGTH) {
+			g_set_error(
+				error,
+				G_IO_ERROR,
+				G_IO_ERROR_INVALID_DATA,
+				"invalid RDP audio volume payload"
+			);
+			return false;
+		}
+		if (!read_all(stream, payload, sizeof(payload), error))
+			return false;
+		*message_type = RF_RDP_AUDIO_STREAM_MESSAGE_VOLUME;
+		volume->left = read_u16_le(payload);
+		volume->right = read_u16_le(payload + 2);
+		return true;
+	}
+
+	g_set_error(
+		error,
+		G_IO_ERROR,
+		G_IO_ERROR_INVALID_DATA,
+		"unexpected RDP audio message type"
+	);
+	return false;
+}
+
+bool rf_rdp_audio_stream_read_pcm(
+	GInputStream *stream,
+	struct rf_rdp_audio_pcm_header *header,
+	GByteArray **pcm,
+	GError **error
+)
+{
+	enum rf_rdp_audio_stream_message_type message_type =
+		RF_RDP_AUDIO_STREAM_MESSAGE_PCM;
+	struct rf_rdp_audio_volume volume = { 0 };
+
+	if (!rf_rdp_audio_stream_read_message(
+		    stream,
+		    &message_type,
+		    header,
+		    &volume,
+		    pcm,
+		    error
+	    ))
+		return false;
+	if (message_type == RF_RDP_AUDIO_STREAM_MESSAGE_PCM)
+		return true;
+	g_set_error(
+		error,
+		G_IO_ERROR,
+		G_IO_ERROR_INVALID_DATA,
+		"unexpected RDP audio message type"
+	);
+	return false;
 }
 
 bool rf_rdp_audio_pcm_is_silent(
