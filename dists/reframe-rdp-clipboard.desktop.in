@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ReFrame RDP Clipboard
+Comment=ReFrame RDP Rich Clipboard
+Exec=@bindir@/reframe-rdp-clipboard --socket-dir=/run/reframe-rdp-clipboard
+Terminal=false
+Type=Application
+NoDisplay=true
+X-systemd-skip=false

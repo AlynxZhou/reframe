@@ -9,9 +9,12 @@ Type=exec
 # `/dev/uinput`, then we drop all unused permissions.
 #
 # `CAP_SYS_ADMIN` is used for DRM, `CAP_SYS_PTRACE` is used for
-# `/proc/<pid>/exe`.
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE
-ProtectHome=true
+# `/proc/<pid>/exe`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` are used for
+# compositor IPC under `/run/user/<uid>` when auto-detecting desktop layout.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+# niri exposes its IPC socket under /run/user. Keep home/runtime paths read-only
+# so ReFrame can auto-detect compositor layout without write access.
+ProtectHome=read-only
 ProtectSystem=strict
 ProtectControlGroups=true
 ProtectKernelTunables=true

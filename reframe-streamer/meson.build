@@ -23,5 +23,6 @@ executable(
   sources: sources,
   dependencies: dependencies,
   include_directories: include_directories,
+  install_rpath: libdir,
   install: true
 )

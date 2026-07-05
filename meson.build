@@ -20,6 +20,12 @@ if get_option('neatvnc')
   neatvnc = dependency('neatvnc', required: false)
   neatvnc_unstable_api = neatvnc.version().version_compare('<1.0.0')
 endif
+wayland_client = dependency('wayland-client', required: false)
+wayland_protocols = dependency('wayland-protocols', required: false)
+wayland_scanner = find_program('wayland-scanner', required: false)
+have_wayland_clipboard = wayland_client.found() and wayland_protocols.found() and wayland_scanner.found()
+pipewire = dependency('libpipewire-0.3', required: false)
+have_rdp_audio = get_option('rdp') and pipewire.found()
 
 prefix = get_option('prefix')
 bindir = prefix / get_option('bindir')
@@ -71,6 +77,9 @@ conf_data.set_quoted('LIBDIR', libdir)
 conf_data.set('HAVE_LIBSYSTEMD', get_option('systemd') and libsystemd.found())
 conf_data.set('HAVE_NEATVNC', get_option('neatvnc') and neatvnc.found())
 conf_data.set('NEATVNC_UNSTABLE_API', get_option('neatvnc') and neatvnc.found() and neatvnc_unstable_api)
+conf_data.set('HAVE_RDP', get_option('rdp'))
+conf_data.set('HAVE_WAYLAND_CLIPBOARD', have_wayland_clipboard)
+conf_data.set('HAVE_RDP_AUDIO', have_rdp_audio)
 
 configure_file(
   input: 'reframe-common' / 'config.h.in',
@@ -92,6 +101,9 @@ summary({
   'libdir': libdir,
   'moduledir': moduledir,
   'confdir': confdir,
+  'native rdp': get_option('rdp'),
+  'rdp audio': have_rdp_audio,
+  'wayland clipboard': have_wayland_clipboard,
 }, section: 'Configuration')
 if get_option('systemd') and systemd.found()
   summary({

@@ -3,34 +3,25 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <gio/gio.h>
 
-#include "rf-config.h"
-#include "rf-common.h"
+#include "rf-remote-server.h"
 
 G_BEGIN_DECLS
 
 #define RF_TYPE_VNC_SERVER rf_vnc_server_get_type()
-G_DECLARE_DERIVABLE_TYPE(RfVNCServer, rf_vnc_server, RF, VNC_SERVER, GObject)
+G_DECLARE_DERIVABLE_TYPE(
+	RfVNCServer,
+	rf_vnc_server,
+	RF,
+	VNC_SERVER,
+	RfRemoteServer
+)
 
 struct _RfVNCServerClass {
-	GObjectClass parent_class;
-	void (*start)(RfVNCServer *this);
-	bool (*is_running)(RfVNCServer *this);
-	void (*stop)(RfVNCServer *this);
-	void (*set_desktop_name)(RfVNCServer *this, const char *desktop_name);
-	void (*send_clipboard_text)(RfVNCServer *this, const char *text);
-	void (*update)(
-		RfVNCServer *this,
-		GByteArray *buf,
-		unsigned int width,
-		unsigned int height,
-		const struct rf_rect *damage
-	);
-	void (*flush)(RfVNCServer *this);
+	RfRemoteServerClass parent_class;
 };
 
-typedef RfVNCServer *(*RfVNCServerNewFunc)(RfConfig *config);
+typedef RfRemoteServer *(*RfVNCServerNewFunc)(RfConfig *config);
 
 void rf_vnc_server_start(RfVNCServer *this);
 bool rf_vnc_server_is_running(RfVNCServer *this);

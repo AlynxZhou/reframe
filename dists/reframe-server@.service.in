@@ -8,14 +8,14 @@ Type=exec
 User=@username@
 # `RuntimeDirectory` will be removed if unit stops, so only 1 unit can own a
 # dir, and this unit doesn't own `reframe` dir.
-RuntimeDirectory=reframe-session
+RuntimeDirectory=reframe-session reframe-rdp-clipboard reframe-rdp-audio
 RuntimeDirectoryMode=0755
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # Required for framebuffer-only rendering.
 Environment=EGL_PLATFORM=surfaceless
 # Use seperated dirs for sockets so we don't need to care about prefix.
-ExecStart=@bindir@/reframe-server --config=@confdir@/%i.conf --socket=%t/reframe/%i.sock --session-socket=%t/reframe-session/%i.sock
+ExecStart=@bindir@/reframe-server --config=@confdir@/%i.conf --socket=%t/reframe/%i.sock --session-socket=%t/reframe-session/%i.sock --rdp-clipboard-socket=%t/reframe-rdp-clipboard/%i.sock --rdp-audio-socket=%t/reframe-rdp-audio/%i.sock
 Restart=on-failure
 
 [Install]

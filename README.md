@@ -15,6 +15,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 ## What ReFrame Currently Supports
 
 - **VNC**
+- **RDP** (native server backend)
 - **Wayland**/X11/**TTY**
 - Intel/AMD/**NVIDIA**/[Even **Raspberry Pi**!](https://reframe.alynx.one/#rpi)/[Enter more GPUs that can run a general Wayland compositor…]
 - Pointer/Keyboard
@@ -24,7 +25,7 @@ If you are interested in contribution, you may read [HACKING.md](./HACKING.md) f
 
 ## What ReFrame May Support in Future
 
-- **RDP**: PRs are always welcome.
+- More RDP virtual channels, such as device redirection.
 
 ## What ReFrame Won't Support
 
@@ -139,6 +140,15 @@ The default VNC implementation is libvncserver, if you want to build the optiona
 - zlib
 - ffmpeg
 
+If you want to build the native RDP server module (`-D rdp=true`), you will also need:
+
+- libpng
+- libtiff
+- gdk-pixbuf
+- PipeWire (`libpipewire-0.3`) for RDP remote audio output
+- Opus (`opus`) for low-latency compressed RDP remote audio output
+- ffmpeg libraries (`libavcodec`, `libavutil`, `libswscale`) for AVC/H.264 and AV1 RDPGFX encoders
+
 ### Build
 
 ```
@@ -148,18 +158,25 @@ $ mkdir build && cd build && meson setup --prefix=/usr . .. && meson compile
 # meson install
 ```
 
+To build with the native RDP backend enabled:
+
+```
+$ git clone --recurse-submodules https://github.com/AlynxZhou/reframe.git
+$ cd reframe
+$ meson setup build-rdp --prefix=/usr -D rdp=true
+$ meson compile -C build-rdp
+# meson install -C build-rdp
+```
+
 # Usage
 
-> **Security Suggestion**: VNC data streams may not be encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
-
-1. Run `systemctl start reframe-server@example.service`.
-2. Try connecting to it with a VNC client via port `5933`.
+## Common Setup
 
 If you have only 1 connected monitor and you never rotate it, it should work out of the box without modifying the example configuration. If it cannot find your monitor, you need to manually select monitor via DRM card and connector. If you can see screen content, but cannot control it, you need to manually load `uinput` kernel module (`modprobe uinput`).
 
 You need to disconnect and restart it once you modify any monitor settings.
 
-## Select Monitor via DRM Card and Connector
+### Select Monitor via DRM Card and Connector
 
 1. Find your DRM card name (e.g., `card0`) and connector name (e.g., `DP-1`) in `/sys/class/drm/`.
 2. Copy and modify the example configuration.
@@ -169,21 +186,7 @@ You need to disconnect and restart it once you modify any monitor settings.
 3. Set `card` and `connector` values.
 4. Set the value of `rotation` to the angle you rotate your monitor.
 
-If you cannot resize your VNC client window, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
-
-Then start the ReFrame Server systemd service so it will listen to VNC clients.
-
-```
-# systemctl start reframe-server@DP-1.service
-```
-
-ReFrame Server systemd service should automatically pull ReFrame systemd socket, which will trigger the privileged ReFrame Streamer systemd service on demand. If not, start the ReFrame systemd socket manually.
-
-```
-# systemctl start reframe@DP-1.socket
-```
-
-## Multi-monitor
+### Multi-monitor
 
 If you have more than 1 monitors, you need to set the size of the whole virtual desktop and the position offset of your selected monitor to make pointer position mapping work.
 
@@ -205,7 +208,47 @@ You need to keep the same multi-monitor layout for **both user session and displ
 # cp /home/YOURUSER/.config/monitors.xml /etc/xdg/monitors.xml
 ```
 
-## Specific IP Addresses
+### Headless Setup
+
+This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.
+
+1. **Choose an unused connector**: For example add kernel parameter `video="DP-1:D"` to enable `DP-1`.
+2. **Set resolution via EDID override**: You can dump your real monitor's EDID from `/sys/class/drm/card*-*/edid` or download a virtual one, put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it. **If you have early KMS, also add those EDID binaries to your initramfs.**
+
+Then you can reboot your system, and come back to modify the configuration.
+
+### Automatic Wakeup
+
+Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content.
+
+This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event.
+
+If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
+
+## VNC Backend
+
+> **Security Suggestion**: VNC data streams may not be encrypted even with password authentication, so **NEVER** expose this to public network directly! Connecting to it via VPN is recommended.
+
+VNC is the default remote protocol. For the default example configuration:
+
+1. Run `systemctl start reframe-server@example.service`.
+2. Try connecting to it with a VNC client via port `5933`.
+
+If you cannot resize your VNC client window, or you don't want to resize the VNC client window manually every time, you can set values of `default-width` and `default-height`.
+
+For a selected connector, start the ReFrame Server systemd service so it will listen to VNC clients.
+
+```
+# systemctl start reframe-server@DP-1.service
+```
+
+ReFrame Server systemd service should automatically pull ReFrame systemd socket, which will trigger the privileged ReFrame Streamer systemd service on demand. If not, start the ReFrame systemd socket manually.
+
+```
+# systemctl start reframe@DP-1.socket
+```
+
+### Specific IP Addresses
 
 If you don't want to accpet incoming connections from all IP addresses, for example, you want to only accept incoming connections from your LAN or VPN, you can set the value of `ip` to a `;` seperated list like this:
 
@@ -217,24 +260,7 @@ This is supported with libvncserver and neatvnc stable (`>=1.0.0`), with neatvnc
 
 Leaving it empty will accept all incoming connections from all IP addresses.
 
-## Headless Setup
-
-This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.
-
-1. **Choose an unused connector**: For example add kernel parameter `video="DP-1:D"` to enable `DP-1`.
-2. **Set resolution via EDID override**: You can dump your real monitor's EDID from `/sys/class/drm/card*-*/edid` or download a virtual one, put it to `/lib/firmware/edid/`, for example `/lib/firmware/edid/1280x720.bin`, and then add kernel parameter `drm.edid_firmware="DP-1:edid/1280x720.bin"` to use it. **If you have early KMS, also add those EDID binaries to your initramfs.**
-
-Then you can reboot your system, and come back to modify the configuration.
-
-## Automatic Wakeup
-
-Desktop environments may turn off monitors if automatic screen blank is enabled, and ReFrame by default will try to wake system up by moving pointer a little bit so it could get monitor content.
-
-This will introduce a ~2s delay before you can see monitor content, because your system needs some time to process the input event.
-
-If you don't want this, you can disable automatic screen blank for **both user session and display manager**, then set `wakeup=false` in your configuration file.
-
-## Clipboard Text Sync
+### Clipboard Text Sync
 
 You need to add your user to `reframe` group to use clipboard text sync.
 
@@ -247,6 +273,148 @@ If you set other username than `reframe` while building, the group name should b
 This is implemented by putting a desktop file to XDG autostart dir to start `reframe-session` with your session and handle your clipboard. `reframe-session` talks with `reframe-server` via sockets in directory `/run/reframe-session`, if you are not using systemd, or you changed the directory via `reframe-server`'s argument, don't forget to modify the XDG autostart file to change argument for `reframe-session`
 
 You have to restart `reframe-session` once you update it, because the binary is changed. This could be done via log out and log in again.
+
+## Native RDP Backend
+
+The RDP backend is selected through the common remote protocol setting. Copy the example configuration first:
+
+```
+# cp /etc/reframe/example.conf /etc/reframe/DP-1.conf
+```
+
+Then set the remote protocol to RDP and fill the RDP section:
+
+```ini
+[remote]
+protocol=rdp
+
+[rdp]
+ip=
+port=3389
+tls-private-key-file=/etc/reframe/rdp.key
+tls-certificate-file=/etc/reframe/rdp.crt
+username=
+domain=
+password=
+nla=false
+graphics=auto
+clipboard=true
+avc-encoder=auto
+video-quality=auto
+video-quality-max=3
+target-bandwidth-mbps=20
+audio=true
+audio-sample-rate=48000
+audio-channels=2
+audio-frame-ms=20
+audio-volume=100
+audio-codec=auto
+```
+
+RDP requires TLS credentials. ReFrame does not generate them automatically; for local testing you can create a self-signed certificate:
+
+```
+# openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout /etc/reframe/rdp.key \
+  -out /etc/reframe/rdp.crt \
+  -days 3650 \
+  -subj "/CN=reframe-rdp"
+# chmod 0600 /etc/reframe/rdp.key
+```
+
+Start the server for the selected connector:
+
+```
+# systemctl start reframe-server@DP-1.service
+# systemctl start reframe@DP-1.socket
+```
+
+For clipboard sync, add your desktop user to the `reframe` group, then log out and log in again:
+
+```
+# gpasswd -a YOURUSER reframe
+```
+
+The RDP clipboard helper is installed as an XDG autostart entry and supports text, HTML, and common image formats. Wayland clipboard image sync needs a running user session and a working Wayland clipboard provider.
+
+For remote audio output, enable `[rdp] audio=true`. When PipeWire is available at build time, ReFrame installs `reframe-rdp-audio` as an XDG autostart helper. The helper captures PipeWire monitor audio in the user session and sends PCM frames to the RDP server over `/run/reframe-rdp-audio`. The RDP server then sends `rdpsnd` audio as Opus when both sides support it, IMA/DVI ADPCM as the lightweight fallback, and PCM as the compatibility fallback. Set `audio-codec=pcm` to force the old uncompressed path, `audio-codec=adpcm` to prefer ADPCM explicitly, or `audio-codec=opus` to prefer Opus explicitly. Set `audio-volume=0..100` to send an RDP client playback volume when the audio channel becomes ready.
+
+If you need to start it manually:
+
+```
+$ /usr/bin/reframe-rdp-audio \
+  --socket-dir=/run/reframe-rdp-audio \
+  --sample-rate=48000 \
+  --channels=2 \
+  --frame-ms=20
+```
+
+### FreeRDP Client for RDPGFX/AV1 Testing
+
+FreeRDP is a useful client for testing RDPGFX codecs. If you enable FreeRDP's experimental AV1 support, build it with libaom as well; otherwise the client may advertise AV1 but fail to decode RDPGFX AV1 frames. To receive `rdpsnd` IMA/DVI ADPCM audio, enable FreeRDP's FFmpeg DSP path and experimental DSP codecs; otherwise macOS FreeRDP will usually advertise only PCM audio.
+
+On macOS with Homebrew:
+
+```
+$ brew install cmake ninja pkg-config openssl ffmpeg sdl3 sdl3_ttf sdl3_image aom
+$ git clone https://github.com/FreeRDP/FreeRDP.git
+$ cd FreeRDP
+$ cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_INSTALL_PREFIX=/opt/homebrew \
+  -DWITH_CLIENT_SDL=ON \
+  -DWITH_CLIENT_SDL2=OFF \
+  -DWITH_CLIENT_SDL3=ON \
+  -DWITH_FFMPEG=ON \
+  -DWITH_DSP_FFMPEG=ON \
+  -DWITH_DSP_EXPERIMENTAL=ON \
+  -DWITH_OPUS=ON \
+  -DWITH_VIDEOTOOLBOX=ON \
+  -DWITH_GFX_AV1=ON \
+  -DWITH_AOM=ON
+$ cmake --build build --target install --parallel
+```
+
+Confirm the installed client has the expected codecs:
+
+```
+$ /opt/homebrew/bin/sdl-freerdp /buildconfig | tr ' ' '\n' | grep -E 'WITH_AOM|WITH_GFX_AV1|WITH_VIDEOTOOLBOX|WITH_DSP_FFMPEG|WITH_DSP_EXPERIMENTAL|WITH_OPUS|WITH_CLIENT_SDL[23]'
+```
+
+The output should include:
+
+```
+WITH_AOM=ON
+WITH_GFX_AV1=ON
+WITH_VIDEOTOOLBOX=ON
+WITH_DSP_FFMPEG=ON
+WITH_DSP_EXPERIMENTAL=ON
+WITH_OPUS=ON
+WITH_CLIENT_SDL2=OFF
+WITH_CLIENT_SDL3=ON
+```
+
+Example 1920x1080 windowed connection:
+
+```
+$ SDL_VIDEO_MAC_FULLSCREEN_SPACES=0 /opt/homebrew/bin/sdl-freerdp \
+  /v:SERVER_IP:3389 \
+  /u:USERNAME /p:PASSWORD /cert:ignore \
+  /size:1920x1080 /window-position:40x40 \
+  -dynamic-resolution -toggle-fullscreen \
+  /mouse:grab:off \
+  /sound:sys:mac \
+  /gfx:AV1:on,AVC420:on,AVC444:on,frame-ack:on \
+  /log-level:WARN
+```
+
+For troubleshooting codec negotiation, temporarily disable one codec at a time, for example:
+
+```
+$ /opt/homebrew/bin/sdl-freerdp /v:SERVER_IP:3389 /u:USERNAME /p:PASSWORD /cert:ignore /gfx:AV1:off,AVC420:on,AVC444:off,frame-ack:on
+```
+
+If the client logs `rdpgfx_decode failed` followed by `ChannelId ... not found`, the RDPGFX dynamic channel was closed after a decode failure. Check that the client was built with the decoder it advertised, especially `WITH_AOM=ON` when using AV1.
 
 # Comparison with Other Linux Remote Desktop
 

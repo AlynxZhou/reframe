@@ -31,6 +31,7 @@ bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
 enum rf_damage_type rf_config_get_damage(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
+char *rf_config_get_remote_protocol(RfConfig *this);
 char **rf_config_get_vnc_ip_list(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);
@@ -40,6 +41,27 @@ bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this);
 char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this);
 char *rf_config_get_neatvnc_tls_private_key_file(RfConfig *this);
 char *rf_config_get_neatvnc_tls_certificate_file(RfConfig *this);
+char **rf_config_get_rdp_ip_list(RfConfig *this);
+unsigned int rf_config_get_rdp_port(RfConfig *this);
+char *rf_config_get_rdp_tls_private_key_file(RfConfig *this);
+char *rf_config_get_rdp_tls_certificate_file(RfConfig *this);
+char *rf_config_get_rdp_username(RfConfig *this);
+char *rf_config_get_rdp_domain(RfConfig *this);
+char *rf_config_get_rdp_password(RfConfig *this);
+bool rf_config_get_rdp_nla(RfConfig *this);
+char *rf_config_get_rdp_graphics(RfConfig *this);
+bool rf_config_get_rdp_clipboard(RfConfig *this);
+char *rf_config_get_rdp_avc_encoder(RfConfig *this);
+#define RF_CONFIG_RDP_VIDEO_QUALITY_AUTO (-1)
+int rf_config_get_rdp_video_quality(RfConfig *this);
+unsigned int rf_config_get_rdp_video_quality_max(RfConfig *this);
+unsigned int rf_config_get_rdp_target_bandwidth_mbps(RfConfig *this);
+bool rf_config_get_rdp_audio(RfConfig *this);
+unsigned int rf_config_get_rdp_audio_sample_rate(RfConfig *this);
+unsigned int rf_config_get_rdp_audio_channels(RfConfig *this);
+unsigned int rf_config_get_rdp_audio_frame_ms(RfConfig *this);
+unsigned int rf_config_get_rdp_audio_volume(RfConfig *this);
+char *rf_config_get_rdp_audio_codec(RfConfig *this);
 
 G_END_DECLS
 

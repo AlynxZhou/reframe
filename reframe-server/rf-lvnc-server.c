@@ -229,7 +229,7 @@ listen_tcp(RfLVNCServer *this, const char *ip, const unsigned int port)
 		);
 }
 
-static void start(RfVNCServer *super)
+static void start(RfRemoteServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -282,14 +282,14 @@ static void start(RfVNCServer *super)
 	this->running = true;
 }
 
-static bool is_running(RfVNCServer *super)
+static bool is_running(RfRemoteServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
 	return this->running;
 }
 
-static void stop(RfVNCServer *super)
+static void stop(RfRemoteServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -298,7 +298,7 @@ static void stop(RfVNCServer *super)
 
 	this->running = false;
 
-	rf_vnc_server_flush(super);
+	rf_remote_server_flush(super);
 	this->clients = 0;
 	// This must be called before close the listener.
 	//
@@ -311,7 +311,7 @@ static void stop(RfVNCServer *super)
 	g_clear_pointer(&this->passwords[0], g_free);
 }
 
-static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
+static void set_desktop_name(RfRemoteServer *super, const char *desktop_name)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -327,7 +327,7 @@ static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// }
 }
 
-static void send_clipboard_text(RfVNCServer *super, const char *text)
+static void send_clipboard_text(RfRemoteServer *super, const char *text)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -355,7 +355,7 @@ static void send_clipboard_text(RfVNCServer *super, const char *text)
 }
 
 static void
-update(RfVNCServer *super,
+update(RfRemoteServer *super,
        GByteArray *buf,
        unsigned int width,
        unsigned int height,
@@ -403,7 +403,7 @@ update(RfVNCServer *super,
 	rfbProcessEvents(this->screen, 0);
 }
 
-static void flush(RfVNCServer *super)
+static void flush(RfRemoteServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
@@ -422,18 +422,18 @@ static void flush(RfVNCServer *super)
 static void rf_lvnc_server_class_init(RfLVNCServerClass *klass)
 {
 	GObjectClass *o_class = G_OBJECT_CLASS(klass);
-	RfVNCServerClass *v_class = RF_VNC_SERVER_CLASS(klass);
+	RfRemoteServerClass *r_class = RF_REMOTE_SERVER_CLASS(klass);
 
 	o_class->dispose = dispose;
 	o_class->finalize = finalize;
 
-	v_class->start = start;
-	v_class->is_running = is_running;
-	v_class->stop = stop;
-	v_class->set_desktop_name = set_desktop_name;
-	v_class->send_clipboard_text = send_clipboard_text;
-	v_class->update = update;
-	v_class->flush = flush;
+	r_class->start = start;
+	r_class->is_running = is_running;
+	r_class->stop = stop;
+	r_class->set_desktop_name = set_desktop_name;
+	r_class->send_clipboard_text = send_clipboard_text;
+	r_class->update = update;
+	r_class->flush = flush;
 }
 
 static void rf_lvnc_server_init(RfLVNCServer *this)
@@ -452,9 +452,9 @@ static void rf_lvnc_server_init(RfLVNCServer *this)
 	this->running = false;
 }
 
-G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config)
+G_MODULE_EXPORT RfRemoteServer *rf_vnc_server_new(RfConfig *config)
 {
 	RfLVNCServer *this = g_object_new(RF_TYPE_LVNC_SERVER, NULL);
 	this->config = config;
-	return RF_VNC_SERVER(this);
+	return RF_REMOTE_SERVER(this);
 }
