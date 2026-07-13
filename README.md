@@ -217,6 +217,8 @@ This is supported with libvncserver and neatvnc stable (`>=1.0.0`), with neatvnc
 
 Leaving it empty will accept all incoming connections from all IP addresses.
 
+If you start ReFrame Server on boot, and you specify some IP addresses of software defined interfaces (for example, Tailscale or other VPNs), it may fail to listen to those IP addresses because they are not ready when ReFrame Server is starting. This currently has no general solution, but a workaround is that you manually restart ReFrame Server after those interfaces are ready.
+
 ## Headless Setup
 
 This program only works with connected monitors, however if you have no monitor ("headless"), you can still use it, because Linux kernel could force enable a connector to pretend there is a monitor.

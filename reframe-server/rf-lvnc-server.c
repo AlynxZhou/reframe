@@ -222,7 +222,7 @@ listen_tcp(RfLVNCServer *this, const char *ip, const unsigned int port)
 	// It would be acceptable if we failed to listen to some addresses.
 	if (error != NULL)
 		g_warning(
-			"VNC: Failed to listen on %s:%u:%s.",
+			"VNC: Failed to listen on %s:%u: %s.",
 			ip,
 			port,
 			error->message
