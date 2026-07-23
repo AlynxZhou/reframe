@@ -20,7 +20,7 @@
 #	include <systemd/sd-daemon.h>
 #endif
 
-#define WAKEUP_MAX_EVENTS 4
+#define WAKEUP_MAX_EVENTS 3
 
 // clang-format off
 #define ioctl_must(...)                                                         \
@@ -685,24 +685,43 @@ static void clean_drm(struct this *this)
 
 static void wakeup_uinput(struct this *this)
 {
+	g_message(
+		"Input: Waiting for 1s to let userspace detect the uinput device before wakeup."
+	);
+	g_usleep(G_USEC_PER_SEC);
+
+	// Because we are not a relative device, we cannot send relative events
+	// like moving pointer 1 unit right, instead, we move the pointer from
+	// bottom right to top left, this is done by sending two absolute events.
 	struct input_event ies[WAKEUP_MAX_EVENTS];
 	memset(ies, 0, WAKEUP_MAX_EVENTS * sizeof(*ies));
 
-	ies[0].type = EV_REL;
-	ies[0].code = REL_X;
-	ies[0].value = 1;
+	ies[0].type = EV_ABS;
+	ies[0].code = ABS_X;
+	ies[0].value = RF_POINTER_MAX;
 
-	ies[1].type = EV_SYN;
-	ies[1].code = SYN_REPORT;
+	ies[1].type = EV_ABS;
+	ies[1].code = ABS_Y;
+	ies[1].value = RF_POINTER_MAX;
+
+	ies[2].type = EV_SYN;
+	ies[2].code = SYN_REPORT;
+	ies[2].value = 0;
+
+	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+
+	g_message(
+		"Input: Waiting for 0.1s to let userspace process the movement."
+	);
+	g_usleep(0.1 * G_USEC_PER_SEC);
+
+	ies[0].type = EV_ABS;
+	ies[0].code = ABS_X;
+	ies[0].value = 0;
+
+	ies[1].type = EV_ABS;
+	ies[1].code = ABS_Y;
 	ies[1].value = 0;
-
-	ies[2].type = EV_REL;
-	ies[2].code = REL_Y;
-	ies[2].value = 1;
-
-	ies[3].type = EV_SYN;
-	ies[3].code = SYN_REPORT;
-	ies[3].value = 0;
 
 	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
 }
@@ -761,17 +780,8 @@ static void setup_uinput(struct this *this)
 
 	// If screen is turned off, we cannot get CRTC, so we have to wake it up.
 	this->wakeup = rf_config_get_wakeup(this->config);
-	if (this->wakeup) {
-		g_message(
-			"Input: Waiting for 1 second to let userspace detect the uinput device before wakeup."
-		);
-		g_usleep(G_USEC_PER_SEC);
+	if (this->wakeup)
 		wakeup_uinput(this);
-		g_message(
-			"Input: Waiting for 1 second to let userspace process wakeup."
-		);
-		g_usleep(G_USEC_PER_SEC);
-	}
 }
 
 static void clean_uinput(struct this *this)
