@@ -626,8 +626,21 @@ static void setup_drm(struct this *this)
 
 	this->card_path = rf_config_get_card_path(this->config);
 	this->connector_name = rf_config_get_connector(this->config);
-	drmModeConnector *connector =
-		get_card_and_connector(this, this->connector_name);
+	// The screen may still be waking up after the wakeup events, and
+	// there is no active CRTC until the modeset finishes, so poll for a
+	// usable connector for a while instead of aborting at once.
+	drmModeConnector *connector = NULL;
+	for (int i = 0; i < 20; ++i) {
+		connector = get_card_and_connector(this, this->connector_name);
+		if (connector != NULL)
+			break;
+		if (this->cfd >= 0) {
+			close(this->cfd);
+			this->cfd = -1;
+		}
+		g_message("DRM: No usable connector yet, retrying.");
+		g_usleep(0.5 * G_USEC_PER_SEC);
+	}
 	if (connector == NULL)
 		g_error("DRM: Failed to find a usable connector.");
 
@@ -718,6 +731,28 @@ static void wakeup_uinput(struct this *this)
 	ies[1].value = 0;
 
 	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+
+	// Some session lockers ignore pointer motion while they turned
+	// screen off, so accidental knocks against the desk won't wake the
+	// screen, and they only wake on a key or button press. Press and
+	// release the harmless wakeup key so they turn the screen back on.
+	//
+	// See <https://github.com/AlynxZhou/reframe/issues/42>.
+	ies[0].type = EV_KEY;
+	ies[0].code = KEY_WAKEUP;
+	ies[0].value = 1;
+
+	ies[1].type = EV_SYN;
+	ies[1].code = SYN_REPORT;
+	ies[1].value = 0;
+
+	write_may(this->ufd, ies, 2 * sizeof(*ies));
+
+	ies[0].type = EV_KEY;
+	ies[0].code = KEY_WAKEUP;
+	ies[0].value = 0;
+
+	write_may(this->ufd, ies, 2 * sizeof(*ies));
 }
 
 static void setup_uinput(struct this *this)
