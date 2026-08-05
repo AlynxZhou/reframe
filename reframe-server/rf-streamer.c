@@ -77,20 +77,15 @@ send_input_msg(RfStreamer *this, struct input_event *ies, const size_t length)
 	GOutputStream *os =
 		g_io_stream_get_output_stream(G_IO_STREAM(this->connection));
 
-	ret = rf_send_header(
-		this->connection, RF_MSG_TYPE_INPUT, length, &error
-	);
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_INPUT, length, &error);
 	if (ret <= 0)
 		goto out;
-	ret = g_output_stream_write(
-		os, ies, length * sizeof(*ies), NULL, &error
-	);
+	ret = g_output_stream_write(os, ies, length * sizeof(*ies), NULL, &error);
 
 out:
 	if (ret < 0) {
 		g_warning(
-			"Input: Failed to send input events: %s.",
-			error->message
+			"Input: Failed to send input events: %s.", error->message
 		);
 		rf_streamer_stop(this);
 	} else if (ret > 0) {

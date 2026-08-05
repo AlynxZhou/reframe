@@ -51,9 +51,7 @@ static EGLDisplay get_egl_display_from_drm_card(const char *card_path)
 	int num_devices = 0;
 	EGLDeviceEXT device = EGL_NO_DEVICE_EXT;
 	if (!eglQueryDevicesEXT(0, NULL, &max_devices)) {
-		g_warning(
-			"EGL: Failed to query max devices: %d.", eglGetError()
-		);
+		g_warning("EGL: Failed to query max devices: %d.", eglGetError());
 		return EGL_NO_DISPLAY;
 	}
 
@@ -132,9 +130,7 @@ static int setup_egl(RfConverter *this)
 
 	eglGetConfigs(this->display, NULL, 0, &count);
 	configs = g_malloc_n(count, sizeof(*configs));
-	if (!eglChooseConfig(
-		    this->display, config_attribs, configs, count, &n
-	    )) {
+	if (!eglChooseConfig(this->display, config_attribs, configs, count, &n)) {
 		config_attribs[1] = EGL_OPENGL_ES2_BIT;
 		eglChooseConfig(
 			this->display, config_attribs, configs, count, &n
@@ -276,9 +272,7 @@ static void unbind_buffers(RfConverter *this, unsigned int program)
 	glDisableVertexAttribArray(glGetAttribLocation(program, "in_position"));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glDisableVertexAttribArray(
-		glGetAttribLocation(program, "in_coordinate")
-	);
+	glDisableVertexAttribArray(glGetAttribLocation(program, "in_coordinate"));
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
@@ -289,8 +283,7 @@ static int setup_gl(RfConverter *this)
 		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
 	    )) {
 		g_warning(
-			"EGL: Failed to make context current: %d.",
-			eglGetError()
+			"EGL: Failed to make context current: %d.", eglGetError()
 		);
 		return -4;
 	}
@@ -421,9 +414,7 @@ static int setup_gl(RfConverter *this)
 	};
 	// clang-format on
 	glBindBuffer(GL_ARRAY_BUFFER, this->buffers[0]);
-	glBufferData(
-		GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW
-	);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	// clang-format off
@@ -805,18 +796,14 @@ static EGLImage make_image(EGLDisplay display, const struct rf_buffer *b)
 					     EGL_DMA_BUF_PLANE1_PITCH_EXT,
 					     EGL_DMA_BUF_PLANE2_PITCH_EXT,
 					     EGL_DMA_BUF_PLANE3_PITCH_EXT };
-	EGLAttrib modlo_keys[RF_MAX_FDS] = {
-		EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
-		EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
-		EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT,
-		EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT
-	};
-	EGLAttrib modhi_keys[RF_MAX_FDS] = {
-		EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
-		EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
-		EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT,
-		EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
-	};
+	EGLAttrib modlo_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+					     EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+					     EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT,
+					     EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT };
+	EGLAttrib modhi_keys[RF_MAX_FDS] = { EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
+					     EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
+					     EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT,
+					     EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT };
 	GArray *image_attribs = g_array_new(false, false, sizeof(EGLAttrib));
 	append_attrib(image_attribs, EGL_WIDTH, b->md.fb_width);
 	append_attrib(image_attribs, EGL_HEIGHT, b->md.fb_height);
@@ -1323,8 +1310,7 @@ GByteArray *rf_converter_convert(
 		    this->display, EGL_NO_SURFACE, EGL_NO_SURFACE, this->context
 	    )) {
 		g_warning(
-			"EGL: Failed to make context current: %d.",
-			eglGetError()
+			"EGL: Failed to make context current: %d.", eglGetError()
 		);
 		return NULL;
 	}

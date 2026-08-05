@@ -11,14 +11,10 @@ struct _RfLVNCServer {
 	GByteArray *buf;
 	GIOCondition io_flags;
 	rfbScreenInfo *screen;
-	unsigned int clients;
 	char *passwords[2];
 	char *desktop_name;
 	unsigned int width;
 	unsigned int height;
-	bool resize;
-	bool share;
-	bool running;
 };
 G_DEFINE_TYPE(RfLVNCServer, rf_lvnc_server, RF_TYPE_VNC_SERVER)
 
@@ -43,12 +39,17 @@ static void on_client_gone(rfbClientRec *client)
 
 	g_source_destroy(source);
 	g_source_unref(source);
-	if (this->clients-- == 1)
-		rf_vnc_server_handle_last_client(super);
+	rf_vnc_server_handle_client_gone(super);
 }
 
 static enum rfbNewClientAction on_new_client(rfbClientRec *client)
 {
+	RfLVNCServer *this = client->screen->screenData;
+	RfVNCServer *super = RF_VNC_SERVER(this);
+
+	if (!rf_vnc_server_handle_new_client(super))
+		return RFB_CLIENT_REFUSE;
+
 	client->clientGoneHook = on_client_gone;
 	return RFB_CLIENT_ACCEPT;
 }
@@ -64,13 +65,12 @@ static int on_set_desktop_size(
 	RfLVNCServer *this = client->screen->screenData;
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	if (!this->resize)
-		return rfbExtDesktopSize_ResizeProhibited;
+	if (width == this->width && height == this->height)
+		return rfbExtDesktopSize_Success;
 
-	if (width != this->width || height != this->height)
-		rf_vnc_server_handle_resize_event(super, width, height);
-
-	return rfbExtDesktopSize_Success;
+	return rf_vnc_server_handle_resize_event(super, width, height) ?
+		       rfbExtDesktopSize_Success :
+		       rfbExtDesktopSize_ResizeProhibited;
 }
 
 static void
@@ -109,7 +109,6 @@ static int on_incoming(
 )
 {
 	RfLVNCServer *this = data;
-	RfVNCServer *super = RF_VNC_SERVER(this);
 
 	if (this->screen == NULL) {
 		this->screen = rfbGetScreen(
@@ -144,32 +143,22 @@ static int on_incoming(
 		}
 		rfbInitServer(this->screen);
 	}
+
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	g_debug("VNC: Got new connection %p.", socket);
-	++this->clients;
-	if (this->clients == 1) {
-		rf_vnc_server_handle_first_client(super);
-	} else if (!this->share) {
-		--this->clients;
-		g_message(
-			"VNC: Incoming connection is refused because multiple connections are prohibited."
-		);
+	const int fd = g_socket_get_fd(socket);
+	// `rfbClient` owns fd, but we borrowed it from `GSocketConnection`.
+	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
+	if (client == NULL)
 		return false;
-	}
-	// Don't attach source on new client hook, because it may be called
-	// before we set client data.
+	// New client hook is called during `rfbNewClient()` so we have no way to
+	// pass source into new client hook, and that's why we create source
+	// after `rfbNewClient()`, otherwise we cannot destroy source if we
+	// refuse a incoming client.
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
-	const int fd = g_socket_get_fd(socket);
-	// `rfbClient` owns fd, but we got it from `GSocketConnection`.
-	rfbClientRec *client = rfbNewClient(this->screen, dup(fd));
 	client->clientData = source;
-	// Just in case client disconnects very soon.
-	if (client->sock == -1) {
-		on_client_gone(client);
-		return false;
-	}
 
 	return true;
 }
@@ -233,9 +222,6 @@ static void start(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (this->running)
-		return;
-
 	this->passwords[0] = rf_config_get_vnc_password(this->config);
 	this->desktop_name = rf_config_get_connector(this->config);
 	this->width = rf_config_get_default_width(this->config);
@@ -254,16 +240,9 @@ static void start(RfVNCServer *super)
 			this->height
 		);
 	}
-	this->resize = rf_config_get_resize(this->config);
-	g_message(
-		"VNC: Client resizing will be %s.",
-		this->resize ? "allowed" : "prohibited"
-	);
-	this->share = rf_config_get_share(this->config);
-	g_message(
-		"VNC: Multiple connections will be %s.",
-		this->share ? "allowed" : "prohibited"
-	);
+
+	rf_vnc_server_set_resize(super, rf_config_get_resize(this->config));
+	rf_vnc_server_set_share(super, rf_config_get_share(this->config));
 
 	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
@@ -278,28 +257,13 @@ static void start(RfVNCServer *super)
 	g_signal_connect(
 		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
-
-	this->running = true;
-}
-
-static bool is_running(RfVNCServer *super)
-{
-	RfLVNCServer *this = RF_LVNC_SERVER(super);
-
-	return this->running;
 }
 
 static void stop(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (!this->running)
-		return;
-
-	this->running = false;
-
 	rf_vnc_server_flush(super);
-	this->clients = 0;
 	// This must be called before close the listener.
 	//
 	// See <https://docs.gtk.org/gio/method.SocketService.stop.html#description>.
@@ -311,49 +275,6 @@ static void stop(RfVNCServer *super)
 	g_clear_pointer(&this->passwords[0], g_free);
 }
 
-static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
-{
-	RfLVNCServer *this = RF_LVNC_SERVER(super);
-
-	g_clear_pointer(&this->desktop_name, g_free);
-	this->desktop_name = g_strdup(desktop_name);
-	// Well this does not work because VNC does not update desktop name to
-	// client after it is inited. Clients will get the previous desktop name
-	// which may not be correct.
-	// if (this->screen != NULL) {
-	// 	this->screen->desktopName = this->desktop_name;
-	// 	if (this->running && rfbIsActive(this->screen))
-	// 		rfbProcessEvents(this->screen, 0);
-	// }
-}
-
-static void send_clipboard_text(RfVNCServer *super, const char *text)
-{
-	RfLVNCServer *this = RF_LVNC_SERVER(super);
-
-	if (!this->running || this->screen == NULL ||
-	    !rfbIsActive(this->screen))
-		return;
-
-	g_autofree char *ustr = g_strdup(text);
-	g_autofree char *fstr = g_str_to_ascii(text, "C");
-	if (fstr == NULL) {
-		g_warning("Failed to convert UTF-8 to Latin 1.");
-		rfbSendServerCutTextUTF8(
-			this->screen, ustr, strlen(ustr) + 1, NULL, 0
-		);
-	} else {
-		rfbSendServerCutTextUTF8(
-			this->screen,
-			ustr,
-			strlen(ustr) + 1,
-			fstr,
-			strlen(fstr) + 1
-		);
-	}
-	rfbProcessEvents(this->screen, 0);
-}
-
 static void
 update(RfVNCServer *super,
        GByteArray *buf,
@@ -363,12 +284,10 @@ update(RfVNCServer *super,
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (!this->running || this->screen == NULL ||
-	    !rfbIsActive(this->screen))
+	if (this->screen == NULL || !rfbIsActive(this->screen))
 		return;
 
-	if (this->buf != buf || this->width != width ||
-	    this->height != height) {
+	if (this->buf != buf || this->width != width || this->height != height) {
 		if (this->buf != buf) {
 			g_clear_pointer(&this->buf, g_byte_array_unref);
 			this->buf = g_byte_array_ref(buf);
@@ -407,8 +326,7 @@ static void flush(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (!this->running || this->screen == NULL ||
-	    !rfbIsActive(this->screen))
+	if (this->screen == NULL || !rfbIsActive(this->screen))
 		return;
 
 	rfbClientIteratorPtr it = rfbGetClientIterator(this->screen);
@@ -416,6 +334,48 @@ static void flush(RfVNCServer *super)
 	while ((cl = rfbClientIteratorNext(it)))
 		rfbCloseClient(cl);
 	rfbReleaseClientIterator(it);
+	rfbProcessEvents(this->screen, 0);
+}
+
+static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
+{
+	RfLVNCServer *this = RF_LVNC_SERVER(super);
+
+	g_clear_pointer(&this->desktop_name, g_free);
+	this->desktop_name = g_strdup(desktop_name);
+	// Well, this does not work because libvncserver does not update desktop
+	// name to client after it is inited. Clients will get the previous
+	// desktop name which may not be correct.
+	// if (this->screen != NULL) {
+	// 	this->screen->desktopName = this->desktop_name;
+	// 	if (this->running && rfbIsActive(this->screen))
+	// 		rfbProcessEvents(this->screen, 0);
+	// }
+}
+
+static void send_clipboard_text(RfVNCServer *super, const char *text)
+{
+	RfLVNCServer *this = RF_LVNC_SERVER(super);
+
+	if (this->screen == NULL || !rfbIsActive(this->screen))
+		return;
+
+	g_autofree char *ustr = g_strdup(text);
+	g_autofree char *fstr = g_str_to_ascii(text, "C");
+	if (fstr == NULL) {
+		g_warning("Failed to convert UTF-8 to Latin 1.");
+		rfbSendServerCutTextUTF8(
+			this->screen, ustr, strlen(ustr) + 1, NULL, 0
+		);
+	} else {
+		rfbSendServerCutTextUTF8(
+			this->screen,
+			ustr,
+			strlen(ustr) + 1,
+			fstr,
+			strlen(fstr) + 1
+		);
+	}
 	rfbProcessEvents(this->screen, 0);
 }
 
@@ -428,12 +388,11 @@ static void rf_lvnc_server_class_init(RfLVNCServerClass *klass)
 	o_class->finalize = finalize;
 
 	v_class->start = start;
-	v_class->is_running = is_running;
 	v_class->stop = stop;
-	v_class->set_desktop_name = set_desktop_name;
-	v_class->send_clipboard_text = send_clipboard_text;
 	v_class->update = update;
 	v_class->flush = flush;
+	v_class->set_desktop_name = set_desktop_name;
+	v_class->send_clipboard_text = send_clipboard_text;
 }
 
 static void rf_lvnc_server_init(RfLVNCServer *this)
@@ -448,8 +407,6 @@ static void rf_lvnc_server_init(RfLVNCServer *this)
 	this->desktop_name = NULL;
 	this->width = 0;
 	this->height = 0;
-	this->resize = true;
-	this->running = false;
 }
 
 G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config)

@@ -78,8 +78,8 @@ static int auth_pid(struct this *this, pid_t pid, const char *target)
 
 	g_autoptr(GError) error = NULL;
 	g_autofree char *proc_exe = g_strdup_printf(
-		G_DIR_SEPARATOR_S "proc" G_DIR_SEPARATOR_S
-				  "%d" G_DIR_SEPARATOR_S "exe",
+		G_DIR_SEPARATOR_S "proc" G_DIR_SEPARATOR_S "%d" G_DIR_SEPARATOR_S
+				  "exe",
 		pid
 	);
 	g_autofree char *bin = g_file_read_link(proc_exe, &error);
@@ -164,9 +164,8 @@ static uint64_t get_plane_prop(
 )
 {
 	uint64_t value = default_value;
-	drmModeObjectProperties *props = drmModeObjectGetProperties(
-		cfd, plane_id, DRM_MODE_OBJECT_PLANE
-	);
+	drmModeObjectProperties *props =
+		drmModeObjectGetProperties(cfd, plane_id, DRM_MODE_OBJECT_PLANE);
 	if (props == NULL)
 		return value;
 	for (size_t i = 0; i < props->count_props; ++i) {
@@ -343,9 +342,7 @@ send_frame_msg(struct this *this, size_t length, struct rf_buffer *bufs)
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
 
-	ret = rf_send_header(
-		this->connection, RF_MSG_TYPE_FRAME, length, &error
-	);
+	ret = rf_send_header(this->connection, RF_MSG_TYPE_FRAME, length, &error);
 	if (ret <= 0)
 		goto out;
 	for (size_t i = 0; i < length; ++i) {
@@ -508,8 +505,7 @@ send_connector_name_msg(struct this *this, const char *connector_name)
 out:
 	if (ret < 0)
 		g_warning(
-			"DRM: Failed to send connector name: %s.",
-			error->message
+			"DRM: Failed to send connector name: %s.", error->message
 		);
 	return ret;
 }
@@ -588,8 +584,7 @@ get_usable_card_and_connector(struct this *this, const char *connector_name)
 			continue;
 		g_debug("DRM: Finding the first usable connector on card %s.",
 			card_path);
-		drmModeConnector *connector =
-			get_connector(cfd, connector_name);
+		drmModeConnector *connector = get_connector(cfd, connector_name);
 		if (connector != NULL) {
 			this->cfd = cfd;
 			this->card_path = g_strdup(card_path);
@@ -665,8 +660,7 @@ static void setup_drm(struct this *this)
 		g_error("DRM: Failed to find a primary plane for CRTC.");
 	this->cursor = rf_config_get_cursor(this->config);
 	g_message(
-		"DRM: Cursor plane is %s.",
-		this->cursor ? "enabled" : "disabled"
+		"DRM: Cursor plane is %s.", this->cursor ? "enabled" : "disabled"
 	);
 
 	send_card_path_msg(this, this->card_path);

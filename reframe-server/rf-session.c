@@ -30,8 +30,7 @@ on_clipboard_text_msg(RfSession *this, GSocketConnection *connection)
 	size_t length = 0;
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
-	GInputStream *is =
-		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(connection));
 
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
 	if (ret <= 0)
@@ -66,8 +65,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	char type;
 	g_autoptr(GSocketConnection) connection =
 		g_socket_connection_factory_create_connection(socket);
-	GInputStream *is =
-		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(connection));
 	ret = g_input_stream_read(is, &type, sizeof(type), NULL, &error);
 	if (ret <= 0) {
 		if (ret < 0)

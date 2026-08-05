@@ -36,7 +36,11 @@ typedef struct _RfVNCServerPrivate {
 	struct xkb_context *xkb_context;
 	struct xkb_keymap *xkb_keymap;
 	unsigned int client_idle_id;
-	bool clients;
+	bool connected;
+	unsigned int clients;
+	bool resize;
+	bool share;
+	bool running;
 } RfVNCServerPrivate;
 G_DEFINE_TYPE_WITH_PRIVATE(RfVNCServer, rf_vnc_server, G_TYPE_OBJECT)
 
@@ -74,7 +78,6 @@ static void rf_vnc_server_class_init(RfVNCServerClass *klass)
 	o_class->finalize = finalize;
 
 	klass->start = NULL;
-	klass->is_running = NULL;
 	klass->stop = NULL;
 	klass->set_desktop_name = NULL;
 	klass->send_clipboard_text = NULL;
@@ -185,19 +188,22 @@ void rf_vnc_server_start(RfVNCServer *this)
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->start != NULL);
 
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (priv->running)
+		return;
+
+	priv->connected = false;
+	priv->clients = 0;
+	priv->resize = true;
+	priv->share = true;
+
 	klass->start(this);
-}
 
-bool rf_vnc_server_is_running(RfVNCServer *this)
-{
-	g_return_val_if_fail(RF_IS_VNC_SERVER(this), false);
-
-	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
-	g_return_val_if_fail(klass->is_running != NULL, false);
-
-	return klass->is_running(this);
+	priv->running = true;
 }
 
 void rf_vnc_server_stop(RfVNCServer *this)
@@ -205,7 +211,15 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->stop != NULL);
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
+
+	priv->running = false;
 
 	klass->stop(this);
 }
@@ -216,6 +230,7 @@ void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
 	g_return_if_fail(desktop_name != NULL);
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->set_desktop_name != NULL);
 
 	klass->set_desktop_name(this, desktop_name);
@@ -227,7 +242,13 @@ void rf_vnc_server_send_clipboard_text(RfVNCServer *this, const char *text)
 	g_return_if_fail(text != NULL);
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->send_clipboard_text != NULL);
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
 
 	klass->send_clipboard_text(this, text);
 }
@@ -245,7 +266,13 @@ void rf_vnc_server_update(
 	g_return_if_fail(width > 0 && height > 0);
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->update != NULL);
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
 
 	klass->update(this, buf, width, height, damage);
 }
@@ -255,9 +282,68 @@ void rf_vnc_server_flush(RfVNCServer *this)
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
+
 	g_return_if_fail(klass->flush != NULL);
 
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
+
 	klass->flush(this);
+
+	priv->clients = 0;
+}
+
+void rf_vnc_server_set_resize(RfVNCServer *this, bool resize)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	priv->resize = resize;
+	g_message(
+		"VNC: Client resizing will be %s.",
+		priv->resize ? "allowed" : "prohibited"
+	);
+}
+
+void rf_vnc_server_set_share(RfVNCServer *this, bool share)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	priv->share = share;
+	g_message(
+		"VNC: Multiple connections will be %s.",
+		priv->share ? "allowed" : "prohibited"
+	);
+}
+
+bool rf_vnc_server_handle_resize_event(
+	RfVNCServer *this,
+	unsigned int width,
+	unsigned int height
+)
+{
+	g_return_val_if_fail(RF_IS_VNC_SERVER(this), false);
+	g_return_val_if_fail(width > 0 && height > 0, false);
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return false;
+
+	if (!priv->resize)
+		return false;
+
+	g_debug("VNC: Received resize event for width %d and height %d.",
+		width,
+		height);
+	g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
+
+	return true;
 }
 
 struct iterate_data {
@@ -288,24 +374,6 @@ static void iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 	}
 }
 
-void rf_vnc_server_handle_resize_event(
-	RfVNCServer *this,
-	unsigned int width,
-	unsigned int height
-)
-{
-	g_return_if_fail(RF_IS_VNC_SERVER(this));
-	g_return_if_fail(width > 0 && height > 0);
-
-	if (!rf_vnc_server_is_running(this))
-		return;
-
-	g_debug("VNC: Received resize event for width %d and height %d.",
-		width,
-		height);
-	g_signal_emit(this, sigs[SIG_RESIZE_EVENT], 0, width, height);
-}
-
 void rf_vnc_server_handle_keysym_event(
 	RfVNCServer *this,
 	uint32_t keysym,
@@ -314,10 +382,11 @@ void rf_vnc_server_handle_keysym_event(
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	if (!rf_vnc_server_is_running(this))
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
 		return;
 
-	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
 	struct iterate_data idata = {
 		.keysym = keysym,
 		.keycode = XKB_KEYCODE_INVALID,
@@ -325,9 +394,7 @@ void rf_vnc_server_handle_keysym_event(
 	};
 	xkb_keymap_key_for_each(priv->xkb_keymap, iterate_keys, &idata);
 	if (idata.keycode == XKB_KEYCODE_INVALID) {
-		g_warning(
-			"Input: Failed to find keysym %04x in keymap.", keysym
-		);
+		g_warning("Input: Failed to find keysym %04x in keymap.", keysym);
 		return;
 	}
 	const uint32_t keycode = RF_KEY_CODE_XKB_TO_EV(idata.keycode);
@@ -346,7 +413,9 @@ void rf_vnc_server_handle_keycode_event(
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	if (!rf_vnc_server_is_running(this))
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
 		return;
 
 	g_debug("Input: Received key %s for keycode %u.",
@@ -369,7 +438,9 @@ void rf_vnc_server_handle_pointer_event(
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 
-	if (!rf_vnc_server_is_running(this))
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
 		return;
 
 	const bool left = mask & 1;
@@ -420,7 +491,9 @@ void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text)
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
 	g_return_if_fail(text != NULL);
 
-	if (!rf_vnc_server_is_running(this))
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
 		return;
 
 	g_debug("VNC: Received clipboard text %s.", text);
@@ -439,44 +512,72 @@ static void emit_client_signal(void *data)
 
 	priv->client_idle_id = 0;
 
-	if (!rf_vnc_server_is_running(this))
+	if (!priv->running)
 		return;
 
 	g_debug("Signal: Emitting VNC %s client signal.",
-		priv->clients ? "first" : "last");
+		priv->connected ? "first" : "last");
 	g_signal_emit(
 		this,
-		priv->clients ? sigs[SIG_FIRST_CLIENT] : sigs[SIG_LAST_CLIENT],
+		priv->connected ? sigs[SIG_FIRST_CLIENT] : sigs[SIG_LAST_CLIENT],
 		0
 	);
 }
 
-void rf_vnc_server_handle_first_client(RfVNCServer *this)
+static void handle_first_client(RfVNCServer *this)
 {
-	g_return_if_fail(RF_IS_VNC_SERVER(this));
-
-	if (!rf_vnc_server_is_running(this))
-		return;
-
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
-	priv->clients = true;
+
+	priv->connected = true;
 
 	if (priv->client_idle_id != 0)
 		return;
 	priv->client_idle_id = g_idle_add_once(emit_client_signal, this);
 }
 
-void rf_vnc_server_handle_last_client(RfVNCServer *this)
+static void handle_last_client(RfVNCServer *this)
 {
-	g_return_if_fail(RF_IS_VNC_SERVER(this));
-
-	if (!rf_vnc_server_is_running(this))
-		return;
-
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
-	priv->clients = false;
+
+	priv->connected = false;
 
 	if (priv->client_idle_id != 0)
 		return;
 	priv->client_idle_id = g_idle_add_once(emit_client_signal, this);
+}
+
+bool rf_vnc_server_handle_new_client(RfVNCServer *this)
+{
+	g_return_val_if_fail(RF_IS_VNC_SERVER(this), false);
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return false;
+
+	++priv->clients;
+	if (priv->clients == 1) {
+		handle_first_client(this);
+	} else if (!priv->share) {
+		--priv->clients;
+		g_message(
+			"VNC: Incoming connection is refused because multiple connections are prohibited."
+		);
+		return false;
+	}
+
+	return true;
+}
+
+void rf_vnc_server_handle_client_gone(RfVNCServer *this)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
+
+	if (priv->clients-- == 1)
+		handle_last_client(this);
 }

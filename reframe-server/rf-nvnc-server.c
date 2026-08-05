@@ -18,19 +18,15 @@ struct _RfNVNCServer {
 	struct aml *aml;
 	struct nvnc *nvnc;
 	struct nvnc_display *display;
-	unsigned int clients;
 	char *password;
 	char *desktop_name;
 	unsigned int width;
 	unsigned int height;
-	bool resize;
-	bool share;
 	char *username;
 	bool allow_broken_crypto;
 	char *rsa_private_key_file;
 	char *tls_private_key_file;
 	char *tls_certificate_file;
-	bool running;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
 
@@ -110,13 +106,10 @@ static bool on_resize_event(
 	unsigned int width = nvnc_desktop_layout_get_width(layout);
 	unsigned int height = nvnc_desktop_layout_get_height(layout);
 
-	if (!this->resize)
-		return false;
+	if (width == this->width && height == this->height)
+		return true;
 
-	if (width != this->width || height != this->height)
-		rf_vnc_server_handle_resize_event(super, width, height);
-
-	return true;
+	return rf_vnc_server_handle_resize_event(super, width, height);
 }
 
 static void on_client_gone(void *data)
@@ -126,8 +119,7 @@ static void on_client_gone(void *data)
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	if (this->clients-- == 1)
-		rf_vnc_server_handle_last_client(super);
+	rf_vnc_server_handle_client_gone(super);
 }
 
 static void on_new_client(struct nvnc_client *client)
@@ -136,15 +128,8 @@ static void on_new_client(struct nvnc_client *client)
 	RfNVNCServer *this = nvnc_get_userdata(nvnc);
 	RfVNCServer *super = RF_VNC_SERVER(this);
 
-	++this->clients;
-	if (this->clients == 1) {
-		rf_vnc_server_handle_first_client(super);
-	} else if (!this->share) {
-		--this->clients;
+	if (!rf_vnc_server_handle_new_client(super)) {
 		nvnc_client_close(client);
-		g_message(
-			"VNC: Incoming connection is refused because multiple connections are prohibited."
-		);
 		return;
 	}
 
@@ -223,9 +208,6 @@ static void start(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
-	if (this->running)
-		return;
-
 	this->password = rf_config_get_vnc_password(this->config);
 	this->desktop_name = rf_config_get_connector(this->config);
 	this->width = rf_config_get_default_width(this->config);
@@ -244,16 +226,10 @@ static void start(RfVNCServer *super)
 			this->height
 		);
 	}
-	this->resize = rf_config_get_resize(this->config);
-	g_message(
-		"VNC: Client resizing will be %s.",
-		this->resize ? "allowed" : "prohibited"
-	);
-	this->share = rf_config_get_share(this->config);
-	g_message(
-		"VNC: Multiple connections will be %s.",
-		this->share ? "allowed" : "prohibited"
-	);
+
+	rf_vnc_server_set_resize(super, rf_config_get_resize(this->config));
+	rf_vnc_server_set_share(super, rf_config_get_share(this->config));
+
 	this->username = rf_config_get_neatvnc_username(this->config);
 	this->allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
@@ -263,8 +239,6 @@ static void start(RfVNCServer *super)
 		rf_config_get_neatvnc_tls_private_key_file(this->config);
 	this->tls_certificate_file =
 		rf_config_get_neatvnc_tls_certificate_file(this->config);
-
-	this->clients = 0;
 
 	this->aml = aml_new();
 	aml_set_default(this->aml);
@@ -359,25 +333,11 @@ static void start(RfVNCServer *super)
 	this->aml_id = g_unix_fd_add(
 		aml_get_fd(this->aml), this->io_flags, poll_aml, this
 	);
-
-	this->running = true;
-}
-
-static bool is_running(RfVNCServer *super)
-{
-	RfNVNCServer *this = RF_NVNC_SERVER(super);
-
-	return this->running;
 }
 
 static void stop(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
-
-	if (!this->running)
-		return;
-
-	this->running = false;
 
 	rf_vnc_server_flush(super);
 	if (this->aml_id != 0) {
@@ -401,27 +361,6 @@ static void stop(RfVNCServer *super)
 	g_clear_pointer(&this->password, g_free);
 }
 
-static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
-{
-	RfNVNCServer *this = RF_NVNC_SERVER(super);
-
-	g_clear_pointer(&this->desktop_name, g_free);
-	this->desktop_name = g_strdup(desktop_name);
-#ifndef NEATVNC_UNSTABLE_API
-	nvnc_set_name(this->nvnc, this->desktop_name);
-#endif
-}
-
-static void send_clipboard_text(RfVNCServer *super, const char *text)
-{
-	RfNVNCServer *this = RF_NVNC_SERVER(super);
-
-	if (!this->running)
-		return;
-
-	nvnc_send_cut_text(this->nvnc, text, strlen(text) + 1);
-}
-
 static void
 update(RfVNCServer *super,
        GByteArray *buf,
@@ -430,9 +369,6 @@ update(RfVNCServer *super,
        const struct rf_rect *damage)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
-
-	if (!this->running)
-		return;
 
 	if (this->buf != buf) {
 		g_clear_pointer(&this->buf, g_byte_array_unref);
@@ -449,9 +385,7 @@ update(RfVNCServer *super,
 			&region, damage->x, damage->y, damage->w, damage->h
 		);
 	else
-		pixman_region_init_rect(
-			&region, 0, 0, this->width, this->height
-		);
+		pixman_region_init_rect(&region, 0, 0, this->width, this->height);
 #ifndef NEATVNC_UNSTABLE_API
 	struct nvnc_frame *frame = nvnc_frame_from_raw(
 		this->buf->data,
@@ -481,15 +415,30 @@ static void flush(RfVNCServer *super)
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
-	if (!this->running)
-		return;
-
 	struct nvnc_client *client = nvnc_client_first(this->nvnc);
 	while (client != NULL) {
 		struct nvnc_client *next = nvnc_client_next(client);
 		nvnc_client_close(client);
 		client = next;
 	}
+}
+
+static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
+{
+	RfNVNCServer *this = RF_NVNC_SERVER(super);
+
+	g_clear_pointer(&this->desktop_name, g_free);
+	this->desktop_name = g_strdup(desktop_name);
+#ifndef NEATVNC_UNSTABLE_API
+	nvnc_set_name(this->nvnc, this->desktop_name);
+#endif
+}
+
+static void send_clipboard_text(RfVNCServer *super, const char *text)
+{
+	RfNVNCServer *this = RF_NVNC_SERVER(super);
+
+	nvnc_send_cut_text(this->nvnc, text, strlen(text) + 1);
 }
 
 static void rf_nvnc_server_class_init(RfNVNCServerClass *klass)
@@ -501,12 +450,11 @@ static void rf_nvnc_server_class_init(RfNVNCServerClass *klass)
 	// o_class->finalize = finalize;
 
 	v_class->start = start;
-	v_class->is_running = is_running;
 	v_class->stop = stop;
-	v_class->set_desktop_name = set_desktop_name;
-	v_class->send_clipboard_text = send_clipboard_text;
 	v_class->update = update;
 	v_class->flush = flush;
+	v_class->set_desktop_name = set_desktop_name;
+	v_class->send_clipboard_text = send_clipboard_text;
 }
 
 static void rf_nvnc_server_init(RfNVNCServer *this)
@@ -522,8 +470,6 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 	this->desktop_name = NULL;
 	this->width = 0;
 	this->height = 0;
-	this->resize = true;
-	this->running = false;
 }
 
 G_MODULE_EXPORT RfVNCServer *rf_vnc_server_new(RfConfig *config)

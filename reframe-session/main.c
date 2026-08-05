@@ -84,9 +84,7 @@ static void on_clipboard_changed(GdkClipboard *clipboard, void *data)
 	if (!gdk_content_formats_contain_mime_type(formats, "text/plain"))
 		return;
 
-	gdk_clipboard_read_text_async(
-		clipboard, NULL, on_read_text_finish, this
-	);
+	gdk_clipboard_read_text_async(clipboard, NULL, on_read_text_finish, this);
 }
 
 static ssize_t
@@ -96,8 +94,7 @@ on_clipboard_text_msg(struct this *this, GSocketConnection *connection)
 	size_t length = 0;
 	ssize_t ret = 0;
 	g_autoptr(GError) error = NULL;
-	GInputStream *is =
-		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(connection));
 
 	ret = g_input_stream_read(is, &length, sizeof(length), NULL, &error);
 	if (ret <= 0)
@@ -132,8 +129,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	char type;
 	g_autoptr(GSocketConnection) connection =
 		g_socket_connection_factory_create_connection(socket);
-	GInputStream *is =
-		g_io_stream_get_input_stream(G_IO_STREAM(connection));
+	GInputStream *is = g_io_stream_get_input_stream(G_IO_STREAM(connection));
 	ret = g_input_stream_read(is, &type, sizeof(type), NULL, &error);
 	if (ret <= 0) {
 		if (ret < 0)
@@ -174,8 +170,7 @@ static void connect(struct this *this, const char *socket_path)
 	);
 	if (connection == NULL) {
 		g_warning(
-			"Failed to connect to ReFrame Server: %s",
-			error->message
+			"Failed to connect to ReFrame Server: %s", error->message
 		);
 		return;
 	}
@@ -294,10 +289,7 @@ int main(int argc, char *argv[])
 	if (this->clipboard == NULL)
 		g_error("Failed to get clipboard.");
 	g_signal_connect(
-		this->clipboard,
-		"changed",
-		G_CALLBACK(on_clipboard_changed),
-		this
+		this->clipboard, "changed", G_CALLBACK(on_clipboard_changed), this
 	);
 
 	this->sockets = g_hash_table_new_full(
