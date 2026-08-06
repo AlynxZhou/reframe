@@ -623,6 +623,11 @@ void rf_streamer_stop(RfStreamer *this)
 	g_clear_object(&this->connection);
 }
 
+static inline int down_or_up(bool b)
+{
+	return b ? 1 : 0;
+}
+
 void rf_streamer_send_keyboard_event(
 	RfStreamer *this,
 	uint32_t keycode,
@@ -639,7 +644,7 @@ void rf_streamer_send_keyboard_event(
 
 	ies[0].type = EV_KEY;
 	ies[0].code = keycode;
-	ies[0].value = down;
+	ies[0].value = down_or_up(down);
 
 	ies[1].type = EV_SYN;
 	ies[1].code = SYN_REPORT;
@@ -703,29 +708,29 @@ void rf_streamer_send_pointer_event(
 
 	ies[length].type = EV_KEY;
 	ies[length].code = BTN_LEFT;
-	ies[length].value = left;
+	ies[length].value = down_or_up(left);
 	++length;
 
 	ies[length].type = EV_KEY;
 	ies[length].code = BTN_MIDDLE;
-	ies[length].value = middle;
+	ies[length].value = down_or_up(middle);
 	++length;
 
 	ies[length].type = EV_KEY;
 	ies[length].code = BTN_RIGHT;
-	ies[length].value = right;
+	ies[length].value = down_or_up(right);
 	++length;
 
 	// The back/forward side buttons on mouse are neither BTN_BACK/FORWARD or
 	// BTN_4/5, they actually send BTN_SIDE and BTN_EXTRA.
 	ies[length].type = EV_KEY;
 	ies[length].code = BTN_SIDE;
-	ies[length].value = back;
+	ies[length].value = down_or_up(back);
 	++length;
 
 	ies[length].type = EV_KEY;
 	ies[length].code = BTN_EXTRA;
-	ies[length].value = forward;
+	ies[length].value = down_or_up(forward);
 	++length;
 
 	if (wup || wdown) {

@@ -6,6 +6,8 @@
 
 G_BEGIN_DECLS
 
+enum rf_wakeup_device { RF_WAKEUP_DEVICE_KEYBOARD, RF_WAKEUP_DEVICE_POINTER };
+
 enum rf_damage_type {
 	RF_DAMAGE_TYPE_DUMB,
 	RF_DAMAGE_TYPE_CPU,
@@ -29,6 +31,7 @@ bool rf_config_get_resize(RfConfig *this);
 bool rf_config_get_share(RfConfig *this);
 bool rf_config_get_cursor(RfConfig *this);
 bool rf_config_get_wakeup(RfConfig *this);
+enum rf_wakeup_device rf_config_get_wakeup_device(RfConfig *this);
 enum rf_damage_type rf_config_get_damage(RfConfig *this);
 unsigned int rf_config_get_fps(RfConfig *this);
 char **rf_config_get_vnc_ip_list(RfConfig *this);

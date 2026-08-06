@@ -229,6 +229,21 @@ bool rf_config_get_wakeup(RfConfig *this)
 	return wakeup;
 }
 
+enum rf_wakeup_device rf_config_get_wakeup_device(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), RF_WAKEUP_DEVICE_KEYBOARD);
+
+	g_autoptr(GError) error = NULL;
+	g_autofree char *wakeup_device = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_REFRAME, "wakeup-device", &error
+	);
+	if (error != NULL || wakeup_device == NULL)
+		return RF_WAKEUP_DEVICE_KEYBOARD;
+	if (g_strcmp0(wakeup_device, "pointer") == 0)
+		return RF_WAKEUP_DEVICE_POINTER;
+	return RF_WAKEUP_DEVICE_KEYBOARD;
+}
+
 enum rf_damage_type rf_config_get_damage(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), RF_DAMAGE_TYPE_CPU);

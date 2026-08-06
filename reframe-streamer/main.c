@@ -20,7 +20,8 @@
 #	include <systemd/sd-daemon.h>
 #endif
 
-#define WAKEUP_MAX_EVENTS 3
+#define WAKEUP_POINTER_MAX_EVENTS 3
+#define WAKEUP_KEYBOARD_MAX_EVENTS 2
 
 // clang-format off
 #define ioctl_must(...)                                                         \
@@ -31,7 +32,7 @@
 				__LINE__,                                        \
 				e);                                              \
 	} G_STMT_END
-#define ioctl_may(...)                                                          \
+#define ioctl_may(...)							\
 	G_STMT_START {                                                           \
 		int e;                                                           \
 		if ((e = ioctl(__VA_ARGS__)))                                    \
@@ -67,7 +68,6 @@ struct this {
 	bool cursor;
 	uint32_t cursor_id;
 	int ufd;
-	bool wakeup;
 	bool skip_auth;
 };
 
@@ -677,18 +677,13 @@ static void clean_drm(struct this *this)
 	g_clear_pointer(&this->connector_name, g_free);
 }
 
-static void wakeup_uinput(struct this *this)
+static void wakeup_uinput_pointer(struct this *this)
 {
-	g_message(
-		"Input: Waiting for 1s to let userspace detect the uinput device before wakeup."
-	);
-	g_usleep(G_USEC_PER_SEC);
-
 	// Because we are not a relative device, we cannot send relative events
 	// like moving pointer 1 unit right, instead, we move the pointer from
 	// bottom right to top left, this is done by sending two absolute events.
-	struct input_event ies[WAKEUP_MAX_EVENTS];
-	memset(ies, 0, WAKEUP_MAX_EVENTS * sizeof(*ies));
+	struct input_event ies[WAKEUP_POINTER_MAX_EVENTS];
+	memset(ies, 0, WAKEUP_POINTER_MAX_EVENTS * sizeof(*ies));
 
 	ies[0].type = EV_ABS;
 	ies[0].code = ABS_X;
@@ -702,22 +697,62 @@ static void wakeup_uinput(struct this *this)
 	ies[2].code = SYN_REPORT;
 	ies[2].value = 0;
 
-	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+	write_may(this->ufd, ies, WAKEUP_POINTER_MAX_EVENTS * sizeof(*ies));
 
 	g_message(
 		"Input: Waiting for 0.1s to let userspace process the movement."
 	);
 	g_usleep(0.1 * G_USEC_PER_SEC);
 
-	ies[0].type = EV_ABS;
-	ies[0].code = ABS_X;
 	ies[0].value = 0;
 
-	ies[1].type = EV_ABS;
-	ies[1].code = ABS_Y;
 	ies[1].value = 0;
 
-	write_may(this->ufd, ies, WAKEUP_MAX_EVENTS * sizeof(*ies));
+	write_may(this->ufd, ies, WAKEUP_POINTER_MAX_EVENTS * sizeof(*ies));
+}
+
+static void wakeup_uinput_keyboard(struct this *this)
+{
+	struct input_event ies[WAKEUP_KEYBOARD_MAX_EVENTS];
+	memset(ies, 0, WAKEUP_KEYBOARD_MAX_EVENTS * sizeof(*ies));
+
+	ies[0].type = EV_KEY;
+	ies[0].code = KEY_WAKEUP;
+	ies[0].value = 1;
+
+	ies[1].type = EV_SYN;
+	ies[1].code = SYN_REPORT;
+	ies[1].value = 0;
+
+	write_may(this->ufd, ies, WAKEUP_KEYBOARD_MAX_EVENTS * sizeof(*ies));
+
+	g_message("Input: Waiting for 0.1s to let userspace process the press.");
+	g_usleep(0.1 * G_USEC_PER_SEC);
+
+	ies[0].value = 0;
+
+	write_may(this->ufd, ies, WAKEUP_KEYBOARD_MAX_EVENTS * sizeof(*ies));
+}
+
+static void wakeup_uinput(struct this *this)
+{
+	enum rf_wakeup_device wakeup_device =
+		rf_config_get_wakeup_device(this->config);
+	g_message(
+		"Input: Wakeup device is %s.",
+		wakeup_device == RF_WAKEUP_DEVICE_POINTER ? "pointer" :
+							    "keyboard"
+	);
+
+	g_message(
+		"Input: Waiting for 1s to let userspace detect the uinput device before wakeup."
+	);
+	g_usleep(G_USEC_PER_SEC);
+
+	if (wakeup_device == RF_WAKEUP_DEVICE_POINTER)
+		wakeup_uinput_pointer(this);
+	else
+		wakeup_uinput_keyboard(this);
 }
 
 static void setup_uinput(struct this *this)
@@ -773,8 +808,8 @@ static void setup_uinput(struct this *this)
 	ioctl_must(this->ufd, UI_DEV_CREATE);
 
 	// If screen is turned off, we cannot get CRTC, so we have to wake it up.
-	this->wakeup = rf_config_get_wakeup(this->config);
-	if (this->wakeup)
+	bool wakeup = rf_config_get_wakeup(this->config);
+	if (wakeup)
 		wakeup_uinput(this);
 }
 
