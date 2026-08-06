@@ -370,6 +370,9 @@ update(RfVNCServer *super,
 {
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
+	if (buf == NULL)
+		return;
+
 	if (this->buf != buf) {
 		g_clear_pointer(&this->buf, g_byte_array_unref);
 		this->buf = g_byte_array_ref(buf);

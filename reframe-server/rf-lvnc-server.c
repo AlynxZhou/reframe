@@ -287,6 +287,9 @@ update(RfVNCServer *super,
 	if (this->screen == NULL || !rfbIsActive(this->screen))
 		return;
 
+	if (buf == NULL)
+		goto out;
+
 	if (this->buf != buf || this->width != width || this->height != height) {
 		if (this->buf != buf) {
 			g_clear_pointer(&this->buf, g_byte_array_unref);
@@ -319,6 +322,7 @@ update(RfVNCServer *super,
 		rfbMarkRectAsModified(
 			this->screen, 0, 0, this->width, this->height
 		);
+out:
 	rfbProcessEvents(this->screen, 0);
 }
 

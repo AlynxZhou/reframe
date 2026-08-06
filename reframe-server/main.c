@@ -72,14 +72,13 @@ on_frame(RfStreamer *s, size_t length, const struct rf_buffer *bufs, void *data)
 		this->height,
 		this->skip_damage ? NULL : &damage
 	);
-	if (buf != NULL)
-		rf_vnc_server_update(
-			this->vnc,
-			buf,
-			this->width,
-			this->height,
-			this->skip_damage ? NULL : &damage
-		);
+	rf_vnc_server_update(
+		this->vnc,
+		buf,
+		this->width,
+		this->height,
+		this->skip_damage ? NULL : &damage
+	);
 }
 
 static void on_first_client(RfVNCServer *v, void *data)

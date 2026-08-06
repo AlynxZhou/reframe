@@ -262,8 +262,7 @@ void rf_vnc_server_update(
 )
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
-	g_return_if_fail(buf != NULL);
-	g_return_if_fail(width > 0 && height > 0);
+	g_return_if_fail(width >= 0 && height >= 0);
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
 

@@ -28,7 +28,9 @@ struct _RfVNCServerClass {
 	 */
 	void (*stop)(RfVNCServer *this);
 	/**
-	 * Update the VNC buffer.
+	 * Update the VNC buffer and state.
+	 *
+	 * If @buf is %NULL, you should ignore it, and update the VNC state only.
 	 *
 	 * If @damage is %NULL, the whole buffer is damaged.
 	 */
