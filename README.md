@@ -82,7 +82,7 @@ Leap users please replace URL for Tumbleweed with URL for your Leap version.
 
 Use the NixOS module for reframe, created by [@bitbloxhub](https://github.com/bitbloxhub).
 
-Exmple configuraton:
+Example configuration:
 
 ```nix
 {
@@ -191,8 +191,8 @@ All things mentioned here is only about the **logical** position of monitors, wh
 
 Unfortunately there is no general way to get those values for all desktop environments. You could run a program that reports the current cursor position, and then move the cursor to get the following values.
 
-- `desktop-width`: The x coordinate of right border of your rightmost monitor.
-- `desktop-height`: The y coordinate of bottom border of your bottommost monitor.
+- `desktop-width`: The x coordinate of right border of your right-most monitor.
+- `desktop-height`: The y coordinate of bottom border of your bottom-most monitor.
 - `monitor-x` and `monitor-y`: The x and y coordinates of top-left corner of your selected monitor.
 
 Here is an example about what those keys are and how to find their values:
@@ -207,7 +207,7 @@ You need to keep the same multi-monitor layout for **both user session and displ
 
 ## Specific IP Addresses
 
-If you don't want to accpet incoming connections from all IP addresses, for example, you want to only accept incoming connections from your LAN or VPN, you can set the value of `ip` to a `;` seperated list like this:
+If you don't want to accept incoming connections from all IP addresses, for example, you want to only accept incoming connections from your LAN or VPN, you can set the value of `ip` to a `;` separated list like this:
 
 ```
 ip=192.168.1.3;10.10.10.3
@@ -255,7 +255,7 @@ You have to restart `reframe-session` once you update it, because the binary is 
 - [kmsvnc](https://github.com/isjerryxiao/kmsvnc/)
 	+ ReFrame supports NVIDIA driver by decoding frames with EGL and OpenGL ES, kmsvnc uses VA-API and it cannot decode frames of NVIDIA driver correctly.
 	+ ReFrame gets frame buffer on each frame, so it works correctly if your compositor uses double-buffers.
-	+ ReFrame contains privilieged DRM/uinput process and unprivilieged VNC server process, kmsvnc runs as a whole privilieged process.
+	+ ReFrame contains privileged DRM/uinput process and unprivileged VNC server process, kmsvnc runs as a whole privileged process.
 	+ ReFrame supports resizing client window.
 - [RustDesk](https://github.com/rustdesk/rustdesk/)
 	+ ReFrame supports Remote Login on Wayland, [RustDesk does not support it](https://rustdesk.com/docs/en/client/linux/#login-screen).
