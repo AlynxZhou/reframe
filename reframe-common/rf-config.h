@@ -14,6 +14,8 @@ enum rf_damage_type {
 	RF_DAMAGE_TYPE_GPU
 };
 
+enum rf_vnc_backend { RF_VNC_BACKEND_LIBVNCSERVER, RF_VNC_BACKEND_NEATVNC };
+
 #define RF_TYPE_CONFIG rf_config_get_type()
 G_DECLARE_FINAL_TYPE(RfConfig, rf_config, RF, CONFIG, GObject)
 
@@ -37,7 +39,7 @@ unsigned int rf_config_get_fps(RfConfig *this);
 char **rf_config_get_vnc_ip_list(RfConfig *this);
 unsigned int rf_config_get_vnc_port(RfConfig *this);
 char *rf_config_get_vnc_password(RfConfig *this);
-char *rf_config_get_vnc_type(RfConfig *this);
+enum rf_vnc_backend rf_config_get_vnc_backend(RfConfig *this);
 char *rf_config_get_neatvnc_username(RfConfig *this);
 bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this);
 char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this);

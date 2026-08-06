@@ -345,17 +345,30 @@ char *rf_config_get_vnc_password(RfConfig *this)
 	return password;
 }
 
-char *rf_config_get_vnc_type(RfConfig *this)
+enum rf_vnc_backend rf_config_get_vnc_backend(RfConfig *this)
 {
-	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+	g_return_val_if_fail(RF_IS_CONFIG(this), RF_VNC_BACKEND_LIBVNCSERVER);
 
 	g_autoptr(GError) error = NULL;
-	char *type = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_VNC, "type", &error
+	g_autofree char *backend = g_key_file_get_string(
+		this->f, RF_CONFIG_GROUP_VNC, "backend", &error
 	);
-	if (error != NULL || type == NULL || type[0] == '\0')
-		return NULL;
-	return type;
+	// Backward compatibility.
+	if (error != NULL) {
+		g_clear_pointer(&error, g_error_free);
+		g_clear_pointer(&backend, g_free);
+		g_warning(
+			"Please rename type in the [vnc] group to backend to adapt to the updated configuration format."
+		);
+		backend = g_key_file_get_string(
+			this->f, RF_CONFIG_GROUP_VNC, "type", &error
+		);
+	}
+	if (error != NULL || backend == NULL)
+		return RF_VNC_BACKEND_LIBVNCSERVER;
+	if (g_strcmp0(backend, "neatvnc") == 0)
+		return RF_VNC_BACKEND_NEATVNC;
+	return RF_VNC_BACKEND_LIBVNCSERVER;
 }
 
 char *rf_config_get_neatvnc_username(RfConfig *this)
