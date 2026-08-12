@@ -110,40 +110,6 @@ static int on_incoming(
 {
 	RfLVNCServer *this = data;
 
-	if (this->screen == NULL) {
-		this->screen = rfbGetScreen(
-			0,
-			NULL,
-			this->width,
-			this->height,
-			8,
-			3,
-			RF_BYTES_PER_PIXEL
-		);
-		this->screen->port = 0;
-		this->screen->ipv6port = 0;
-		this->screen->frameBuffer = NULL;
-		if (this->desktop_name != NULL)
-			this->screen->desktopName = this->desktop_name;
-		else
-			this->screen->desktopName = "ReFrame";
-		this->screen->versionString = "ReFrame VNC Server";
-		this->screen->screenData = this;
-		this->screen->cursor = NULL;
-		this->screen->newClientHook = on_new_client;
-		this->screen->setDesktopSizeHook = on_set_desktop_size;
-		this->screen->ptrAddEvent = on_pointer_event;
-		this->screen->kbdAddEvent = on_keysym_event;
-		this->screen->setXCutText = on_clipboard_text;
-		this->screen->setXCutTextUTF8 = on_clipboard_text;
-		if (this->passwords[0] != NULL &&
-		    this->passwords[0][0] != '\0') {
-			this->screen->authPasswdData = this->passwords;
-			this->screen->passwordCheck = rfbCheckPasswordByList;
-		}
-		rfbInitServer(this->screen);
-	}
-
 	GSocket *socket = g_socket_connection_get_socket(connection);
 	g_debug("VNC: Got new connection %p.", socket);
 	const int fd = g_socket_get_fd(socket);
@@ -159,7 +125,6 @@ static int on_incoming(
 	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	client->clientData = source;
-
 	return true;
 }
 
@@ -173,14 +138,12 @@ static void dispose(GObject *o)
 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->dispose(o);
 }
 
-static void finalize(GObject *o)
-{
-	RfLVNCServer *this = RF_LVNC_SERVER(o);
+// static void finalize(GObject *o)
+// {
+// 	RfLVNCServer *this = RF_LVNC_SERVER(o);
 
-	g_clear_pointer(&this->screen, rfbScreenCleanup);
-
-	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->finalize(o);
-}
+// 	G_OBJECT_CLASS(rf_lvnc_server_parent_class)->finalize(o);
+// }
 
 static void
 listen_tcp(RfLVNCServer *this, const char *ip, const unsigned int port)
@@ -254,6 +217,31 @@ static void start(RfVNCServer *super)
 		listen_tcp(this, NULL, port);
 	}
 
+	this->screen = rfbGetScreen(
+		0, NULL, this->width, this->height, 8, 3, RF_BYTES_PER_PIXEL
+	);
+	this->screen->port = 0;
+	this->screen->ipv6port = 0;
+	this->screen->frameBuffer = NULL;
+	if (this->desktop_name != NULL)
+		this->screen->desktopName = this->desktop_name;
+	else
+		this->screen->desktopName = "ReFrame";
+	this->screen->versionString = "ReFrame VNC Server";
+	this->screen->screenData = this;
+	this->screen->cursor = NULL;
+	this->screen->newClientHook = on_new_client;
+	this->screen->setDesktopSizeHook = on_set_desktop_size;
+	this->screen->ptrAddEvent = on_pointer_event;
+	this->screen->kbdAddEvent = on_keysym_event;
+	this->screen->setXCutText = on_clipboard_text;
+	this->screen->setXCutTextUTF8 = on_clipboard_text;
+	if (this->passwords[0] != NULL && this->passwords[0][0] != '\0') {
+		this->screen->authPasswdData = this->passwords;
+		this->screen->passwordCheck = rfbCheckPasswordByList;
+	}
+	rfbInitServer(this->screen);
+
 	g_signal_connect(
 		this->service, "incoming", G_CALLBACK(on_incoming), this
 	);
@@ -270,6 +258,7 @@ static void stop(RfVNCServer *super)
 	g_socket_service_stop(this->service);
 	g_socket_listener_close(G_SOCKET_LISTENER(this->service));
 	g_clear_object(&this->service);
+	g_clear_pointer(&this->screen, rfbScreenCleanup);
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->desktop_name, g_free);
 	g_clear_pointer(&this->passwords[0], g_free);
@@ -284,7 +273,7 @@ update(RfVNCServer *super,
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (this->screen == NULL || !rfbIsActive(this->screen))
+	if (!rfbIsActive(this->screen))
 		return;
 
 	if (buf == NULL)
@@ -330,7 +319,7 @@ static void flush(RfVNCServer *super)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (this->screen == NULL || !rfbIsActive(this->screen))
+	if (!rfbIsActive(this->screen))
 		return;
 
 	rfbClientIteratorPtr it = rfbGetClientIterator(this->screen);
@@ -347,21 +336,23 @@ static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 
 	g_clear_pointer(&this->desktop_name, g_free);
 	this->desktop_name = g_strdup(desktop_name);
+
 	// Well, this does not work because libvncserver does not update desktop
 	// name to client after it is inited. Clients will get the previous
 	// desktop name which may not be correct.
-	// if (this->screen != NULL) {
-	// 	this->screen->desktopName = this->desktop_name;
-	// 	if (this->running && rfbIsActive(this->screen))
-	// 		rfbProcessEvents(this->screen, 0);
-	// }
+
+	// if (!rfbIsActive(this->screen))
+	// 	return;
+
+	// this->screen->desktopName = this->desktop_name;
+	// rfbProcessEvents(this->screen, 0);
 }
 
 static void send_clipboard_text(RfVNCServer *super, const char *text)
 {
 	RfLVNCServer *this = RF_LVNC_SERVER(super);
 
-	if (this->screen == NULL || !rfbIsActive(this->screen))
+	if (!rfbIsActive(this->screen))
 		return;
 
 	g_autofree char *ustr = g_strdup(text);
@@ -389,7 +380,7 @@ static void rf_lvnc_server_class_init(RfLVNCServerClass *klass)
 	RfVNCServerClass *v_class = RF_VNC_SERVER_CLASS(klass);
 
 	o_class->dispose = dispose;
-	o_class->finalize = finalize;
+	// o_class->finalize = finalize;
 
 	v_class->start = start;
 	v_class->stop = stop;
