@@ -388,7 +388,9 @@ update(RfVNCServer *super,
 			&region, damage->x, damage->y, damage->w, damage->h
 		);
 	else
-		pixman_region_init_rect(&region, 0, 0, this->width, this->height);
+		pixman_region_init_rect(
+			&region, 0, 0, this->width, this->height
+		);
 #ifndef NEATVNC_UNSTABLE_API
 	struct nvnc_frame *frame = nvnc_frame_from_raw(
 		this->buf->data,

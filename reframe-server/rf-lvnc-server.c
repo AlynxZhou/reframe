@@ -279,7 +279,8 @@ update(RfVNCServer *super,
 	if (buf == NULL)
 		goto out;
 
-	if (this->buf != buf || this->width != width || this->height != height) {
+	if (this->buf != buf || this->width != width ||
+	    this->height != height) {
 		if (this->buf != buf) {
 			g_clear_pointer(&this->buf, g_byte_array_unref);
 			this->buf = g_byte_array_ref(buf);

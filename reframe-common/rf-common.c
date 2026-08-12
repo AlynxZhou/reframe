@@ -101,7 +101,8 @@ pid_t rf_get_socket_pid(GSocket *socket)
 	pid_t pid = g_credentials_get_unix_pid(cred, &error);
 	if (pid < 0)
 		g_warning(
-			"Failed to get PID of socket client: %s.", error->message
+			"Failed to get PID of socket client: %s.",
+			error->message
 		);
 	return pid;
 }

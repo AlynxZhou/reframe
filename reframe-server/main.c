@@ -226,8 +226,9 @@ int main(int argc, char *argv[])
 #endif
 		module_name = "lib" PROJECT_NAME
 			      "-libvncserver." G_MODULE_SUFFIX;
-	g_autofree char *module_path =
-		g_build_filename(LIBDIR, PROJECT_NAME, "vnc", module_name, NULL);
+	g_autofree char *module_path = g_build_filename(
+		LIBDIR, PROJECT_NAME, "vnc", module_name, NULL
+	);
 	GModule *module = g_module_open(
 		module_path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL
 	);
@@ -250,7 +251,10 @@ int main(int argc, char *argv[])
 	this->streamer = rf_streamer_new(this->config);
 	rf_streamer_set_socket_path(this->streamer, socket_path);
 	g_signal_connect_swapped(
-		this->streamer, "stop", G_CALLBACK(rf_vnc_server_flush), this->vnc
+		this->streamer,
+		"stop",
+		G_CALLBACK(rf_vnc_server_flush),
+		this->vnc
 	);
 	g_signal_connect_swapped(
 		this->streamer,
@@ -305,7 +309,10 @@ int main(int argc, char *argv[])
 		this->session
 	);
 	g_signal_connect_swapped(
-		this->streamer, "stop", G_CALLBACK(rf_session_stop), this->session
+		this->streamer,
+		"stop",
+		G_CALLBACK(rf_session_stop),
+		this->session
 	);
 	g_signal_connect_swapped(
 		this->session,
@@ -314,7 +321,10 @@ int main(int argc, char *argv[])
 		this->streamer
 	);
 	g_signal_connect_swapped(
-		this->streamer, "auth", G_CALLBACK(rf_session_auth), this->session
+		this->streamer,
+		"auth",
+		G_CALLBACK(rf_session_auth),
+		this->session
 	);
 	rf_vnc_server_start(this->vnc);
 

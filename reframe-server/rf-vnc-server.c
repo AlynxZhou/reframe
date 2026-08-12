@@ -398,7 +398,9 @@ void rf_vnc_server_handle_keysym_event(
 	};
 	xkb_keymap_key_for_each(priv->xkb_keymap, iterate_keys, &idata);
 	if (idata.keycode == XKB_KEYCODE_INVALID) {
-		g_warning("Input: Failed to find keysym %04x in keymap.", keysym);
+		g_warning(
+			"Input: Failed to find keysym %04x in keymap.", keysym
+		);
 		return;
 	}
 	const uint32_t keycode = RF_KEY_CODE_XKB_TO_EV(idata.keycode);
@@ -523,7 +525,8 @@ static void emit_client_signal(void *data)
 		priv->connected ? "first" : "last");
 	g_signal_emit(
 		this,
-		priv->connected ? sigs[SIG_FIRST_CLIENT] : sigs[SIG_LAST_CLIENT],
+		priv->connected ? sigs[SIG_FIRST_CLIENT] :
+				  sigs[SIG_LAST_CLIENT],
 		0
 	);
 }
