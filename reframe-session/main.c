@@ -48,7 +48,7 @@ send_clipboard_text_msg(struct this *this, const char *clipboard_text)
 					error->message
 				);
 			else
-				g_message("ReFrame Server disconnected.");
+				g_message("ReFrame Server %p disconnected.", key);
 			g_source_destroy(value);
 			g_hash_table_iter_remove(&it);
 		}
@@ -151,8 +151,9 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 out:
 	if (ret <= 0) {
 		if (ret == 0)
-			g_message("ReFrame Server disconnected.");
+			g_message("ReFrame Server %p disconnected.", socket);
 		g_hash_table_remove(this->sockets, socket);
+		// This will destroy the source.
 		return G_SOURCE_REMOVE;
 	}
 	return G_SOURCE_CONTINUE;
@@ -160,7 +161,6 @@ out:
 
 static void connect(struct this *this, const char *socket_path)
 {
-	g_debug("Socket: Connect to path %s.", socket_path);
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GSocketAddress)
 		address = g_unix_socket_address_new(socket_path);
@@ -176,33 +176,55 @@ static void connect(struct this *this, const char *socket_path)
 	}
 
 	GSocket *socket = g_socket_connection_get_socket(connection);
+	g_message("ReFrame Server %p connected via %s.", socket, socket_path);
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
 	g_hash_table_insert(this->sockets, g_object_ref(socket), source);
 }
 
+static inline const char *monitor_event(GFileMonitorEvent event)
+{
+	switch (event) {
+	case G_FILE_MONITOR_EVENT_CHANGED:
+		return "changed";
+	case G_FILE_MONITOR_EVENT_DELETED:
+		return "deleted";
+	case G_FILE_MONITOR_EVENT_CREATED:
+		return "created";
+	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		return "attribute changed";
+	default:
+		// Actually it is not unknown, we just do not care about them.
+		return "unknown";
+	}
+}
+
 static void on_changed(
 	GFileMonitor *monitor,
 	GFile *file,
 	GFile *other_file,
-	GFileMonitorEvent event_type,
+	GFileMonitorEvent event,
 	void *data
 )
 {
 	struct this *this = data;
 
+	g_autofree char *path = g_file_get_path(file);
+	g_debug("Socket: Got event %s for path %s", monitor_event(event), path);
+
 	if (g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) !=
 	    G_FILE_TYPE_SPECIAL)
 		return;
 
-	g_autofree char *socket_path = g_file_get_path(file);
-	g_debug("Socket: Got changed type %d for path %s",
-		event_type,
-		socket_path);
-	switch (event_type) {
-	case G_FILE_MONITOR_EVENT_CREATED:
-		connect(this, socket_path);
+	switch (event) {
+	// The correct event is attribute changed, because when a socket is
+	// created, we don't have the permission to connect, we need to wait
+	// until server changes the permission of the socket.
+	// case G_FILE_MONITOR_EVENT_CREATED:
+	// case G_FILE_MONITOR_EVENT_CHANGED:
+	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		connect(this, path);
 		break;
 	// It should be enough to handle disconnect on transfer.
 	// case G_FILE_MONITOR_EVENT_DELETED:
@@ -299,22 +321,28 @@ int main(int argc, char *argv[])
 		(GDestroyNotify)g_source_unref
 	);
 
-	g_autoptr(GDir) dir = g_dir_open(socket_dir, 0, NULL);
+	// Do not use `g_autoptr` here, we need to close the dir as soon as we
+	// finish reading it, otherwise we keep opening it and blocks systemd
+	// from removing the runtime directory.
+	GDir *dir = g_dir_open(socket_dir, 0, NULL);
 	if (dir != NULL) {
 		const char *name = NULL;
 		while ((name = g_dir_read_name(dir)) != NULL) {
-			g_autofree char *socket_path =
+			g_autofree char *path =
 				g_build_filename(socket_dir, name, NULL);
-			connect(this, socket_path);
+			connect(this, path);
 		}
 	}
+	g_clear_pointer(&dir, g_dir_close);
 
 	g_autoptr(GFile) file = g_file_new_for_path(socket_dir);
 	g_autoptr(GFileMonitor) monitor = g_file_monitor_directory(
 		file, G_FILE_MONITOR_NONE, NULL, &error
 	);
-	if (monitor == NULL)
-		g_warning("Failed to monitor socket dir: %s", error->message);
+	if (monitor == NULL) {
+		g_warning("Failed to monitor socket dir: %s.", error->message);
+		g_clear_pointer(&error, g_error_free);
+	}
 	g_signal_connect(monitor, "changed", G_CALLBACK(on_changed), this);
 
 	this->main_loop = g_main_loop_new(NULL, false);
@@ -330,8 +358,9 @@ int main(int argc, char *argv[])
 	g_hash_table_remove_all(this->sockets);
 
 	g_clear_object(&this->clipboard);
-	if (this->display != NULL)
-		gdk_display_close(this->display);
+	// GDKDisplay will be closed automatically on unref.
+	// if (this->display != NULL)
+	// 	gdk_display_close(this->display);
 	g_clear_object(&this->display);
 
 	return 0;
