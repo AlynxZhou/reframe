@@ -91,7 +91,7 @@ static int auth_pid(struct this *this, pid_t pid, const char *target)
 		);
 		return -1;
 	}
-	g_debug("Auth: Authenticating process executable binary %s.", bin);
+	g_debug("Auth: Authenticating process executable binary %s with PID %d.", bin, pid);
 	if (g_strcmp0(bin, target) != 0)
 		return -2;
 	return 0;
@@ -971,21 +971,18 @@ int main(int argc, char *argv[])
 		if (this->connection == NULL)
 			g_error("Socket: Failed to accept connection: %s.",
 				error->message);
+		g_message("Socket: ReFrame Server connected.");
 
 		GSocket *socket =
 			g_socket_connection_get_socket(this->connection);
 		const pid_t pid = rf_get_socket_pid(socket);
-		if (auth_pid(
-			    this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server"
-		    ) != 0) {
-			g_warning(
-				"Auth: Got disallowed socket client PID %d.",
-				pid
-			);
+		bool ok = auth_pid(this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server") == 0;
+		if (ok) {
+			g_message("Socket: ReFrame Server with PID %d accepted.", pid);
+		} else {
+			g_warning("Socket: ReFrame Server with PID %d refused.", pid);
 			goto close;
 		}
-
-		g_message("Socket: ReFrame Server connected.");
 
 		setup_uinput(this);
 		setup_drm(this);

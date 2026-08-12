@@ -345,7 +345,7 @@ void rf_session_auth(RfSession *this, pid_t pid, bool ok)
 
 	g_hash_table_remove(this->pids, GINT_TO_POINTER(pid));
 	if (ok) {
-		g_message("Socket: ReFrame Session %p accepted.", socket);
+		g_message("Socket: ReFrame Session %p with PID %d accepted.", socket, pid);
 		GSource *source =
 			g_socket_create_source(socket, this->io_flags, NULL);
 		g_source_set_callback(
@@ -354,7 +354,7 @@ void rf_session_auth(RfSession *this, pid_t pid, bool ok)
 		g_source_attach(source, NULL);
 		g_hash_table_insert(this->sockets, socket, source);
 	} else {
-		g_message("Socket: ReFrame Session %p refused.", socket);
+		g_warning("Socket: ReFrame Session %p with PID %d refused.", socket, pid);
 		g_clear_object(&socket);
 	}
 }
