@@ -358,7 +358,7 @@ static void send_clipboard_text(RfVNCServer *super, const char *text)
 	g_autofree char *ustr = g_strdup(text);
 	g_autofree char *fstr = g_str_to_ascii(text, "C");
 	if (fstr == NULL) {
-		g_warning("Failed to convert UTF-8 to Latin 1.");
+		g_warning("Clipboard: Failed to convert UTF-8 to Latin 1.");
 		rfbSendServerCutTextUTF8(
 			this->screen, ustr, strlen(ustr) + 1, NULL, 0
 		);

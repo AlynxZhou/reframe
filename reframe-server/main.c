@@ -197,8 +197,8 @@ int main(int argc, char *argv[])
 		skip_damage ? "enabled" : "disabled"
 	);
 	g_message("Using configuration file %s.", config_path);
-	g_message("Using socket %s.", socket_path);
-	g_message("Using session socket %s.", session_socket_path);
+	g_message("Socket: Using socket %s.", socket_path);
+	g_message("Socket: Using session socket %s.", session_socket_path);
 
 	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
 	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {

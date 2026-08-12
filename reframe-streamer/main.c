@@ -914,7 +914,7 @@ int main(int argc, char *argv[])
 		skip_auth ? "enabled" : "disabled"
 	);
 	g_message("Using configuration file %s.", config_path);
-	g_message("Using socket %s.", socket_path);
+	g_message("Socket: Using socket %s.", socket_path);
 
 	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->cfd = -1;
@@ -931,7 +931,7 @@ int main(int argc, char *argv[])
 		const int sfd = SD_LISTEN_FDS_START;
 		g_autoptr(GSocket) socket = g_socket_new_from_fd(sfd, &error);
 		if (error != NULL)
-			g_error("Failed to create socket from systemd fd: %s.",
+			g_error("Socket: Failed to create socket from systemd fd: %s.",
 				error->message);
 		g_socket_listener_add_socket(listener, socket, NULL, &error);
 	} else {
@@ -955,14 +955,15 @@ int main(int argc, char *argv[])
 	}
 #endif
 	if (error != NULL)
-		g_error("Failed to listen to socket: %s.", error->message);
+		g_error("Socket: Failed to listen to socket: %s.",
+			error->message);
 
 	signal(SIGINT, on_sigint);
 	do {
 		this->connection =
 			g_socket_listener_accept(listener, NULL, NULL, &error);
 		if (this->connection == NULL)
-			g_error("Failed to accept connection: %s.",
+			g_error("Socket: Failed to accept connection: %s.",
 				error->message);
 
 		GSocket *socket =
@@ -971,11 +972,13 @@ int main(int argc, char *argv[])
 		if (auth_pid(
 			    this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server"
 		    ) != 0) {
-			g_warning("Got disallowed socket client PID %d.", pid);
+			g_warning(
+				"Auth: Got disallowed socket client PID %d.", pid
+			);
 			goto close;
 		}
 
-		g_message("ReFrame Server connected.");
+		g_message("Socket: ReFrame Server connected.");
 
 		setup_uinput(this);
 		setup_drm(this);
@@ -992,7 +995,7 @@ int main(int argc, char *argv[])
 			if (ret <= 0) {
 				if (ret < 0) {
 					g_warning(
-						"Failed to read message type: %s.",
+						"Socket: Failed to read message type: %s.",
 						error->message
 					);
 					g_clear_pointer(&error, g_error_free);
@@ -1017,7 +1020,7 @@ int main(int argc, char *argv[])
 				break;
 		}
 
-		g_message("ReFrame Server disconnected.");
+		g_message("Socket: ReFrame Server disconnected.");
 
 		clean_drm(this);
 		clean_uinput(this);

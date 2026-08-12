@@ -46,7 +46,7 @@ on_clipboard_text_msg(RfSession *this, GSocketConnection *connection)
 out:
 	if (ret < 0)
 		g_warning(
-			"Failed to receive clipboard text: %s.", error->message
+			"Clipboard: Failed to receive text: %s.", error->message
 		);
 	else if (ret > 0)
 		g_debug("Clipboard: Received text %s.", msg);
@@ -70,7 +70,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	if (ret <= 0) {
 		if (ret < 0)
 			g_warning(
-				"Failed to read message type: %s.",
+				"Socket: Failed to read message type: %s.",
 				error->message
 			);
 		goto out;
@@ -87,7 +87,10 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 out:
 	if (ret <= 0) {
 		if (ret == 0)
-			g_message("ReFrame Session %p disconnected.", socket);
+			g_message(
+				"Socket: ReFrame Session %p disconnected.",
+				socket
+			);
 		g_hash_table_remove(this->sockets, socket);
 		return G_SOURCE_REMOVE;
 	}
@@ -104,7 +107,7 @@ static int on_incoming(
 	RfSession *this = data;
 
 	GSocket *socket = g_socket_connection_get_socket(connection);
-	g_message("ReFrame Session %p connected.", socket);
+	g_message("Socket: ReFrame Session %p connected.", socket);
 	pid_t pid = rf_get_socket_pid(socket);
 	if (pid < 0) {
 		g_clear_object(&connection);
@@ -234,7 +237,8 @@ int rf_session_start(RfSession *this)
 	g_chmod(socket_path, 0660);
 	if (error != NULL) {
 		g_warning(
-			"Failed to listen to session socket: %s", error->message
+			"Socket: Failed to listen to session socket: %s",
+			error->message
 		);
 		return -2;
 	}
@@ -314,12 +318,13 @@ void rf_session_send_clipboard_text_msg(RfSession *this, const char *text)
 		if (ret <= 0) {
 			if (ret < 0)
 				g_warning(
-					"Failed to send clipboard text: %s.",
+					"Clipboard: Failed to send text: %s.",
 					error->message
 				);
 			else
 				g_message(
-					"ReFrame Session %p disconnected.", key
+					"Socket: ReFrame Session %p disconnected.",
+					key
 				);
 			g_source_destroy(value);
 			g_hash_table_iter_remove(&it);
@@ -338,7 +343,7 @@ void rf_session_auth(RfSession *this, pid_t pid, bool ok)
 
 	g_hash_table_remove(this->pids, GINT_TO_POINTER(pid));
 	if (ok) {
-		g_message("ReFrame Session %p accepted.", socket);
+		g_message("Socket: ReFrame Session %p accepted.", socket);
 		GSource *source =
 			g_socket_create_source(socket, this->io_flags, NULL);
 		g_source_set_callback(
@@ -347,7 +352,7 @@ void rf_session_auth(RfSession *this, pid_t pid, bool ok)
 		g_source_attach(source, NULL);
 		g_hash_table_insert(this->sockets, socket, source);
 	} else {
-		g_message("ReFrame Session %p refused.", socket);
+		g_message("Socket: ReFrame Session %p refused.", socket);
 		g_clear_object(&socket);
 	}
 }

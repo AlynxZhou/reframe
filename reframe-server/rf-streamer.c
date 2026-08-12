@@ -62,7 +62,7 @@ out:
 		g_warning("Auth: Failed to send auth PID: %s.", error->message);
 		rf_streamer_stop(this);
 	} else if (ret == 0) {
-		g_warning("ReFrame Streamer disconnected.");
+		g_warning("Socket: ReFrame Streamer disconnected.");
 		rf_streamer_stop(this);
 	} else {
 		g_debug("Auth: Sent auth message for PID %d.", pid);
@@ -93,7 +93,7 @@ out:
 			length,
 			sizeof(*ies));
 	} else {
-		g_warning("ReFrame Streamer disconnected.");
+		g_warning("Socket: ReFrame Streamer disconnected.");
 		rf_streamer_stop(this);
 	}
 }
@@ -114,7 +114,7 @@ static int send_frame_msg(void *data)
 		this->last_frame_time = g_get_monotonic_time();
 		this->timer_id = 0;
 	} else {
-		g_warning("ReFrame Streamer disconnected.");
+		g_warning("Socket: ReFrame Streamer disconnected.");
 		rf_streamer_stop(this);
 	}
 	return G_SOURCE_REMOVE;
@@ -392,7 +392,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	if (ret <= 0) {
 		if (ret < 0)
 			g_warning(
-				"Failed to read message type: %s.",
+				"Socket: Failed to read message type: %s.",
 				error->message
 			);
 		goto out;
@@ -418,7 +418,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 out:
 	if (ret <= 0) {
 		if (ret == 0)
-			g_warning("ReFrame Streamer disconnected.");
+			g_warning("Socket: ReFrame Streamer disconnected.");
 		rf_streamer_stop(this);
 		return G_SOURCE_REMOVE;
 	}
@@ -574,7 +574,7 @@ int rf_streamer_start(RfStreamer *this)
 	);
 	if (this->connection == NULL) {
 		g_warning(
-			"Failed to connecting to ReFrame Streamer: %s.",
+			"Socket: Failed to connecting to ReFrame Streamer: %s.",
 			error->message
 		);
 		return -2;

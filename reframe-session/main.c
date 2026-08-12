@@ -44,11 +44,14 @@ send_clipboard_text_msg(struct this *this, const char *clipboard_text)
 		if (ret <= 0) {
 			if (ret < 0)
 				g_warning(
-					"Failed to send clipboard text: %s.",
+					"Clipboard: Failed to send text: %s.",
 					error->message
 				);
 			else
-				g_message("ReFrame Server %p disconnected.", key);
+				g_message(
+					"Socket: ReFrame Server %p disconnected.",
+					key
+				);
 			g_source_destroy(value);
 			g_hash_table_iter_remove(&it);
 		}
@@ -65,7 +68,7 @@ on_read_text_finish(GObject *source_object, GAsyncResult *res, void *data)
 
 	text = gdk_clipboard_read_text_finish(clipboard, res, &error);
 	if (text == NULL) {
-		g_warning("Failed to read clipboard text: %s.", error->message);
+		g_warning("Clipboard: Failed to read text: %s.", error->message);
 		return;
 	}
 	g_debug("Clipboard: Got new text %s.", text);
@@ -110,7 +113,7 @@ on_clipboard_text_msg(struct this *this, GSocketConnection *connection)
 out:
 	if (ret < 0)
 		g_warning(
-			"Failed to receive clipboard text: %s.", error->message
+			"Clipboard: Failed to receive text: %s.", error->message
 		);
 	else if (ret > 0)
 		g_debug("Clipboard: Received text %s.", msg);
@@ -134,7 +137,7 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 	if (ret <= 0) {
 		if (ret < 0)
 			g_warning(
-				"Failed to read message type: %s.",
+				"Socket: Failed to read message type: %s.",
 				error->message
 			);
 		goto out;
@@ -151,7 +154,9 @@ static int on_socket_in(GSocket *socket, GIOCondition condition, void *data)
 out:
 	if (ret <= 0) {
 		if (ret == 0)
-			g_message("ReFrame Server %p disconnected.", socket);
+			g_message(
+				"Socket: ReFrame Server %p disconnected.", socket
+			);
 		g_hash_table_remove(this->sockets, socket);
 		// This will destroy the source.
 		return G_SOURCE_REMOVE;
@@ -170,13 +175,18 @@ static void connect(struct this *this, const char *socket_path)
 	);
 	if (connection == NULL) {
 		g_warning(
-			"Failed to connect to ReFrame Server: %s", error->message
+			"Socket: Failed to connect to ReFrame Server: %s",
+			error->message
 		);
 		return;
 	}
 
 	GSocket *socket = g_socket_connection_get_socket(connection);
-	g_message("ReFrame Server %p connected via %s.", socket, socket_path);
+	g_message(
+		"Socket: ReFrame Server %p connected via %s.",
+		socket,
+		socket_path
+	);
 	GSource *source = g_socket_create_source(socket, this->io_flags, NULL);
 	g_source_set_callback(source, G_SOURCE_FUNC(on_socket_in), this, NULL);
 	g_source_attach(source, NULL);
@@ -306,10 +316,10 @@ int main(int argc, char *argv[])
 
 	this->display = gdk_display_get_default();
 	if (this->display == NULL)
-		g_error("Failed to get the default GDK display.");
+		g_error("Clipboard: Failed to get the default GDK display.");
 	this->clipboard = gdk_display_get_clipboard(this->display);
 	if (this->clipboard == NULL)
-		g_error("Failed to get clipboard.");
+		g_error("Clipboard: Failed to get clipboard.");
 	g_signal_connect(
 		this->clipboard, "changed", G_CALLBACK(on_clipboard_changed), this
 	);
@@ -340,7 +350,10 @@ int main(int argc, char *argv[])
 		file, G_FILE_MONITOR_NONE, NULL, &error
 	);
 	if (monitor == NULL) {
-		g_warning("Failed to monitor socket dir: %s.", error->message);
+		g_warning(
+			"Socket: Failed to monitor socket dir: %s.",
+			error->message
+		);
 		g_clear_pointer(&error, g_error_free);
 	}
 	g_signal_connect(monitor, "changed", G_CALLBACK(on_changed), this);
