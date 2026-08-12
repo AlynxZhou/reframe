@@ -233,6 +233,11 @@ void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
 
 	g_return_if_fail(klass->set_desktop_name != NULL);
 
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	if (!priv->running)
+		return;
+
 	klass->set_desktop_name(this, desktop_name);
 }
 
