@@ -91,7 +91,9 @@ static int auth_pid(struct this *this, pid_t pid, const char *target)
 		);
 		return -1;
 	}
-	g_debug("Auth: Authenticating process executable binary %s with PID %d.", bin, pid);
+	g_debug("Auth: Authenticating process executable binary %s with PID %d.",
+		bin,
+		pid);
 	if (g_strcmp0(bin, target) != 0)
 		return -2;
 	return 0;
@@ -976,11 +978,21 @@ int main(int argc, char *argv[])
 		GSocket *socket =
 			g_socket_connection_get_socket(this->connection);
 		const pid_t pid = rf_get_socket_pid(socket);
-		bool ok = auth_pid(this, pid, BINDIR G_DIR_SEPARATOR_S "reframe-server") == 0;
+		bool ok = auth_pid(
+				  this,
+				  pid,
+				  BINDIR G_DIR_SEPARATOR_S "reframe-server"
+			  ) == 0;
 		if (ok) {
-			g_message("Socket: ReFrame Server with PID %d accepted.", pid);
+			g_message(
+				"Socket: ReFrame Server with PID %d accepted.",
+				pid
+			);
 		} else {
-			g_warning("Socket: ReFrame Server with PID %d refused.", pid);
+			g_warning(
+				"Socket: ReFrame Server with PID %d refused.",
+				pid
+			);
 			goto close;
 		}
 

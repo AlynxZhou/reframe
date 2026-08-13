@@ -342,6 +342,11 @@ int main(int argc, char *argv[])
 	// Do not use `g_autoptr` here, we need to close the dir as soon as we
 	// finish reading it, otherwise we keep opening it and blocks systemd
 	// from removing the runtime directory.
+	//
+	// It is OK to ignore the error, because this process starts with user
+	// session, and it is OK that reframe-server is not started. We just wait
+	// until there is a socket in that dir. Printing the error message only
+	// makes user confused.
 	GDir *dir = g_dir_open(socket_dir, 0, NULL);
 	if (dir != NULL) {
 		const char *name = NULL;
