@@ -24,15 +24,17 @@
 #define WAKEUP_KEYBOARD_MAX_EVENTS 2
 
 // clang-format off
-#define ioctl_must(...)                                                         \
+#define ioctl_must(...)                                                          \
 	G_STMT_START {                                                           \
 		int e;                                                           \
 		if ((e = ioctl(__VA_ARGS__)))                                    \
-			g_error("Input: Failed to call ioctl() at line %d: %d.", \
+			g_error(                                                 \
+				"Input: Failed to call ioctl() at line %d: %d.", \
 				__LINE__,                                        \
-				e);                                              \
+				e                                                \
+			);                                                       \
 	} G_STMT_END
-#define ioctl_may(...)							\
+#define ioctl_may(...)                                                           \
 	G_STMT_START {                                                           \
 		int e;                                                           \
 		if ((e = ioctl(__VA_ARGS__)))                                    \
@@ -43,9 +45,9 @@
 			);                                                       \
 	} G_STMT_END
 
-#define write_may(fd, buf, count)                                                                              \
+#define write_may(fd, buf, count)                                                                               \
 	G_STMT_START {                                                                                          \
-		size_t e = write((fd), (buf), (count));                                                        \
+		size_t e = write((fd), (buf), (count));                                                         \
 		if (e != (count))                                                                               \
 			g_warning(                                                                              \
 				"Input: Failed to write %ld bytes to %d at line %d, actually wrote %ld bytes.", \
