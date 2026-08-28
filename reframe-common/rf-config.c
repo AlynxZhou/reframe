@@ -9,6 +9,7 @@ struct _RfConfig {
 G_DEFINE_TYPE(RfConfig, rf_config, G_TYPE_OBJECT)
 
 #define RF_CONFIG_GROUP_REFRAME "reframe"
+#define RF_CONFIG_GROUP_XKB "xkb"
 #define RF_CONFIG_GROUP_VNC "vnc"
 #define RF_CONFIG_GROUP_LIBVNCSERVER "libvncserver"
 #define RF_CONFIG_GROUP_NEATVNC "neatvnc"
@@ -47,48 +48,65 @@ RfConfig *rf_config_new(const char *config_path)
 	return this;
 }
 
+static inline char *get_string(GKeyFile *f, const char *group, const char *key)
+{
+	g_autoptr(GError) error = NULL;
+	char *value = g_key_file_get_string(f, group, key, &error);
+	if (error != NULL || value == NULL || value[0] == '\0') {
+		g_clear_pointer(&value, g_free);
+		return NULL;
+	}
+	return value;
+}
+
+static inline int get_integer(
+	GKeyFile *f,
+	const char *group,
+	const char *key,
+	const int default_value
+)
+{
+	g_autoptr(GError) error = NULL;
+	int value = g_key_file_get_integer(f, group, key, &error);
+	return error == NULL ? value : default_value;
+}
+
+static inline bool get_boolean(
+	GKeyFile *f,
+	const char *group,
+	const char *key,
+	const bool default_value
+)
+{
+	g_autoptr(GError) error = NULL;
+	int value = g_key_file_get_boolean(f, group, key, &error);
+	return error == NULL ? value : default_value;
+}
+
 char *rf_config_get_card_path(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	g_autofree char *card = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_REFRAME, "card", &error
-	);
-	if (error != NULL || card == NULL || card[0] == '\0') {
-		g_clear_pointer(&card, g_free);
+	g_autofree char *card =
+		get_string(this->f, RF_CONFIG_GROUP_REFRAME, "card");
+	if (card == NULL)
 		return NULL;
-	}
-	char *card_path =
-		g_build_filename(G_DIR_SEPARATOR_S "dev", "dri", card, NULL);
-	return card_path;
+	return g_build_filename(G_DIR_SEPARATOR_S "dev", "dri", card, NULL);
 }
 
 char *rf_config_get_connector(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	char *connector = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_REFRAME, "connector", &error
-	);
-	if (error != NULL || connector == NULL || connector[0] == '\0') {
-		g_clear_pointer(&connector, g_free);
-		return NULL;
-	}
-	return connector;
+	return get_string(this->f, RF_CONFIG_GROUP_REFRAME, "connector");
 }
 
 unsigned int rf_config_get_rotation(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int rotation = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "rotation", &error
-	);
-	if (error != NULL)
-		return 0;
+	unsigned int rotation =
+		get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "rotation", 0);
 	if (rotation % 90 != 0) {
 		g_warning(
 			"Got invalid monitor rotation angle %u, valid angles are clockwise 0, 90, 180, 270.",
@@ -103,142 +121,82 @@ unsigned int rf_config_get_desktop_width(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int desktop_width = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "desktop-width", &error
-	);
-	if (error != NULL)
-		return 0;
-	return desktop_width;
+	return get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "desktop-width", 0);
 }
 
 unsigned int rf_config_get_desktop_height(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int desktop_height = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "desktop-height", &error
+	return get_integer(
+		this->f, RF_CONFIG_GROUP_REFRAME, "desktop-height", 0
 	);
-	if (error != NULL)
-		return 0;
-	return desktop_height;
 }
 
 int rf_config_get_monitor_x(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	int monitor_x = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "monitor-x", &error
-	);
-	if (error != NULL)
-		return 0;
-	return monitor_x;
+	return get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "monitor-x", 0);
 }
 
 int rf_config_get_monitor_y(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	int monitor_y = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "monitor-y", &error
-	);
-	if (error != NULL)
-		return 0;
-	return monitor_y;
+	return get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "monitor-y", 0);
 }
 
 unsigned int rf_config_get_default_width(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int default_width = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "default-width", &error
-	);
-	if (error != NULL)
-		return 0;
-	return default_width;
+	return get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "default-width", 0);
 }
 
 unsigned int rf_config_get_default_height(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 0);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int default_height = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "default-height", &error
+	return get_integer(
+		this->f, RF_CONFIG_GROUP_REFRAME, "default-height", 0
 	);
-	if (error != NULL)
-		return 0;
-	return default_height;
 }
 
 bool rf_config_get_resize(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
-	g_autoptr(GError) error = NULL;
-	int resize = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP_REFRAME, "resize", &error
-	);
-	if (error != NULL)
-		return true;
-	return resize;
+	return get_boolean(this->f, RF_CONFIG_GROUP_REFRAME, "resize", true);
 }
 
 bool rf_config_get_share(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
-	g_autoptr(GError) error = NULL;
-	int share = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP_REFRAME, "share", &error
-	);
-	if (error != NULL)
-		return true;
-	return share;
+	return get_boolean(this->f, RF_CONFIG_GROUP_REFRAME, "share", true);
 }
 
 bool rf_config_get_cursor(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
-	g_autoptr(GError) error = NULL;
-	int cursor = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP_REFRAME, "cursor", &error
-	);
-	if (error != NULL)
-		return true;
-	return cursor;
+	return get_boolean(this->f, RF_CONFIG_GROUP_REFRAME, "cursor", true);
 }
 
 bool rf_config_get_wakeup(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), true);
 
-	g_autoptr(GError) error = NULL;
-	int wakeup = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP_REFRAME, "wakeup", &error
-	);
-	if (error != NULL)
-		return true;
-	return wakeup;
+	return get_boolean(this->f, RF_CONFIG_GROUP_REFRAME, "wakeup", true);
 }
 
 enum rf_wakeup_device rf_config_get_wakeup_device(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), RF_WAKEUP_DEVICE_KEYBOARD);
 
-	g_autoptr(GError) error = NULL;
-	g_autofree char *wakeup_device = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_REFRAME, "wakeup-device", &error
-	);
-	if (error != NULL || wakeup_device == NULL)
-		return RF_WAKEUP_DEVICE_KEYBOARD;
+	g_autofree char *wakeup_device =
+		get_string(this->f, RF_CONFIG_GROUP_REFRAME, "wakeup-device");
 	if (g_strcmp0(wakeup_device, "pointer") == 0)
 		return RF_WAKEUP_DEVICE_POINTER;
 	return RF_WAKEUP_DEVICE_KEYBOARD;
@@ -267,13 +225,42 @@ unsigned int rf_config_get_fps(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), 30);
 
-	g_autoptr(GError) error = NULL;
-	unsigned int fps = g_key_file_get_integer(
-		this->f, RF_CONFIG_GROUP_REFRAME, "fps", &error
-	);
-	if (error != NULL)
-		return 30;
-	return fps;
+	return get_integer(this->f, RF_CONFIG_GROUP_REFRAME, "fps", 30);
+}
+
+char *rf_config_get_xkb_rules(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	return get_string(this->f, RF_CONFIG_GROUP_XKB, "rules");
+}
+
+char *rf_config_get_xkb_model(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	return get_string(this->f, RF_CONFIG_GROUP_XKB, "model");
+}
+
+char *rf_config_get_xkb_layout(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	return get_string(this->f, RF_CONFIG_GROUP_XKB, "layout");
+}
+
+char *rf_config_get_xkb_variant(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	return get_string(this->f, RF_CONFIG_GROUP_XKB, "variant");
+}
+
+char *rf_config_get_xkb_options(RfConfig *this)
+{
+	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
+
+	return get_string(this->f, RF_CONFIG_GROUP_XKB, "options");
 }
 
 char **rf_config_get_vnc_ip_list(RfConfig *this)
@@ -375,64 +362,41 @@ char *rf_config_get_neatvnc_username(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	char *username = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_NEATVNC, "username", &error
-	);
-	if (error != NULL || username == NULL || username[0] == '\0')
-		return NULL;
-	return username;
+	return get_string(this->f, RF_CONFIG_GROUP_NEATVNC, "username");
 }
 
 bool rf_config_get_neatvnc_allow_broken_crypto(RfConfig *this)
 {
-	g_return_val_if_fail(RF_IS_CONFIG(this), true);
+	g_return_val_if_fail(RF_IS_CONFIG(this), false);
 
-	g_autoptr(GError) error = NULL;
-	int allow_broken_crypto = g_key_file_get_boolean(
-		this->f, RF_CONFIG_GROUP_NEATVNC, "allow-broken-crypto", &error
+	return get_boolean(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "allow-broken-crypto", false
 	);
-	if (error != NULL)
-		return false;
-	return allow_broken_crypto;
 }
 
 char *rf_config_get_neatvnc_rsa_private_key_file(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	char *key_file = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_NEATVNC, "rsa-private-key-file", &error
+	return get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "rsa-private-key-file"
 	);
-	if (error != NULL || key_file == NULL || key_file[0] == '\0')
-		return NULL;
-	return key_file;
 }
 
 char *rf_config_get_neatvnc_tls_private_key_file(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	char *key_file = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-private-key-file", &error
+	return get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-private-key-file"
 	);
-	if (error != NULL || key_file == NULL || key_file[0] == '\0')
-		return NULL;
-	return key_file;
 }
 
 char *rf_config_get_neatvnc_tls_certificate_file(RfConfig *this)
 {
 	g_return_val_if_fail(RF_IS_CONFIG(this), NULL);
 
-	g_autoptr(GError) error = NULL;
-	char *certificate_file = g_key_file_get_string(
-		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-certificate-file", &error
+	return get_string(
+		this->f, RF_CONFIG_GROUP_NEATVNC, "tls-certificate-file"
 	);
-	if (error != NULL || certificate_file == NULL ||
-	    certificate_file[0] == '\0')
-		return NULL;
-	return certificate_file;
 }

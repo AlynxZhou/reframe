@@ -206,8 +206,16 @@ static void start(RfVNCServer *super)
 
 	rf_vnc_server_set_resize(super, rf_config_get_resize(this->config));
 	rf_vnc_server_set_share(super, rf_config_get_share(this->config));
+	g_autofree char *rules = rf_config_get_xkb_rules(this->config);
+	g_autofree char *model = rf_config_get_xkb_model(this->config);
+	g_autofree char *layout = rf_config_get_xkb_layout(this->config);
+	g_autofree char *variant = rf_config_get_xkb_variant(this->config);
+	g_autofree char *options = rf_config_get_xkb_options(this->config);
+	rf_vnc_server_set_xkb_keymap(
+		super, rules, model, layout, variant, options
+	);
 
-	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);
+	g_auto(GStrv) ips = rf_config_get_vnc_ip_list(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
 	this->service = g_socket_service_new();
 	if (ips != NULL) {
@@ -333,10 +341,7 @@ static void flush(RfVNCServer *super)
 
 static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 {
-	RfLVNCServer *this = RF_LVNC_SERVER(super);
-
-	g_clear_pointer(&this->desktop_name, g_free);
-	this->desktop_name = g_strdup(desktop_name);
+	// RfLVNCServer *this = RF_LVNC_SERVER(super);
 
 	// Well, this does not work because libvncserver does not update desktop
 	// name to client after it is inited. Clients will get the previous
@@ -345,6 +350,8 @@ static void set_desktop_name(RfVNCServer *super, const char *desktop_name)
 	// if (!rfbIsActive(this->screen))
 	// 	return;
 
+	// g_clear_pointer(&this->desktop_name, g_free);
+	// this->desktop_name = g_strdup(desktop_name);
 	// this->screen->desktopName = this->desktop_name;
 	// rfbProcessEvents(this->screen, 0);
 }

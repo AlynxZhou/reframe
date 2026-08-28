@@ -200,14 +200,6 @@ int main(int argc, char *argv[])
 	g_message("Socket: Using socket %s.", socket_path);
 	g_message("Socket: Using session socket %s.", session_socket_path);
 
-	const char *xkb_default_layout = g_getenv("XKB_DEFAULT_LAYOUT");
-	if (xkb_default_layout == NULL || xkb_default_layout[0] == '\0') {
-		g_message(
-			"XKB_DEFAULT_LAYOUT is empty, using US layout by default."
-		);
-		g_setenv("XKB_DEFAULT_LAYOUT", "us", true);
-	}
-
 	g_autofree struct this *this = g_malloc0(sizeof(*this));
 	this->skip_damage = skip_damage;
 	this->config = rf_config_new(config_path);

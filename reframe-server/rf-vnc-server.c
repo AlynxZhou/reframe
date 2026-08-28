@@ -174,13 +174,7 @@ static void rf_vnc_server_init(RfVNCServer *this)
 
 	priv->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (priv->xkb_context == NULL)
-		g_error("VNC: Failed to create XKB context.");
-	struct xkb_rule_names names = { NULL, NULL, NULL, NULL, NULL };
-	priv->xkb_keymap = xkb_keymap_new_from_names(
-		priv->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS
-	);
-	if (priv->xkb_keymap == NULL)
-		g_error("VNC: Failed to create XKB context.");
+		g_error("Input: Failed to create XKB context.");
 }
 
 void rf_vnc_server_start(RfVNCServer *this)
@@ -196,6 +190,8 @@ void rf_vnc_server_start(RfVNCServer *this)
 	if (priv->running)
 		return;
 
+	priv->running = true;
+
 	priv->connected = false;
 	priv->clients = 0;
 	priv->resize = true;
@@ -203,7 +199,11 @@ void rf_vnc_server_start(RfVNCServer *this)
 
 	klass->start(this);
 
-	priv->running = true;
+	// Ensure we always have a fallback keymap, though it could be incorrect.
+	if (priv->xkb_keymap == NULL)
+		rf_vnc_server_set_xkb_keymap(this, NULL, NULL, NULL, NULL, NULL);
+	if (priv->xkb_keymap == NULL)
+		g_error("Input: Failed to create fallback XKB keymap.");
 }
 
 void rf_vnc_server_stop(RfVNCServer *this)
@@ -219,9 +219,11 @@ void rf_vnc_server_stop(RfVNCServer *this)
 	if (!priv->running)
 		return;
 
-	priv->running = false;
-
 	klass->stop(this);
+
+	g_clear_pointer(&priv->xkb_keymap, xkb_keymap_unref);
+
+	priv->running = false;
 }
 
 void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
@@ -267,7 +269,7 @@ void rf_vnc_server_update(
 )
 {
 	g_return_if_fail(RF_IS_VNC_SERVER(this));
-	g_return_if_fail(width >= 0 && height >= 0);
+	g_return_if_fail(width > 0 && height > 0);
 
 	RfVNCServerClass *klass = RF_VNC_SERVER_GET_CLASS(this);
 
@@ -295,8 +297,6 @@ void rf_vnc_server_flush(RfVNCServer *this)
 		return;
 
 	klass->flush(this);
-
-	priv->clients = 0;
 }
 
 void rf_vnc_server_set_resize(RfVNCServer *this, bool resize)
@@ -322,6 +322,47 @@ void rf_vnc_server_set_share(RfVNCServer *this, bool share)
 	g_message(
 		"VNC: Multiple connections will be %s.",
 		priv->share ? "allowed" : "prohibited"
+	);
+}
+
+void rf_vnc_server_set_xkb_keymap(
+	RfVNCServer *this,
+	const char *rules,
+	const char *model,
+	const char *layout,
+	const char *variant,
+	const char *options
+)
+{
+	g_return_if_fail(RF_IS_VNC_SERVER(this));
+
+	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
+
+	struct xkb_rule_names names = { rules, model, layout, variant, options };
+	struct xkb_keymap *xkb_keymap = xkb_keymap_new_from_names(
+		priv->xkb_context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS
+	);
+	if (xkb_keymap == NULL) {
+		g_warning(
+			"Input: Failed to create XKB keymap with rules %s, model %s, layout %s, variant %s, options %s.",
+			rules,
+			model,
+			layout,
+			variant,
+			options
+		);
+		return;
+	}
+
+	g_clear_pointer(&priv->xkb_keymap, xkb_keymap_unref);
+	priv->xkb_keymap = xkb_keymap;
+	g_message(
+		"Input: Created XKB keymap with rules %s, model %s, layout %s, variant %s, options %s.",
+		rules,
+		model,
+		layout,
+		variant,
+		options
 	);
 }
 
@@ -510,6 +551,12 @@ void rf_vnc_server_handle_clipboard_text(RfVNCServer *this, const char *text)
 // they are related to create/destroy resources and triggered during processing
 // events, it is not OK to release resources while still processing events so we
 // have to delay them until events are done.
+//
+// We must always update the connected status and always handle the latest
+// connected status (not the connected status at dispatch time), otherwise a
+// disconnecting last client will block a connecting first client.
+//
+// See <https://github.com/AlynxZhou/reframe/pull/26#issuecomment-4414394405>.
 
 static void emit_client_signal(void *data)
 {
@@ -585,6 +632,10 @@ void rf_vnc_server_handle_client_gone(RfVNCServer *this)
 	if (!priv->running)
 		return;
 
-	if (priv->clients-- == 1)
+	if (priv->clients == 0)
+		return;
+
+	if (priv->clients == 1)
 		handle_last_client(this);
+	--priv->clients;
 }

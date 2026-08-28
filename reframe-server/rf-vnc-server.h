@@ -65,6 +65,14 @@ void rf_vnc_server_set_desktop_name(RfVNCServer *this, const char *desktop_name)
 void rf_vnc_server_send_clipboard_text(RfVNCServer *this, const char *text);
 void rf_vnc_server_set_resize(RfVNCServer *this, bool resize);
 void rf_vnc_server_set_share(RfVNCServer *this, bool share);
+void rf_vnc_server_set_xkb_keymap(
+	RfVNCServer *this,
+	const char *rules,
+	const char *model,
+	const char *layout,
+	const char *variant,
+	const char *options
+);
 /**
  * You should call this when client sends resize request, and decide to allow or
  * prohibit this resize request by the return value.

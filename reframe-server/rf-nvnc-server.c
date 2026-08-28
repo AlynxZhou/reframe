@@ -23,10 +23,6 @@ struct _RfNVNCServer {
 	unsigned int width;
 	unsigned int height;
 	char *username;
-	bool allow_broken_crypto;
-	char *rsa_private_key_file;
-	char *tls_private_key_file;
-	char *tls_certificate_file;
 };
 G_DEFINE_TYPE(RfNVNCServer, rf_nvnc_server, RF_TYPE_VNC_SERVER)
 
@@ -229,21 +225,33 @@ static void start(RfVNCServer *super)
 
 	rf_vnc_server_set_resize(super, rf_config_get_resize(this->config));
 	rf_vnc_server_set_share(super, rf_config_get_share(this->config));
+	g_autofree char *rules = rf_config_get_xkb_rules(this->config);
+	g_autofree char *model = rf_config_get_xkb_model(this->config);
+	g_autofree char *layout = rf_config_get_xkb_layout(this->config);
+	g_autofree char *variant = rf_config_get_xkb_variant(this->config);
+	g_autofree char *options = rf_config_get_xkb_options(this->config);
+	rf_vnc_server_set_xkb_keymap(
+		super, rules, model, layout, variant, options
+	);
 
 	this->username = rf_config_get_neatvnc_username(this->config);
-	this->allow_broken_crypto =
+	bool allow_broken_crypto =
 		rf_config_get_neatvnc_allow_broken_crypto(this->config);
-	this->rsa_private_key_file =
+	g_autofree char *rsa_private_key_file =
 		rf_config_get_neatvnc_rsa_private_key_file(this->config);
-	this->tls_private_key_file =
+	g_autofree char *tls_private_key_file =
 		rf_config_get_neatvnc_tls_private_key_file(this->config);
-	this->tls_certificate_file =
+	g_autofree char *tls_certificate_file =
 		rf_config_get_neatvnc_tls_certificate_file(this->config);
 
 	this->aml = aml_new();
 	aml_set_default(this->aml);
+	// Integrate aml into GLib's main loop.
+	this->aml_id = g_unix_fd_add(
+		aml_get_fd(this->aml), this->io_flags, poll_aml, this
+	);
 
-	g_autofree char **ips = rf_config_get_vnc_ip_list(this->config);
+	g_auto(GStrv) ips = rf_config_get_vnc_ip_list(this->config);
 	const unsigned int port = rf_config_get_vnc_port(this->config);
 #ifndef NEATVNC_UNSTABLE_API
 	this->nvnc = nvnc_new();
@@ -280,7 +288,7 @@ static void start(RfVNCServer *super)
 	nvnc_set_new_client_fn(this->nvnc, on_new_client);
 	enum nvnc_auth_flags auth_flags = NVNC_AUTH_REQUIRE_AUTH;
 #ifndef NEATVNC_UNSTABLE_API
-	if (this->allow_broken_crypto)
+	if (allow_broken_crypto)
 		auth_flags |= NVNC_AUTH_ALLOW_BROKEN_CRYPTO;
 #endif
 	int res = 0;
@@ -289,17 +297,14 @@ static void start(RfVNCServer *super)
 		if (res < 0)
 			g_error("VNC: Failed to enable authentication.");
 	}
-	if (this->rsa_private_key_file != NULL) {
-		res = nvnc_set_rsa_creds(this->nvnc, this->rsa_private_key_file);
+	if (rsa_private_key_file != NULL) {
+		res = nvnc_set_rsa_creds(this->nvnc, rsa_private_key_file);
 		if (res < 0)
 			g_error("VNC: Failed to set RSA credentials.");
 	}
-	if (this->tls_private_key_file != NULL &&
-	    this->tls_certificate_file != NULL) {
+	if (tls_private_key_file != NULL && tls_certificate_file != NULL) {
 		res = nvnc_set_tls_creds(
-			this->nvnc,
-			this->tls_private_key_file,
-			this->tls_certificate_file
+			this->nvnc, tls_private_key_file, tls_certificate_file
 		);
 		if (res < 0)
 			g_error("VNC: Failed to set TLS credentials.");
@@ -328,11 +333,6 @@ static void start(RfVNCServer *super)
 	nvnc_fb_unref(fb);
 #endif
 	pixman_region_fini(&region);
-
-	// Integrate aml into GLib's main loop.
-	this->aml_id = g_unix_fd_add(
-		aml_get_fd(this->aml), this->io_flags, poll_aml, this
-	);
 }
 
 static void stop(RfVNCServer *super)
@@ -340,10 +340,6 @@ static void stop(RfVNCServer *super)
 	RfNVNCServer *this = RF_NVNC_SERVER(super);
 
 	rf_vnc_server_flush(super);
-	if (this->aml_id != 0) {
-		g_source_remove(this->aml_id);
-		this->aml_id = 0;
-	}
 	nvnc_remove_display(this->nvnc, this->display);
 	g_clear_pointer(&this->display, nvnc_display_unref);
 #ifndef NEATVNC_UNSTABLE_API
@@ -351,6 +347,10 @@ static void stop(RfVNCServer *super)
 #else
 	g_clear_pointer(&this->nvnc, nvnc_close);
 #endif
+	if (this->aml_id != 0) {
+		g_source_remove(this->aml_id);
+		this->aml_id = 0;
+	}
 	if (this->aml != NULL) {
 		aml_set_default(NULL);
 		aml_unref(this->aml);
@@ -358,6 +358,7 @@ static void stop(RfVNCServer *super)
 	}
 	g_clear_pointer(&this->buf, g_byte_array_unref);
 	g_clear_pointer(&this->desktop_name, g_free);
+	g_clear_pointer(&this->username, g_free);
 	g_clear_pointer(&this->password, g_free);
 }
 
@@ -471,6 +472,7 @@ static void rf_nvnc_server_init(RfNVNCServer *this)
 	this->aml = NULL;
 	this->nvnc = NULL;
 	this->display = NULL;
+	this->username = NULL;
 	this->password = NULL;
 	this->desktop_name = NULL;
 	this->width = 0;
