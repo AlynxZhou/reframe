@@ -69,10 +69,10 @@ First [add archlinuxcn repo to your system](https://www.archlinuxcn.org/archlinu
 
 #### Install from OBS
 
-Packages can be found in [my OBS project](https://build.opensuse.org/package/show/home:AZhou/reframe/).
+Packages can be found in [OBS X11:RemoteDesktop devel project](https://build.opensuse.org/package/show/X11:RemoteDesktop/reframe).
 
 ```
-# zypper ar https://download.opensuse.org/repositories/home:/AZhou/openSUSE_Tumbleweed/home:AZhou.repo
+# zypper ar https://download.opensuse.org/repositories/X11:/RemoteDesktop/openSUSE_Tumbleweed/X11:RemoteDesktop.repo
 # zypper in reframe
 ```
 
