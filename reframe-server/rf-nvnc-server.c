@@ -168,7 +168,14 @@ static bool on_auth(const char *username, const char *password, void *data)
 {
 	RfNVNCServer *this = data;
 
-	return g_strcmp0(password, this->password) == 0;
+	if (username == NULL)
+		return false;
+	if (g_strcmp0(username, this->username ? this->username : "") != 0)
+		return false;
+	if (g_strcmp0(password, this->password) != 0)
+		return false;
+
+	return true;
 }
 #endif
 
