@@ -250,6 +250,10 @@ This is implemented by putting a desktop file to XDG autostart dir to start `ref
 
 You have to restart `reframe-session` once you update it, because the binary is changed. This could be done via log out and log in again.
 
+## Keyboard Layout
+
+If the default keyboard layout does not match your keyboard, you can tweak `[xkb]` group in configuration files to tell xkbcommon your keyboard layout, it accepts [the RMLOV configurations](https://xkbcommon.org/doc/current/xkb-intro.html).
+
 # Comparison with Other Linux Remote Desktop
 
 - [kmsvnc](https://github.com/isjerryxiao/kmsvnc/)
