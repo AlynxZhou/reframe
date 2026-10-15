@@ -1,7 +1,17 @@
+#include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "rf-common.h"
 #include "rf-vnc-server.h"
+
+#define MOD_SHIFT XKB_MOD_NAME_SHIFT
+
+// Old XKBcommon does not define `XKB_MOD_NAME_MOD5`.
+#if defined(XKB_MOD_NAME_MOD5)
+#	define MOD_ALTGR XKB_MOD_NAME_MOD5
+#else
+#	define MOD_ALTGR "Mod5"
+#endif
 
 #if !GLIB_CHECK_VERSION(2, 74, 0)
 typedef void (*GSourceOnceFunc)(gpointer user_data);
@@ -41,6 +51,10 @@ typedef struct _RfVNCServerPrivate {
 	bool resize;
 	bool share;
 	bool running;
+	// Modifiers currently held by the client, to synthesize only the missing
+	// ones when a keysym needs another shift level.
+	bool client_shift;
+	bool client_altgr;
 } RfVNCServerPrivate;
 G_DEFINE_TYPE_WITH_PRIVATE(RfVNCServer, rf_vnc_server, G_TYPE_OBJECT)
 
@@ -196,6 +210,8 @@ void rf_vnc_server_start(RfVNCServer *this)
 	priv->clients = 0;
 	priv->resize = true;
 	priv->share = true;
+	priv->client_shift = false;
+	priv->client_altgr = false;
 
 	klass->start(this);
 
@@ -395,28 +411,79 @@ struct iterate_data {
 	xkb_keysym_t keysym;
 	xkb_keycode_t keycode;
 	xkb_level_index_t level;
+	xkb_mod_mask_t mask;
+	int cost;
 };
 
+static int popcount_mask(xkb_mod_mask_t m)
+{
+	int n = 0;
+	for (; m != 0; m &= m - 1)
+		++n;
+	return n;
+}
+
+// Find the key producing the keysym with the fewest modifiers: on layouts like
+// French AZERTY, digits are on the Shift level and many symbols on the AltGr
+// level, so the level found must be applied, not only the keycode.
 static void iterate_keys(struct xkb_keymap *map, xkb_keycode_t key, void *data)
 {
 	struct iterate_data *idata = data;
-	if (idata->keycode != XKB_KEYCODE_INVALID)
+
+	// Only keys the uinput device declares can be sent.
+	if (RF_KEY_CODE_XKB_TO_EV(key) >= RF_KEYBOARD_MAX)
 		return;
 
 	xkb_level_index_t num_levels =
 		xkb_keymap_num_levels_for_key(map, key, 0);
-	for (xkb_level_index_t i = 0; i < num_levels; ++i) {
+	for (xkb_level_index_t level = 0; level < num_levels; ++level) {
 		const xkb_keysym_t *syms;
-		const int num_syms =
-			xkb_keymap_key_get_syms_by_level(map, key, 0, i, &syms);
+		const int num_syms = xkb_keymap_key_get_syms_by_level(
+			map, key, 0, level, &syms
+		);
 		for (int k = 0; k < num_syms; ++k) {
-			if (syms[k] == idata->keysym) {
+			if (syms[k] != idata->keysym)
+				continue;
+
+			xkb_mod_mask_t masks[8];
+			const size_t num_masks =
+				xkb_keymap_key_get_mods_for_level(
+					map,
+					key,
+					0,
+					level,
+					masks,
+					G_N_ELEMENTS(masks)
+				);
+			xkb_mod_mask_t mask = num_masks > 0 ? masks[0] : 0;
+			int cost = popcount_mask(mask);
+			for (size_t m = 1; m < num_masks; ++m) {
+				int c = popcount_mask(masks[m]);
+				if (c < cost) {
+					mask = masks[m];
+					cost = c;
+				}
+			}
+			if (idata->keycode == XKB_KEYCODE_INVALID ||
+			    cost < idata->cost) {
 				idata->keycode = key;
-				idata->level = i;
-				return;
+				idata->level = level;
+				idata->mask = mask;
+				idata->cost = cost;
 			}
 		}
 	}
+}
+
+static bool is_shift_keysym(uint32_t keysym)
+{
+	return keysym == XKB_KEY_Shift_L || keysym == XKB_KEY_Shift_R;
+}
+
+static bool is_altgr_keysym(uint32_t keysym)
+{
+	return keysym == XKB_KEY_ISO_Level3_Shift ||
+	       keysym == XKB_KEY_Mode_switch;
 }
 
 void rf_vnc_server_handle_keysym_event(
@@ -432,10 +499,17 @@ void rf_vnc_server_handle_keysym_event(
 	if (!priv->running)
 		return;
 
+	if (is_shift_keysym(keysym))
+		priv->client_shift = down;
+	else if (is_altgr_keysym(keysym))
+		priv->client_altgr = down;
+
 	struct iterate_data idata = {
 		.keysym = keysym,
 		.keycode = XKB_KEYCODE_INVALID,
 		.level = 0,
+		.mask = 0,
+		.cost = 0,
 	};
 	xkb_keymap_key_for_each(priv->xkb_keymap, iterate_keys, &idata);
 	if (idata.keycode == XKB_KEYCODE_INVALID) {
@@ -445,11 +519,67 @@ void rf_vnc_server_handle_keysym_event(
 		return;
 	}
 	const uint32_t keycode = RF_KEY_CODE_XKB_TO_EV(idata.keycode);
-	g_debug("Input: Received key %s for keysym %04x and keycode %u.",
+	g_debug("Input: Received key %s for keysym %04x and keycode %u at level %u.",
 		down ? "down" : "up",
 		keysym,
-		keycode);
+		keycode,
+		idata.level);
+
+	// We don't need to inject Shift/AltGr and key releases.
+	const bool can_inject = down && !is_shift_keysym(keysym) &&
+				!is_altgr_keysym(keysym);
+
+	const xkb_mod_index_t shift_index =
+		xkb_keymap_mod_get_index(priv->xkb_keymap, MOD_SHIFT);
+	const xkb_mod_index_t altgr_index =
+		xkb_keymap_mod_get_index(priv->xkb_keymap, MOD_ALTGR);
+	const bool need_shift = shift_index != XKB_MOD_INVALID &&
+				(idata.mask & (1u << shift_index));
+	const bool need_altgr = altgr_index != XKB_MOD_INVALID &&
+				(idata.mask & (1u << altgr_index));
+
+	// Temporarily bring the modifiers to the state the level needs, then
+	// restore what the client holds.
+	const bool inject_shift = can_inject && need_shift &&
+				  !priv->client_shift;
+	const bool inject_altgr = can_inject && need_altgr &&
+				  !priv->client_altgr;
+
+	if (inject_shift)
+		g_signal_emit(
+			this,
+			sigs[SIG_KEYBOARD_EVENT],
+			0,
+			KEY_LEFTSHIFT,
+			need_shift
+		);
+	if (inject_altgr)
+		g_signal_emit(
+			this,
+			sigs[SIG_KEYBOARD_EVENT],
+			0,
+			KEY_RIGHTALT,
+			need_altgr
+		);
+
 	g_signal_emit(this, sigs[SIG_KEYBOARD_EVENT], 0, keycode, down);
+
+	if (inject_altgr)
+		g_signal_emit(
+			this,
+			sigs[SIG_KEYBOARD_EVENT],
+			0,
+			KEY_RIGHTALT,
+			priv->client_altgr
+		);
+	if (inject_shift)
+		g_signal_emit(
+			this,
+			sigs[SIG_KEYBOARD_EVENT],
+			0,
+			KEY_LEFTSHIFT,
+			priv->client_shift
+		);
 }
 
 void rf_vnc_server_handle_keycode_event(
@@ -583,6 +713,9 @@ static void handle_first_client(RfVNCServer *this)
 	RfVNCServerPrivate *priv = rf_vnc_server_get_instance_private(this);
 
 	priv->connected = true;
+	// Reset possibly dirty state.
+	priv->client_shift = false;
+	priv->client_altgr = false;
 
 	if (priv->client_idle_id != 0)
 		return;
