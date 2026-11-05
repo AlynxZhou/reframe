@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <string.h>
 #include <rfb/rfb.h>
 
 #include "rf-common.h"
@@ -230,7 +231,19 @@ static void start(RfVNCServer *super)
 	);
 	this->screen->port = 0;
 	this->screen->ipv6port = 0;
-	this->screen->frameBuffer = NULL;
+	// libvncserver needs a valid framebuffer before it can process the
+	// client handshake. Otherwise `on_socket_in()` keeps ignoring readable
+	// client data until the first streamed frame and, because its source
+	// has a higher priority than the idle callback that starts the
+	// streamer, the main loop can spin forever without ever starting it.
+	// A blank initial framebuffer avoids that deadlock, like the neatvnc
+	// backend does with its initial black frame.
+	const size_t frame_size =
+		(size_t)this->width * this->height * RF_BYTES_PER_PIXEL;
+	this->buf = g_byte_array_sized_new((guint)frame_size);
+	g_byte_array_set_size(this->buf, (guint)frame_size);
+	memset(this->buf->data, 0, frame_size);
+	this->screen->frameBuffer = (char *)this->buf->data;
 	if (this->desktop_name != NULL)
 		this->screen->desktopName = this->desktop_name;
 	else
