@@ -6,6 +6,8 @@ Requires=reframe@%i.socket
 [Service]
 Type=exec
 User=@username@
+# Some distros prevent all users from accessing DRM render nodes.
+SupplementaryGroups=video render
 # `RuntimeDirectory` will be removed if unit stops, so only 1 unit can own a
 # dir, and this unit doesn't own `reframe` dir.
 RuntimeDirectory=reframe-session
